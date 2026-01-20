@@ -1,0 +1,120 @@
+[
+  {
+    "store_name": "COLRUYT",
+    "period": "January 2026",
+    "total_store_spend": 189.90,
+    "categories": [
+      {
+        "name": "Meat & Fish",
+        "spent": 65.40,
+        "percentage": 34
+      },
+      {
+        "name": "Alcohol",
+        "spent": 42.50,
+        "percentage": 22
+      },
+      {
+        "name": "Drinks (Soft/Soda)",
+        "spent": 28.00,
+        "percentage": 15
+      },
+      {
+        "name": "Household",
+        "spent": 35.00,
+        "percentage": 18
+      },
+      {
+        "name": "Snacks & Sweets",
+        "spent": 19.00,
+        "percentage": 11
+      }
+    ]
+  },
+  {
+    "store_name": "ALDI",
+    "period": "January 2026",
+    "total_store_spend": 94.50,
+    "categories": [
+      {
+        "name": "Fresh Produce",
+        "spent": 32.10,
+        "percentage": 34
+      },
+      {
+        "name": "Dairy & Eggs",
+        "spent": 24.50,
+        "percentage": 26
+      },
+      {
+        "name": "Ready Meals",
+        "spent": 20.40,
+        "percentage": 22
+      },
+      {
+        "name": "Bakery",
+        "spent": 10.50,
+        "percentage": 11
+      },
+      {
+        "name": "Drinks (Water)",
+        "spent": 7.00,
+        "percentage": 7
+      }
+    ]
+  },
+  {
+    "store_name": "COLRUYT",
+    "period": "February 2026",
+    "total_store_spend": 85.25,
+    "categories": [
+      {
+        "name": "Pantry",
+        "spent": 40.25,
+        "percentage": 47
+      },
+      {
+        "name": "Personal Care",
+        "spent": 25.00,
+        "percentage": 29
+      },
+      {
+        "name": "Drinks (Soft/Soda)",
+        "spent": 20.00,
+        "percentage": 24
+      }
+    ]
+  },
+  {
+    "store_name": "ALDI",
+    "period": "February 2026",
+    "total_store_spend": 130.50,
+    "categories": [
+      {
+        "name": "Meat & Fish",
+        "spent": 50.50,
+        "percentage": 39
+      },
+      {
+        "name": "Ready Meals",
+        "spent": 30.00,
+        "percentage": 23
+      },
+      {
+        "name": "Fresh Produce",
+        "spent": 25.00,
+        "percentage": 19
+      },
+      {
+        "name": "Snacks & Sweets",
+        "spent": 15.00,
+        "percentage": 11
+      },
+      {
+        "name": "Dairy & Eggs",
+        "spent": 10.00,
+        "percentage": 8
+      }
+    ]
+  }
+]
