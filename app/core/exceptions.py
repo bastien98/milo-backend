@@ -44,3 +44,9 @@ class RateLimitExceededError(ScandaliciousException):
     """Raised when user exceeds their rate limit for AI chat messages."""
 
     pass
+
+
+class VeryfiAPIError(ScandaliciousException):
+    """Raised when Veryfi API call fails."""
+
+    pass

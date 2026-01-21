@@ -11,11 +11,13 @@ from app.core.exceptions import (
     ReceiptProcessingError,
     ImageValidationError,
     ClaudeAPIError,
+    VeryfiAPIError,
     ResourceNotFoundError,
     PermissionDeniedError,
     RateLimitExceededError,
 )
 from app.api.v1.router import api_router
+from app.api.v3.router import api_router as api_router_v3
 from app.db.session import init_db
 
 settings = get_settings()
@@ -87,6 +89,28 @@ async def claude_api_exception_handler(request: Request, exc: ClaudeAPIError):
     content = {
         "error": "llm_service_error",
         "message": "Receipt extraction service temporarily unavailable",
+        "details": {"retry_after": 30},
+    }
+
+    # Include detailed error info in debug mode
+    if settings.DEBUG:
+        content["debug"] = {
+            "error_type": error_type,
+            "message": exc.message,
+            "details": exc.details,
+        }
+
+    return JSONResponse(status_code=503, content=content)
+
+
+@app.exception_handler(VeryfiAPIError)
+async def veryfi_api_exception_handler(request: Request, exc: VeryfiAPIError):
+    error_type = exc.details.get("error_type", "unknown")
+    logger.error(f"VeryfiAPIError: {exc.message} (type={error_type}, details={exc.details})")
+
+    content = {
+        "error": "ocr_service_error",
+        "message": "Receipt OCR service temporarily unavailable",
         "details": {"retry_after": 30},
     }
 
@@ -181,8 +205,9 @@ async def general_exception_handler(request: Request, exc: Exception):
     )
 
 
-# Include API router
+# Include API routers
 app.include_router(api_router, prefix=settings.API_V1_PREFIX)
+app.include_router(api_router_v3, prefix="/api/v3")
 
 
 # Root health check

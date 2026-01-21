@@ -21,6 +21,12 @@ class Settings(BaseSettings):
     # Anthropic
     ANTHROPIC_API_KEY: str = ""
 
+    # Veryfi
+    VERYFI_CLIENT_ID: str = ""
+    VERYFI_CLIENT_SECRET: str = ""
+    VERYFI_USERNAME: str = ""
+    VERYFI_API_KEY: str = ""
+
     # File upload limits
     MAX_UPLOAD_SIZE_MB: int = 20
     ALLOWED_EXTENSIONS: set = {"pdf", "jpg", "jpeg", "png"}
