@@ -41,8 +41,8 @@ class AnalyticsService:
         )
         transactions = list(result.scalars().all())
 
-        # Calculate totals
-        total_spend = sum(t.item_price for t in transactions)
+        # Calculate totals (multiply by quantity for correct totals)
+        total_spend = sum(t.item_price * t.quantity for t in transactions)
         transaction_count = len(transactions)
 
         # Calculate average health score (only for items with health scores)
@@ -52,7 +52,7 @@ class AnalyticsService:
         # Group by store
         store_data = defaultdict(lambda: {"amount": 0.0, "dates": set()})
         for t in transactions:
-            store_data[t.store_name]["amount"] += t.item_price
+            store_data[t.store_name]["amount"] += t.item_price * t.quantity
             store_data[t.store_name]["dates"].add(t.date)
 
         # Build store spending list
@@ -104,8 +104,8 @@ class AnalyticsService:
         )
         transactions = list(result.scalars().all())
 
-        # Calculate totals
-        total_spend = sum(t.item_price for t in transactions)
+        # Calculate totals (multiply by quantity for correct totals)
+        total_spend = sum(t.item_price * t.quantity for t in transactions)
 
         # Calculate overall average health score
         all_health_scores = [t.health_score for t in transactions if t.health_score is not None]
@@ -114,7 +114,7 @@ class AnalyticsService:
         # Group by category
         category_data = defaultdict(lambda: {"amount": 0.0, "count": 0, "health_scores": []})
         for t in transactions:
-            category_data[t.category.value]["amount"] += t.item_price
+            category_data[t.category.value]["amount"] += t.item_price * t.quantity
             category_data[t.category.value]["count"] += 1
             if t.health_score is not None:
                 category_data[t.category.value]["health_scores"].append(t.health_score)
@@ -171,8 +171,8 @@ class AnalyticsService:
         )
         transactions = list(result.scalars().all())
 
-        # Calculate totals
-        total_spend = sum(t.item_price for t in transactions)
+        # Calculate totals (multiply by quantity for correct totals)
+        total_spend = sum(t.item_price * t.quantity for t in transactions)
         visit_dates = set(t.date for t in transactions)
 
         # Calculate average health score for this store
@@ -182,7 +182,7 @@ class AnalyticsService:
         # Group by category
         category_data = defaultdict(lambda: {"amount": 0.0, "count": 0, "health_scores": []})
         for t in transactions:
-            category_data[t.category.value]["amount"] += t.item_price
+            category_data[t.category.value]["amount"] += t.item_price * t.quantity
             category_data[t.category.value]["count"] += 1
             if t.health_score is not None:
                 category_data[t.category.value]["health_scores"].append(t.health_score)
@@ -265,7 +265,8 @@ class AnalyticsService:
             )
             transactions = list(result.scalars().all())
 
-            total_spend = sum(t.item_price for t in transactions)
+            # Calculate totals (multiply by quantity for correct totals)
+            total_spend = sum(t.item_price * t.quantity for t in transactions)
 
             # Calculate average health score for this period
             period_health_scores = [t.health_score for t in transactions if t.health_score is not None]
