@@ -96,6 +96,7 @@ class ReceiptProcessor:
                     unit_price=item.unit_price,
                     category=item.category,
                     date=final_date or date.today(),
+                    health_score=item.health_score,
                 )
                 transactions.append(
                     ExtractedItem(
@@ -104,6 +105,7 @@ class ReceiptProcessor:
                         quantity=item.quantity,
                         unit_price=item.unit_price,
                         category=item.category,
+                        health_score=item.health_score,
                     )
                 )
 

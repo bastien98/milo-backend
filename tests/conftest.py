@@ -76,27 +76,27 @@ async def test_transactions(test_session: AsyncSession, test_user: User) -> list
     today = date.today()
     transactions_data = [
         # Colruyt transactions
-        {"store_name": "COLRUYT", "item_name": "Melk", "item_price": 1.29, "category": Category.DAIRY_EGGS, "date": today - timedelta(days=1)},
-        {"store_name": "COLRUYT", "item_name": "Brood", "item_price": 2.49, "category": Category.BAKERY, "date": today - timedelta(days=1)},
-        {"store_name": "COLRUYT", "item_name": "Kipfilet", "item_price": 7.99, "category": Category.MEAT_FISH, "date": today - timedelta(days=1)},
-        {"store_name": "COLRUYT", "item_name": "Appels", "item_price": 3.49, "category": Category.FRESH_PRODUCE, "date": today - timedelta(days=3)},
-        {"store_name": "COLRUYT", "item_name": "Bananen", "item_price": 1.99, "category": Category.FRESH_PRODUCE, "date": today - timedelta(days=3)},
+        {"store_name": "COLRUYT", "item_name": "Melk", "item_price": 1.29, "category": Category.DAIRY_EGGS, "date": today - timedelta(days=1), "health_score": 4},
+        {"store_name": "COLRUYT", "item_name": "Brood", "item_price": 2.49, "category": Category.BAKERY, "date": today - timedelta(days=1), "health_score": 3},
+        {"store_name": "COLRUYT", "item_name": "Kipfilet", "item_price": 7.99, "category": Category.MEAT_FISH, "date": today - timedelta(days=1), "health_score": 4},
+        {"store_name": "COLRUYT", "item_name": "Appels", "item_price": 3.49, "category": Category.FRESH_PRODUCE, "date": today - timedelta(days=3), "health_score": 5},
+        {"store_name": "COLRUYT", "item_name": "Bananen", "item_price": 1.99, "category": Category.FRESH_PRODUCE, "date": today - timedelta(days=3), "health_score": 5},
         # Aldi transactions
-        {"store_name": "ALDI", "item_name": "Pasta", "item_price": 0.99, "category": Category.PANTRY, "date": today - timedelta(days=5)},
-        {"store_name": "ALDI", "item_name": "Tomatensaus", "item_price": 1.49, "category": Category.PANTRY, "date": today - timedelta(days=5)},
-        {"store_name": "ALDI", "item_name": "Kaas", "item_price": 4.99, "category": Category.DAIRY_EGGS, "date": today - timedelta(days=5)},
-        {"store_name": "ALDI", "item_name": "Bier (6-pack)", "item_price": 5.99, "category": Category.ALCOHOL, "date": today - timedelta(days=7)},
+        {"store_name": "ALDI", "item_name": "Pasta", "item_price": 0.99, "category": Category.PANTRY, "date": today - timedelta(days=5), "health_score": 3},
+        {"store_name": "ALDI", "item_name": "Tomatensaus", "item_price": 1.49, "category": Category.PANTRY, "date": today - timedelta(days=5), "health_score": 3},
+        {"store_name": "ALDI", "item_name": "Kaas", "item_price": 4.99, "category": Category.DAIRY_EGGS, "date": today - timedelta(days=5), "health_score": 3},
+        {"store_name": "ALDI", "item_name": "Bier (6-pack)", "item_price": 5.99, "category": Category.ALCOHOL, "date": today - timedelta(days=7), "health_score": 0},
         # Carrefour transactions
-        {"store_name": "CARREFOUR", "item_name": "Chips", "item_price": 2.99, "category": Category.SNACKS_SWEETS, "date": today - timedelta(days=10)},
-        {"store_name": "CARREFOUR", "item_name": "Cola", "item_price": 1.99, "category": Category.DRINKS_SOFT, "date": today - timedelta(days=10)},
-        {"store_name": "CARREFOUR", "item_name": "Water (6x1.5L)", "item_price": 3.49, "category": Category.DRINKS_WATER, "date": today - timedelta(days=10)},
-        {"store_name": "CARREFOUR", "item_name": "Tandpasta", "item_price": 2.49, "category": Category.PERSONAL_CARE, "date": today - timedelta(days=14)},
-        {"store_name": "CARREFOUR", "item_name": "Schoonmaakmiddel", "item_price": 3.99, "category": Category.HOUSEHOLD, "date": today - timedelta(days=14)},
+        {"store_name": "CARREFOUR", "item_name": "Chips", "item_price": 2.99, "category": Category.SNACKS_SWEETS, "date": today - timedelta(days=10), "health_score": 1},
+        {"store_name": "CARREFOUR", "item_name": "Cola", "item_price": 1.99, "category": Category.DRINKS_SOFT, "date": today - timedelta(days=10), "health_score": 1},
+        {"store_name": "CARREFOUR", "item_name": "Water (6x1.5L)", "item_price": 3.49, "category": Category.DRINKS_WATER, "date": today - timedelta(days=10), "health_score": 5},
+        {"store_name": "CARREFOUR", "item_name": "Tandpasta", "item_price": 2.49, "category": Category.PERSONAL_CARE, "date": today - timedelta(days=14), "health_score": None},
+        {"store_name": "CARREFOUR", "item_name": "Schoonmaakmiddel", "item_price": 3.99, "category": Category.HOUSEHOLD, "date": today - timedelta(days=14), "health_score": None},
         # More transactions for better statistics
-        {"store_name": "COLRUYT", "item_name": "Yoghurt", "item_price": 2.99, "category": Category.DAIRY_EGGS, "date": today - timedelta(days=20)},
-        {"store_name": "COLRUYT", "item_name": "Eieren", "item_price": 3.29, "category": Category.DAIRY_EGGS, "date": today - timedelta(days=20)},
-        {"store_name": "ALDI", "item_name": "Pizza Diepvries", "item_price": 2.99, "category": Category.FROZEN, "date": today - timedelta(days=25)},
-        {"store_name": "ALDI", "item_name": "Lasagne Ready Meal", "item_price": 4.49, "category": Category.READY_MEALS, "date": today - timedelta(days=25)},
+        {"store_name": "COLRUYT", "item_name": "Yoghurt", "item_price": 2.99, "category": Category.DAIRY_EGGS, "date": today - timedelta(days=20), "health_score": 4},
+        {"store_name": "COLRUYT", "item_name": "Eieren", "item_price": 3.29, "category": Category.DAIRY_EGGS, "date": today - timedelta(days=20), "health_score": 4},
+        {"store_name": "ALDI", "item_name": "Pizza Diepvries", "item_price": 2.99, "category": Category.FROZEN, "date": today - timedelta(days=25), "health_score": 2},
+        {"store_name": "ALDI", "item_name": "Lasagne Ready Meal", "item_price": 4.49, "category": Category.READY_MEALS, "date": today - timedelta(days=25), "health_score": 2},
     ]
 
     transactions = []

@@ -14,6 +14,7 @@ class TransactionBase(BaseModel):
     unit_price: Optional[float] = None
     category: Category
     date: date
+    health_score: Optional[int] = None  # 0-5, None for non-food items
 
 
 class TransactionCreate(TransactionBase):
@@ -28,6 +29,7 @@ class TransactionUpdate(BaseModel):
     unit_price: Optional[float] = None
     category: Optional[Category] = None
     date: Optional[date] = None
+    health_score: Optional[int] = None
 
 
 class TransactionResponse(TransactionBase):

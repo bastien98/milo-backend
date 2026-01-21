@@ -22,6 +22,7 @@ class ExtractedItem:
     quantity: int
     unit_price: Optional[float]
     category: Category
+    health_score: Optional[int]  # 0-5, where 0 is unhealthy and 5 is very healthy (None for non-food items)
 
 
 @dataclass
@@ -62,6 +63,14 @@ For each item, identify:
    - "Baby & Kids" (diapers, baby food, kids products)
    - "Pet Supplies" (pet food, pet accessories)
    - "Other" (anything that doesn't fit above)
+6. health_score: Rate the healthiness of each item from 0 to 5:
+   - 5: Very healthy (fresh vegetables, fruits, water, plain nuts)
+   - 4: Healthy (whole grains, lean proteins, eggs, plain dairy)
+   - 3: Moderately healthy (bread, pasta, cheese, some ready meals)
+   - 2: Less healthy (processed meats, sweetened drinks, some snacks)
+   - 1: Unhealthy (chips, candy, cookies, sodas, sugary cereals)
+   - 0: Very unhealthy (alcohol, energy drinks, heavily processed foods)
+   Note: Non-food items (household, personal care, pet supplies) should have health_score: null
 
 Also extract:
 - store_name: The store name (e.g., "COLRUYT", "ALDI")
@@ -86,7 +95,8 @@ Return ONLY valid JSON in this exact format:
       "item_price": 0.00,
       "quantity": 1,
       "unit_price": 0.00,
-      "category": "Category Name"
+      "category": "Category Name",
+      "health_score": 3
     }
   ]
 }"""
@@ -228,6 +238,13 @@ Return ONLY valid JSON in this exact format:
 
             unit_price = item_data.get("unit_price") or item_price
 
+            # Parse health score (can be null for non-food items)
+            health_score_raw = item_data.get("health_score")
+            if health_score_raw is not None:
+                health_score = max(0, min(5, int(health_score_raw)))  # Clamp to 0-5
+            else:
+                health_score = None
+
             items.append(
                 ExtractedItem(
                     item_name=item_data.get("item_name", "Unknown Item"),
@@ -235,6 +252,7 @@ Return ONLY valid JSON in this exact format:
                     quantity=int(item_data.get("quantity", 1)),
                     unit_price=float(unit_price),
                     category=category,
+                    health_score=health_score,
                 )
             )
 

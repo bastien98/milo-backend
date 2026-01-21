@@ -84,6 +84,7 @@ class TransactionRepository:
         receipt_id: Optional[str] = None,
         quantity: int = 1,
         unit_price: Optional[float] = None,
+        health_score: Optional[int] = None,
     ) -> Transaction:
         """Create a new transaction."""
         transaction = Transaction(
@@ -96,6 +97,7 @@ class TransactionRepository:
             unit_price=unit_price,
             category=category,
             date=date,
+            health_score=health_score,
         )
         self.db.add(transaction)
         await self.db.flush()
@@ -112,6 +114,7 @@ class TransactionRepository:
         unit_price: Optional[float] = None,
         category: Optional[Category] = None,
         date: Optional[date] = None,
+        health_score: Optional[int] = None,
     ) -> Optional[Transaction]:
         """Update a transaction."""
         transaction = await self.get_by_id(transaction_id)
@@ -132,6 +135,8 @@ class TransactionRepository:
             transaction.category = category
         if date is not None:
             transaction.date = date
+        if health_score is not None:
+            transaction.health_score = health_score
 
         await self.db.flush()
         await self.db.refresh(transaction)

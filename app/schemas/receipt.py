@@ -12,6 +12,7 @@ class ExtractedItem(BaseModel):
     quantity: int = 1
     unit_price: Optional[float] = None
     category: Category
+    health_score: Optional[int] = None  # 0-5, None for non-food items
 
 
 class ReceiptUploadResponse(BaseModel):
