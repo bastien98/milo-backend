@@ -12,6 +12,8 @@ from app.schemas.transaction import (
     TransactionResponse,
     TransactionListResponse,
     TransactionUpdate,
+    TransactionBulkDeleteRequest,
+    TransactionBulkDeleteResponse,
 )
 from app.db.repositories.transaction_repo import TransactionRepository
 from app.core.exceptions import ResourceNotFoundError
@@ -115,6 +117,41 @@ async def update_transaction(
     )
 
     return TransactionResponse.model_validate(updated)
+
+
+@router.delete("", response_model=TransactionBulkDeleteResponse)
+async def delete_transactions_bulk(
+    request: TransactionBulkDeleteRequest,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_db_user),
+):
+    """
+    Delete transactions for a specific store within a time period.
+
+    Used by the iOS app's "jiggle mode" to remove store cards from the dashboard.
+    Only deletes transactions belonging to the authenticated user.
+    """
+    transaction_repo = TransactionRepository(db)
+
+    deleted_count = await transaction_repo.delete_by_store_and_date_range(
+        user_id=current_user.id,
+        store_name=request.store_name,
+        start_date=request.start_date,
+        end_date=request.end_date,
+    )
+
+    if deleted_count == 0:
+        raise ResourceNotFoundError(
+            f"No transactions found for {request.store_name} "
+            f"between {request.start_date} and {request.end_date}"
+        )
+
+    return TransactionBulkDeleteResponse(
+        success=True,
+        deleted_count=deleted_count,
+        message=f"Deleted {deleted_count} transactions for {request.store_name} "
+        f"between {request.start_date} and {request.end_date}",
+    )
 
 
 @router.delete("/{transaction_id}")

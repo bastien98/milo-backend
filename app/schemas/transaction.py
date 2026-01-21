@@ -1,5 +1,5 @@
 from datetime import date, datetime
-from typing import Optional, List
+from typing import Optional, List, Literal
 
 from pydantic import BaseModel, Field
 
@@ -57,3 +57,22 @@ class TransactionFilters(BaseModel):
     category: Optional[Category] = None
     page: int = Field(default=1, ge=1)
     page_size: int = Field(default=50, ge=1, le=100)
+
+
+class TransactionBulkDeleteRequest(BaseModel):
+    """Request body for bulk deleting transactions by store and date range."""
+
+    store_name: str = Field(..., description="Store name to delete transactions for")
+    period: Literal["week", "month", "year"] = Field(
+        ..., description="Time period type"
+    )
+    start_date: date = Field(..., description="Start date of the period (inclusive)")
+    end_date: date = Field(..., description="End date of the period (inclusive)")
+
+
+class TransactionBulkDeleteResponse(BaseModel):
+    """Response for bulk delete operation."""
+
+    success: bool
+    deleted_count: int
+    message: str

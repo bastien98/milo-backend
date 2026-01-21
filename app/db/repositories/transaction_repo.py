@@ -1,7 +1,7 @@
 from datetime import date
 from typing import Optional, List
 
-from sqlalchemy import select, func, and_
+from sqlalchemy import select, func, and_, delete
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.transaction import Transaction
@@ -160,3 +160,43 @@ class TransactionRepository:
             .order_by(Transaction.created_at)
         )
         return list(result.scalars().all())
+
+    async def delete_by_store_and_date_range(
+        self,
+        user_id: str,
+        store_name: str,
+        start_date: date,
+        end_date: date,
+    ) -> int:
+        """Delete transactions for a user by store name and date range.
+
+        Returns the number of deleted transactions.
+        """
+        # First count matching transactions
+        count_result = await self.db.execute(
+            select(func.count(Transaction.id)).where(
+                and_(
+                    Transaction.user_id == user_id,
+                    Transaction.store_name == store_name,
+                    Transaction.date >= start_date,
+                    Transaction.date <= end_date,
+                )
+            )
+        )
+        count = count_result.scalar() or 0
+
+        if count > 0:
+            # Delete matching transactions
+            await self.db.execute(
+                delete(Transaction).where(
+                    and_(
+                        Transaction.user_id == user_id,
+                        Transaction.store_name == store_name,
+                        Transaction.date >= start_date,
+                        Transaction.date <= end_date,
+                    )
+                )
+            )
+            await self.db.flush()
+
+        return count
