@@ -13,6 +13,7 @@ from app.core.exceptions import (
     ClaudeAPIError,
     ResourceNotFoundError,
     PermissionDeniedError,
+    RateLimitExceededError,
 )
 from app.api.v1.router import api_router
 from app.db.session import init_db
@@ -120,6 +121,29 @@ async def permission_denied_exception_handler(
         content={
             "error": "permission_denied",
             "message": exc.message,
+        },
+    )
+
+
+@app.exception_handler(RateLimitExceededError)
+async def rate_limit_exceeded_exception_handler(
+    request: Request, exc: RateLimitExceededError
+):
+    """Handle rate limit exceeded errors with 429 status."""
+    retry_after = exc.details.get("retry_after_seconds", 86400)
+
+    return JSONResponse(
+        status_code=429,
+        content={
+            "error": "rate_limit_exceeded",
+            "message": exc.message,
+            "messages_used": exc.details.get("messages_used"),
+            "messages_limit": exc.details.get("messages_limit"),
+            "period_end_date": exc.details.get("period_end_date"),
+            "retry_after_seconds": retry_after,
+        },
+        headers={
+            "Retry-After": str(retry_after),
         },
     )
 

@@ -38,3 +38,9 @@ class PermissionDeniedError(ScandaliciousException):
     """Raised when user doesn't have permission for an action."""
 
     pass
+
+
+class RateLimitExceededError(ScandaliciousException):
+    """Raised when user exceeds their rate limit for AI chat messages."""
+
+    pass

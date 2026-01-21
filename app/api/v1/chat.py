@@ -1,9 +1,9 @@
 import json
 import logging
-from typing import AsyncGenerator, Optional
+from typing import AsyncGenerator, Optional, Callable, Awaitable
 
-from fastapi import APIRouter, Depends, HTTPException, Query
-from fastapi.responses import StreamingResponse
+from fastapi import APIRouter, Depends, HTTPException, Query, Response
+from fastapi.responses import StreamingResponse, JSONResponse
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -12,16 +12,38 @@ from app.config import get_settings
 from app.models.user import User
 from app.schemas.chat import ChatRequest, ChatResponse
 from app.services.dobby_chat_service import DobbyChatService
-from app.core.exceptions import ClaudeAPIError
+from app.services.rate_limit_service import RateLimitService, RateLimitStatus
+from app.core.exceptions import ClaudeAPIError, RateLimitExceededError
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
 settings = get_settings()
 
 
+def build_rate_limit_headers(status: RateLimitStatus, account_for_current: bool = True) -> dict:
+    """
+    Build rate limit response headers.
+
+    Args:
+        status: The current rate limit status
+        account_for_current: If True, remaining count reflects this request being processed
+                           (i.e., remaining = original remaining - 1)
+    """
+    reset_timestamp = int(status.period_end_date.timestamp())
+    remaining = status.messages_remaining
+    if account_for_current and remaining > 0:
+        remaining -= 1
+    return {
+        "X-RateLimit-Limit": str(status.messages_limit),
+        "X-RateLimit-Remaining": str(remaining),
+        "X-RateLimit-Reset": str(reset_timestamp),
+    }
+
+
 @router.post("/", response_model=ChatResponse)
 async def chat(
     request: ChatRequest,
+    response: Response,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_db_user),
 ):
@@ -29,7 +51,27 @@ async def chat(
     Send a message to Dobby AI and receive a response about your transactional data.
 
     This is a non-streaming endpoint that returns the complete response at once.
+
+    Rate limit information is included in the response headers:
+    - X-RateLimit-Limit: Maximum messages allowed per period
+    - X-RateLimit-Remaining: Messages remaining in current period
+    - X-RateLimit-Reset: Unix timestamp when the rate limit resets
     """
+    # Check rate limit
+    rate_limit_service = RateLimitService(db)
+    rate_status = await rate_limit_service.check_rate_limit(current_user.firebase_uid)
+
+    if not rate_status.allowed:
+        raise RateLimitExceededError(
+            message="You've reached your message limit for this period",
+            details={
+                "messages_used": rate_status.messages_used,
+                "messages_limit": rate_status.messages_limit,
+                "period_end_date": rate_status.period_end_date.isoformat(),
+                "retry_after_seconds": rate_status.retry_after_seconds,
+            },
+        )
+
     try:
         chat_service = DobbyChatService()
         response_text = await chat_service.chat(
@@ -38,6 +80,15 @@ async def chat(
             message=request.message,
             conversation_history=request.conversation_history,
         )
+
+        # Increment counter on successful response
+        await rate_status.increment_on_success()
+
+        # Add rate limit headers to response
+        rate_headers = build_rate_limit_headers(rate_status)
+        for key, value in rate_headers.items():
+            response.headers[key] = value
+
         return ChatResponse(response=response_text)
     except ClaudeAPIError:
         raise
@@ -51,8 +102,10 @@ async def stream_response(
     user_id: str,
     message: str,
     conversation_history,
+    increment_callback: Optional[Callable[[], Awaitable[None]]] = None,
 ) -> AsyncGenerator[str, None]:
     """Generate Server-Sent Events for streaming chat response."""
+    stream_completed = False
     try:
         chat_service = DobbyChatService()
         async for chunk in chat_service.chat_stream(
@@ -64,6 +117,13 @@ async def stream_response(
             # Format as SSE data event
             data = json.dumps({"type": "text", "content": chunk})
             yield f"data: {data}\n\n"
+
+        # Stream completed successfully
+        stream_completed = True
+
+        # Increment rate limit counter on successful completion
+        if increment_callback:
+            await increment_callback()
 
         # Send done event
         yield f"data: {json.dumps({'type': 'done'})}\n\n"
@@ -92,20 +152,45 @@ async def chat_stream(
     - type: "text" | "error" | "done"
     - content: The text chunk (for "text" type)
     - error: The error message (for "error" type)
+
+    Rate limit information is included in the response headers:
+    - X-RateLimit-Limit: Maximum messages allowed per period
+    - X-RateLimit-Remaining: Messages remaining in current period
+    - X-RateLimit-Reset: Unix timestamp when the rate limit resets
     """
+    # Check rate limit
+    rate_limit_service = RateLimitService(db)
+    rate_status = await rate_limit_service.check_rate_limit(current_user.firebase_uid)
+
+    if not rate_status.allowed:
+        raise RateLimitExceededError(
+            message="You've reached your message limit for this period",
+            details={
+                "messages_used": rate_status.messages_used,
+                "messages_limit": rate_status.messages_limit,
+                "period_end_date": rate_status.period_end_date.isoformat(),
+                "retry_after_seconds": rate_status.retry_after_seconds,
+            },
+        )
+
+    # Build headers with rate limit info
+    headers = {
+        "Cache-Control": "no-cache",
+        "Connection": "keep-alive",
+        "X-Accel-Buffering": "no",  # Disable nginx buffering
+        **build_rate_limit_headers(rate_status),
+    }
+
     return StreamingResponse(
         stream_response(
             db=db,
             user_id=str(current_user.id),
             message=request.message,
             conversation_history=request.conversation_history,
+            increment_callback=rate_status.increment_on_success,
         ),
         media_type="text/event-stream",
-        headers={
-            "Cache-Control": "no-cache",
-            "Connection": "keep-alive",
-            "X-Accel-Buffering": "no",  # Disable nginx buffering
-        },
+        headers=headers,
     )
 
 
