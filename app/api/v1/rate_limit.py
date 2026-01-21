@@ -23,16 +23,22 @@ async def get_rate_limit_status(
     Returns information about:
     - Messages used in the current period
     - Messages remaining
+    - Receipt uploads used in the current period
+    - Receipt uploads remaining
     - When the rate limit period resets
     """
     rate_limit_service = RateLimitService(db)
-    status = await rate_limit_service.get_status(current_user.uid)
+    message_status = await rate_limit_service.get_status(current_user.uid)
+    receipt_status = await rate_limit_service.get_receipt_status(current_user.uid)
 
     return RateLimitStatusResponse(
-        messages_used=status.messages_used,
-        messages_limit=status.messages_limit,
-        messages_remaining=status.messages_remaining,
-        period_start_date=status.period_start_date,
-        period_end_date=status.period_end_date,
-        days_until_reset=status.days_until_reset,
+        messages_used=message_status.messages_used,
+        messages_limit=message_status.messages_limit,
+        messages_remaining=message_status.messages_remaining,
+        receipts_used=receipt_status.receipts_used,
+        receipts_limit=receipt_status.receipts_limit,
+        receipts_remaining=receipt_status.receipts_remaining,
+        period_start_date=message_status.period_start_date,
+        period_end_date=message_status.period_end_date,
+        days_until_reset=message_status.days_until_reset,
     )

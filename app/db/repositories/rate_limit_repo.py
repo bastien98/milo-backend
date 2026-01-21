@@ -8,6 +8,7 @@ from app.models.user_rate_limit import UserRateLimit
 
 
 RATE_LIMIT_MESSAGES = 100
+RATE_LIMIT_RECEIPTS = 15
 RATE_LIMIT_PERIOD_DAYS = 30
 
 
@@ -47,6 +48,7 @@ class RateLimitRepository:
         """Reset the rate limit period for a user."""
         now = datetime.now(timezone.utc)
         record.messages_used = 0
+        record.receipts_used = 0
         record.period_start_date = now
         record.period_end_date = now + timedelta(days=RATE_LIMIT_PERIOD_DAYS)
         await self.db.flush()
@@ -56,6 +58,13 @@ class RateLimitRepository:
     async def increment_messages_used(self, record: UserRateLimit) -> UserRateLimit:
         """Increment the messages used counter by 1."""
         record.messages_used += 1
+        await self.db.flush()
+        await self.db.refresh(record)
+        return record
+
+    async def increment_receipts_used(self, record: UserRateLimit) -> UserRateLimit:
+        """Increment the receipts used counter by 1."""
+        record.receipts_used += 1
         await self.db.flush()
         await self.db.refresh(record)
         return record

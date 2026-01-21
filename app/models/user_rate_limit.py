@@ -9,7 +9,7 @@ from app.db.base import Base
 
 
 class UserRateLimit(Base):
-    """Tracks rate limits for AI chat messages per user."""
+    """Tracks rate limits for AI chat messages and receipt uploads per user."""
 
     __tablename__ = "user_rate_limits"
 
@@ -18,6 +18,7 @@ class UserRateLimit(Base):
         String(128), unique=True, nullable=False, index=True
     )
     messages_used: Mapped[int] = mapped_column(Integer, default=0)
+    receipts_used: Mapped[int] = mapped_column(Integer, default=0)
     period_start_date: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False
     )
