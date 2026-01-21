@@ -5,12 +5,12 @@ from typing import Optional, List
 
 class Settings(BaseSettings):
     # App
-    APP_NAME: str = "Dobby Backend"
+    APP_NAME: str = "Scandalicious Backend"
     DEBUG: bool = False
     API_V1_PREFIX: str = "/api/v1"
 
     # Database
-    DATABASE_URL: str = "postgresql+asyncpg://localhost:5432/dobby"
+    DATABASE_URL: str = "postgresql+asyncpg://localhost:5432/scandalicious"
     DATABASE_POOL_SIZE: int = 5
     DATABASE_MAX_OVERFLOW: int = 10
 

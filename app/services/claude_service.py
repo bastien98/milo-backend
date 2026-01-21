@@ -1,5 +1,6 @@
 import base64
 import json
+import logging
 from dataclasses import dataclass
 from datetime import date
 from typing import List, Optional
@@ -11,6 +12,7 @@ from app.models.enums import Category
 from app.config import get_settings
 
 settings = get_settings()
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -106,12 +108,13 @@ Return ONLY valid JSON in this exact format:
             content = []
             for img_bytes in images:
                 base64_image = base64.standard_b64encode(img_bytes).decode("utf-8")
+                media_type = self._detect_media_type(img_bytes)
                 content.append(
                     {
                         "type": "image",
                         "source": {
                             "type": "base64",
-                            "media_type": "image/png",
+                            "media_type": media_type,
                             "data": base64_image,
                         },
                     }
@@ -142,21 +145,61 @@ Return ONLY valid JSON in this exact format:
             # Validate and convert to result object
             return self._parse_extraction_result(data)
 
+        except anthropic.AuthenticationError as e:
+            logger.error(f"Claude API authentication failed: {e}. Check your ANTHROPIC_API_KEY.")
+            raise ClaudeAPIError(
+                "Claude API authentication failed - invalid or missing API key",
+                details={"error_type": "authentication", "api_error": str(e)},
+            )
+        except anthropic.RateLimitError as e:
+            logger.warning(f"Claude API rate limit exceeded: {e}")
+            raise ClaudeAPIError(
+                "Claude API rate limit exceeded - please retry later",
+                details={"error_type": "rate_limit", "api_error": str(e)},
+            )
+        except anthropic.APIStatusError as e:
+            logger.error(f"Claude API status error: status={e.status_code}, message={e.message}")
+            raise ClaudeAPIError(
+                f"Claude API error (status {e.status_code}): {e.message}",
+                details={"error_type": "api_status", "status_code": e.status_code, "api_error": str(e)},
+            )
+        except anthropic.APIConnectionError as e:
+            logger.error(f"Claude API connection failed: {e}")
+            raise ClaudeAPIError(
+                "Failed to connect to Claude API - check network connectivity",
+                details={"error_type": "connection", "api_error": str(e)},
+            )
         except anthropic.APIError as e:
+            logger.error(f"Claude API error: {e}")
             raise ClaudeAPIError(
                 f"Claude API error: {str(e)}",
-                details={"api_error": str(e)},
+                details={"error_type": "api_error", "api_error": str(e)},
             )
         except json.JSONDecodeError as e:
+            logger.error(f"Failed to parse Claude response as JSON: {e}. Response text: {response_text[:500] if 'response_text' in locals() else 'N/A'}")
             raise ClaudeAPIError(
                 "Failed to parse Claude response as JSON",
-                details={"parse_error": str(e)},
+                details={"error_type": "parse_error", "parse_error": str(e)},
             )
         except Exception as e:
+            logger.exception(f"Unexpected error during receipt extraction: {e}")
             raise ClaudeAPIError(
                 f"Receipt extraction failed: {str(e)}",
-                details={"error": str(e)},
+                details={"error_type": "unexpected", "error": str(e)},
             )
+
+    def _detect_media_type(self, img_bytes: bytes) -> str:
+        """Detect image media type from magic bytes."""
+        if img_bytes[:8] == b'\x89PNG\r\n\x1a\n':
+            return "image/png"
+        elif img_bytes[:2] == b'\xff\xd8':
+            return "image/jpeg"
+        elif img_bytes[:4] == b'GIF8':
+            return "image/gif"
+        elif img_bytes[:4] == b'RIFF' and img_bytes[8:12] == b'WEBP':
+            return "image/webp"
+        # Default to PNG if unknown
+        return "image/png"
 
     def _extract_json(self, text: str) -> str:
         """Extract JSON from response, handling markdown code blocks."""
@@ -178,12 +221,19 @@ Return ONLY valid JSON in this exact format:
             except ValueError:
                 category = Category.OTHER
 
+            # Handle missing or null prices
+            item_price = item_data.get("item_price")
+            if item_price is None:
+                continue  # Skip items without a price
+
+            unit_price = item_data.get("unit_price") or item_price
+
             items.append(
                 ExtractedItem(
-                    item_name=item_data["item_name"],
-                    item_price=float(item_data["item_price"]),
+                    item_name=item_data.get("item_name", "Unknown Item"),
+                    item_price=float(item_price),
                     quantity=int(item_data.get("quantity", 1)),
-                    unit_price=float(item_data.get("unit_price") or item_data["item_price"]),
+                    unit_price=float(unit_price),
                     category=category,
                 )
             )
@@ -197,8 +247,8 @@ Return ONLY valid JSON in this exact format:
                 pass
 
         return ReceiptExtractionResult(
-            store_name=data.get("store_name", "Unknown"),
+            store_name=data.get("store_name") or "Unknown",
             receipt_date=receipt_date,
-            total_amount=float(data.get("total_amount", 0)),
+            total_amount=float(data.get("total_amount") or 0),
             items=items,
         )

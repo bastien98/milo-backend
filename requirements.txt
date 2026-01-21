@@ -14,7 +14,7 @@ alembic==1.13.1
 firebase-admin==6.4.0
 
 # Anthropic Claude
-anthropic==0.18.1
+anthropic>=0.40.0
 
 # Image processing
 Pillow==10.2.0

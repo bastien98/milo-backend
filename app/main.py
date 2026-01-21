@@ -1,13 +1,13 @@
 import logging
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, Request, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
 from app.config import get_settings
 from app.core.exceptions import (
-    DobbyException,
+    ScandaliciousException,
     ReceiptProcessingError,
     ImageValidationError,
     ClaudeAPIError,
@@ -26,11 +26,11 @@ logger = logging.getLogger(__name__)
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     # Startup
-    logger.info("Starting Dobby Backend...")
+    logger.info("Starting Scandalicious Backend...")
     await init_db()
     yield
     # Shutdown
-    logger.info("Shutting down Dobby Backend...")
+    logger.info("Shutting down Scandalicious Backend...")
 
 
 app = FastAPI(
@@ -80,14 +80,24 @@ async def receipt_processing_exception_handler(
 
 @app.exception_handler(ClaudeAPIError)
 async def claude_api_exception_handler(request: Request, exc: ClaudeAPIError):
-    return JSONResponse(
-        status_code=503,
-        content={
-            "error": "llm_service_error",
-            "message": "Receipt extraction service temporarily unavailable",
-            "details": {"retry_after": 30},
-        },
-    )
+    error_type = exc.details.get("error_type", "unknown")
+    logger.error(f"ClaudeAPIError: {exc.message} (type={error_type}, details={exc.details})")
+
+    content = {
+        "error": "llm_service_error",
+        "message": "Receipt extraction service temporarily unavailable",
+        "details": {"retry_after": 30},
+    }
+
+    # Include detailed error info in debug mode
+    if settings.DEBUG:
+        content["debug"] = {
+            "error_type": error_type,
+            "message": exc.message,
+            "details": exc.details,
+        }
+
+    return JSONResponse(status_code=503, content=content)
 
 
 @app.exception_handler(ResourceNotFoundError)
@@ -111,6 +121,27 @@ async def permission_denied_exception_handler(
             "error": "permission_denied",
             "message": exc.message,
         },
+    )
+
+
+@app.exception_handler(HTTPException)
+async def http_exception_handler(request: Request, exc: HTTPException):
+    """Handle FastAPI HTTPExceptions with consistent format."""
+    error_type = {
+        400: "bad_request",
+        401: "unauthorized",
+        403: "forbidden",
+        404: "not_found",
+        422: "validation_error",
+    }.get(exc.status_code, "http_error")
+
+    return JSONResponse(
+        status_code=exc.status_code,
+        content={
+            "error": error_type,
+            "message": exc.detail if isinstance(exc.detail, str) else str(exc.detail),
+        },
+        headers=exc.headers,
     )
 
 

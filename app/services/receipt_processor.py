@@ -107,13 +107,19 @@ class ReceiptProcessor:
                     )
                 )
 
+            # Use Claude's total if available, otherwise calculate from items
+            if extraction_result.total_amount and extraction_result.total_amount > 0:
+                final_total = extraction_result.total_amount
+            else:
+                final_total = sum(item.item_price for item in extraction_result.items)
+
             # Step 8: Update receipt
             await self.receipt_repo.update(
                 receipt_id=receipt.id,
                 status=ReceiptStatus.COMPLETED,
                 store_name=extraction_result.store_name,
                 receipt_date=final_date,
-                total_amount=extraction_result.total_amount,
+                total_amount=final_total,
                 processed_at=datetime.utcnow(),
             )
 
@@ -123,7 +129,7 @@ class ReceiptProcessor:
                 status=ReceiptStatus.COMPLETED,
                 store_name=extraction_result.store_name,
                 receipt_date=final_date,
-                total_amount=extraction_result.total_amount,
+                total_amount=final_total,
                 items_count=len(transactions),
                 transactions=transactions,
                 warnings=warnings,
@@ -138,18 +144,57 @@ class ReceiptProcessor:
             )
             raise
 
+    # Claude's image size limit is 5 MB (5242880 bytes)
+    # We target slightly under to account for base64 encoding overhead
+    MAX_IMAGE_SIZE_BYTES = 4_500_000
+
     async def _prepare_images(
         self, file_content: bytes, content_type: str
     ) -> List[bytes]:
         """Convert file to images for Claude."""
         if self.pdf_service.is_pdf(content_type):
-            return await self.pdf_service.convert_to_images(file_content)
+            images = await self.pdf_service.convert_to_images(file_content)
+            return [self._compress_image_if_needed(img) for img in images]
         else:
-            # Convert image to PNG for consistency
+            # Convert and compress image
             image = Image.open(io.BytesIO(file_content))
+            return [self._compress_image_if_needed(self._image_to_bytes(image))]
+
+    def _image_to_bytes(self, image: Image.Image, format: str = "PNG") -> bytes:
+        """Convert PIL Image to bytes."""
+        buffer = io.BytesIO()
+        image.save(buffer, format=format)
+        return buffer.getvalue()
+
+    def _compress_image_if_needed(self, image_bytes: bytes) -> bytes:
+        """Compress image if it exceeds Claude's size limit."""
+        if len(image_bytes) <= self.MAX_IMAGE_SIZE_BYTES:
+            return image_bytes
+
+        image = Image.open(io.BytesIO(image_bytes))
+
+        # Convert to RGB if necessary (for JPEG compression)
+        if image.mode in ("RGBA", "P"):
+            image = image.convert("RGB")
+
+        # Try JPEG compression with decreasing quality
+        for quality in [85, 70, 55, 40]:
             buffer = io.BytesIO()
-            image.save(buffer, format="PNG")
-            return [buffer.getvalue()]
+            image.save(buffer, format="JPEG", quality=quality, optimize=True)
+            if buffer.tell() <= self.MAX_IMAGE_SIZE_BYTES:
+                return buffer.getvalue()
+
+        # If still too large, resize the image
+        while True:
+            width, height = image.size
+            new_width = int(width * 0.8)
+            new_height = int(height * 0.8)
+            image = image.resize((new_width, new_height), Image.Resampling.LANCZOS)
+
+            buffer = io.BytesIO()
+            image.save(buffer, format="JPEG", quality=70, optimize=True)
+            if buffer.tell() <= self.MAX_IMAGE_SIZE_BYTES:
+                return buffer.getvalue()
 
     def _get_file_type(self, content_type: str) -> str:
         """Get file type from content type."""
