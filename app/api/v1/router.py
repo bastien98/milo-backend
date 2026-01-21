@@ -1,6 +1,6 @@
 from fastapi import APIRouter
 
-from app.api.v1 import health, receipts, transactions, analytics
+from app.api.v1 import health, receipts, transactions, analytics, chat
 
 api_router = APIRouter()
 
@@ -10,3 +10,4 @@ api_router.include_router(
     transactions.router, prefix="/transactions", tags=["transactions"]
 )
 api_router.include_router(analytics.router, prefix="/analytics", tags=["analytics"])
+api_router.include_router(chat.router, prefix="/chat", tags=["chat"])
