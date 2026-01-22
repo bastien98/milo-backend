@@ -45,4 +45,6 @@ htmlcov/
 firebase-service-account.json
 
 .env.example
-.claude/settings.json
+
+# Claude Code local settings (personal, not shared)
+.claude/settings.local.json
