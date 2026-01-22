@@ -34,7 +34,7 @@ endif
 	@echo "Deploying to $(ENV) environment..."
 	@railway environment link $(ENV)
 	@echo "Starting deployment..."
-	@railway up --service $(SERVICE) && echo "\n✅ Deployment to $(ENV) complete!" || (echo "\n❌ Deployment to $(ENV) failed!" && exit 1)
+	@railway up --service $(SERVICE)
 
 .PHONY: logs
 logs:
