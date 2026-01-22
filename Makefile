@@ -25,8 +25,8 @@ ifeq ($(ENV),production)
 	@echo "⚠️  WARNING: You are about to deploy to PRODUCTION!"
 	@echo "This action should only be done manually by authorized personnel."
 	@echo ""
-	@read -p "Type 'YES' to confirm production deployment: " confirm; \
-	if [ "$$confirm" != "YES" ]; then \
+	@read -p "Type 'yes' to confirm production deployment: " confirm; \
+	if [ "$$confirm" != "yes" ]; then \
 		echo "❌ Production deployment cancelled."; \
 		exit 1; \
 	fi
