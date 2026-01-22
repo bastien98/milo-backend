@@ -45,3 +45,4 @@ htmlcov/
 firebase-service-account.json
 
 .env.example
+.claude/settings.json
