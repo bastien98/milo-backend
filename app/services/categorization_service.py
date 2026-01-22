@@ -25,16 +25,39 @@ class CategorizedItem:
     health_score: Optional[int]  # 0-5, None for non-food items
 
 
+@dataclass
+class CategorizationResult:
+    """Result of categorization including cleaned store name and items."""
+    store_name: Optional[str]
+    items: List[CategorizedItem]
+
+
 class CategorizationService:
     """Anthropic Claude integration for categorizing items and assigning health scores."""
 
     MODEL = "claude-sonnet-4-20250514"
     MAX_TOKENS = 4096
 
-    SYSTEM_PROMPT = """You are a grocery item categorization assistant. Given a list of items from a receipt, categorize each item and assign a health score.
+    SYSTEM_PROMPT = """You are a grocery item categorization assistant. Given a store name and list of items from a receipt, clean up the data, categorize each item, and assign a health score.
+
+First, clean the store name:
+- Remove garbage characters, random symbols, and OCR artifacts
+- Fix obvious OCR errors and misspellings
+- Use the proper/official store name (e.g., "COLRUYT" → "Colruyt", "C0LRUYT LAAGSTE" → "Colruyt")
+- Use title case for proper formatting
+- Common Belgian stores: Colruyt, Delhaize, Carrefour, Aldi, Lidl, Albert Heijn, Spar, Match, Intermarché
 
 For each item, provide:
-1. category: Classify into exactly one of these categories:
+1. item_name: Clean up the raw OCR text to produce a clear, readable product name:
+   - Remove garbage characters, random symbols, and OCR artifacts
+   - Remove product codes, SKUs, and internal reference numbers
+   - Remove weight/quantity info that's already captured separately (e.g., "1.5KG", "x2")
+   - Fix obvious OCR errors and misspellings
+   - Keep the actual product name clear and concise (e.g., "Organic Whole Milk" not "0RG4N1C WH0LE M1LK 1L 2.99")
+   - Keep brand names if recognizable (e.g., "Coca-Cola", "Danone")
+   - Use title case for proper formatting
+
+2. category: Classify into exactly one of these categories:
    - "Meat & Fish" (meat, poultry, fish, seafood)
    - "Alcohol" (beer, wine, spirits, including deposit/leeggoed)
    - "Drinks (Soft/Soda)" (sodas, juices, energy drinks)
@@ -52,7 +75,7 @@ For each item, provide:
    - "Pet Supplies" (pet food, pet accessories)
    - "Other" (anything that doesn't fit above)
 
-2. health_score: Rate the healthiness of each item from 0 to 5:
+3. health_score: Rate the healthiness of each item from 0 to 5:
    - 5: Very healthy (fresh vegetables, fruits, water, plain nuts)
    - 4: Healthy (whole grains, lean proteins, eggs, plain dairy)
    - 3: Moderately healthy (bread, pasta, cheese, some ready meals)
@@ -62,18 +85,22 @@ For each item, provide:
    Note: Non-food items (household, personal care, pet supplies) should have health_score: null
 
 IMPORTANT:
-- Belgian receipts may have Dutch/French product names
+- Belgian receipts may have Dutch/French product names - translate to the original language but clean up the text
 - Deposit items (leeggoed/vidange) should be categorized with the related product (usually Alcohol or Drinks)
 - Use the item type hint if provided (e.g., "food", "alcohol", "product")
 
-Return ONLY valid JSON as an array with this exact format:
-[
-  {
-    "index": 0,
-    "category": "Category Name",
-    "health_score": 3
-  }
-]
+Return ONLY valid JSON with this exact format:
+{
+  "store_name": "Clean Store Name",
+  "items": [
+    {
+      "index": 0,
+      "item_name": "Clean Product Name",
+      "category": "Category Name",
+      "health_score": 3
+    }
+  ]
+}
 
 The "index" must match the position of the item in the input list (0-indexed)."""
 
@@ -84,23 +111,28 @@ The "index" must match the position of the item in the input list (0-indexed).""
         self.client = anthropic.Anthropic(api_key=self.api_key)
 
     async def categorize_items(
-        self, items: List[VeryfiLineItem]
-    ) -> List[CategorizedItem]:
+        self, items: List[VeryfiLineItem], vendor_name: Optional[str] = None
+    ) -> CategorizationResult:
         """
         Categorize items and assign health scores using Claude.
 
         Args:
             items: List of VeryfiLineItem from OCR extraction
+            vendor_name: Raw vendor/store name from OCR to be cleaned
 
         Returns:
-            List of CategorizedItem with categories and health scores
+            CategorizationResult with cleaned store name and categorized items
         """
         if not items:
-            return []
+            return CategorizationResult(store_name=vendor_name, items=[])
 
         try:
             # Prepare items for categorization
             items_text = self._format_items_for_prompt(items)
+
+            # Build user message with store name
+            store_line = f"Store name: {vendor_name}\n\n" if vendor_name else "Store name: Unknown\n\n"
+            user_content = f"{store_line}Items:\n{items_text}"
 
             # Call Claude API
             response = self.client.messages.create(
@@ -110,7 +142,7 @@ The "index" must match the position of the item in the input list (0-indexed).""
                 messages=[
                     {
                         "role": "user",
-                        "content": f"Categorize these items from a receipt:\n\n{items_text}",
+                        "content": f"Clean and categorize this receipt data:\n\n{user_content}",
                     }
                 ],
             )
@@ -118,10 +150,15 @@ The "index" must match the position of the item in the input list (0-indexed).""
             # Parse response
             response_text = response.content[0].text
             json_str = self._extract_json(response_text)
-            categorizations = json.loads(json_str)
+            result_data = json.loads(json_str)
+
+            # Extract cleaned store name and items from response
+            cleaned_store_name = result_data.get("store_name") or vendor_name
+            categorizations = result_data.get("items", [])
 
             # Build result combining Veryfi data with Claude categorizations
-            return self._build_categorized_items(items, categorizations)
+            categorized_items = self._build_categorized_items(items, categorizations)
+            return CategorizationResult(store_name=cleaned_store_name, items=categorized_items)
 
         except anthropic.AuthenticationError as e:
             logger.error(f"Claude API authentication failed: {e}")
@@ -214,6 +251,9 @@ The "index" must match the position of the item in the input list (0-indexed).""
             else:
                 health_score = None
 
+            # Get cleaned item name from Claude, fallback to raw description
+            cleaned_name = cat_data.get("item_name") or item.description
+
             # Calculate prices
             total_price = item.total if item.total is not None else item.price
             quantity = int(item.quantity) if item.quantity else 1
@@ -221,7 +261,7 @@ The "index" must match the position of the item in the input list (0-indexed).""
 
             result.append(
                 CategorizedItem(
-                    item_name=item.description,
+                    item_name=cleaned_name,
                     item_price=float(total_price),
                     quantity=quantity,
                     unit_price=float(unit_price) if unit_price else None,

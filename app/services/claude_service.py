@@ -42,7 +42,12 @@ class ClaudeService:
     SYSTEM_PROMPT = """You are a receipt data extraction assistant. Extract all items from grocery receipts accurately.
 
 For each item, identify:
-1. item_name: The product name as shown on receipt
+1. item_name: A clean, readable product name:
+   - Extract the actual product name, not codes or gibberish
+   - Remove product codes, SKUs, and internal reference numbers
+   - Remove weight/quantity info that's captured separately (e.g., "1.5KG", "x2")
+   - Keep brand names if visible (e.g., "Coca-Cola", "Danone")
+   - Use title case for proper formatting (e.g., "Organic Whole Milk")
 2. item_price: The total price for this line item (after quantity multiplication)
 3. quantity: Number of units (default 1 if not specified)
 4. unit_price: Price per single unit (if different from item_price)
@@ -73,7 +78,7 @@ For each item, identify:
    Note: Non-food items (household, personal care, pet supplies) should have health_score: null
 
 Also extract:
-- store_name: The store name (e.g., "COLRUYT", "ALDI")
+- store_name: The clean store name using proper capitalization (e.g., "Colruyt", "Aldi", "Delhaize", "Carrefour", "Lidl")
 - receipt_date: Date in ISO format (YYYY-MM-DD)
 - total_amount: Total amount paid
 

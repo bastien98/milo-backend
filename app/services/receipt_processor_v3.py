@@ -82,21 +82,25 @@ class ReceiptProcessorV3:
                 file_content, filename
             )
 
-            # Step 5: Categorize items via Claude
-            categorized_items = await self.categorization_service.categorize_items(
-                veryfi_result.line_items
+            # Step 5: Categorize items and clean data via Claude
+            categorization_result = await self.categorization_service.categorize_items(
+                veryfi_result.line_items,
+                vendor_name=veryfi_result.vendor_name,
             )
+
+            # Use cleaned store name from Claude
+            cleaned_store_name = categorization_result.store_name or "Unknown"
 
             # Use override date if provided, otherwise use Veryfi's extracted date
             final_date = receipt_date_override or veryfi_result.date
 
             # Step 6: Create transactions
             transactions = []
-            for item in categorized_items:
+            for item in categorization_result.items:
                 transaction = await self.transaction_repo.create(
                     user_id=user_id,
                     receipt_id=receipt.id,
-                    store_name=veryfi_result.vendor_name or "Unknown",
+                    store_name=cleaned_store_name,
                     item_name=item.item_name,
                     item_price=item.item_price,
                     quantity=item.quantity,
@@ -120,13 +124,13 @@ class ReceiptProcessorV3:
             if veryfi_result.total and veryfi_result.total > 0:
                 final_total = veryfi_result.total
             else:
-                final_total = sum(item.item_price for item in categorized_items)
+                final_total = sum(item.item_price for item in categorization_result.items)
 
             # Step 7: Update receipt
             await self.receipt_repo.update(
                 receipt_id=receipt.id,
                 status=ReceiptStatus.COMPLETED,
-                store_name=veryfi_result.vendor_name,
+                store_name=cleaned_store_name,
                 receipt_date=final_date,
                 total_amount=final_total,
                 processed_at=datetime.utcnow(),
@@ -136,7 +140,7 @@ class ReceiptProcessorV3:
             return ReceiptUploadResponse(
                 receipt_id=receipt.id,
                 status=ReceiptStatus.COMPLETED,
-                store_name=veryfi_result.vendor_name,
+                store_name=cleaned_store_name,
                 receipt_date=final_date,
                 total_amount=final_total,
                 items_count=len(transactions),
