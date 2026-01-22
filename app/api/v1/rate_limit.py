@@ -12,7 +12,7 @@ router = APIRouter()
 logger = logging.getLogger(__name__)
 
 
-@router.get("/", response_model=RateLimitStatusResponse)
+@router.get("", response_model=RateLimitStatusResponse)
 async def get_rate_limit_status(
     db: AsyncSession = Depends(get_db),
     current_user: FirebaseUser = Depends(get_current_user),
