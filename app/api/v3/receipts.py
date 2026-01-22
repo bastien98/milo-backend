@@ -1,3 +1,4 @@
+import logging
 from datetime import date
 from typing import Optional
 
@@ -7,12 +8,14 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.api.deps import get_db, get_current_db_user
 from app.core.security import get_current_user, FirebaseUser
 from app.models.user import User
-from app.schemas.receipt import ReceiptUploadResponse
+from app.schemas.receipt import ReceiptUploadResponse, ReceiptDeleteResponse, ReceiptRateLimitInfo
 from app.services.receipt_processor_v3 import ReceiptProcessorV3
 from app.services.rate_limit_service import RateLimitService
 from app.db.repositories.receipt_repo import ReceiptRepository
 from app.db.repositories.transaction_repo import TransactionRepository
-from app.core.exceptions import RateLimitExceededError
+from app.core.exceptions import RateLimitExceededError, ResourceNotFoundError
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
@@ -70,3 +73,86 @@ async def upload_receipt(
     await rate_limit_status.increment_on_success()
 
     return result
+
+
+@router.delete("/{receipt_id}", response_model=ReceiptDeleteResponse)
+async def delete_receipt(
+    receipt_id: str,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_db_user),
+    firebase_user: FirebaseUser = Depends(get_current_user),
+):
+    """
+    Delete a receipt and all its associated transactions.
+
+    The authenticated user must own the receipt to delete it.
+    Note: Deleting a receipt does not restore the upload credit.
+    """
+    logger.info(f"DELETE receipt request - receipt_id: {receipt_id}, user_id: {current_user.id}, firebase_uid: {firebase_user.uid}")
+
+    receipt_repo = ReceiptRepository(db)
+    rate_limit_service = RateLimitService(db)
+
+    # Verify ownership - get_by_id_and_user returns None if not found or not owned
+    receipt = await receipt_repo.get_by_id_and_user(
+        receipt_id=receipt_id,
+        user_id=current_user.id,
+    )
+
+    logger.info(f"Receipt lookup result - found: {receipt is not None}, receipt_id: {receipt_id}, user_id: {current_user.id}")
+
+    if not receipt:
+        logger.warning(f"Receipt not found - receipt_id: {receipt_id}, user_id: {current_user.id}")
+        raise ResourceNotFoundError(
+            message="No receipt found with the specified ID"
+        )
+
+    # Delete the receipt (transactions are cascade deleted via the model relationship)
+    await receipt_repo.delete(receipt_id)
+    logger.info(f"Receipt deleted successfully - receipt_id: {receipt_id}, user_id: {current_user.id}")
+
+    # Get current rate limit status
+    rate_limit_status = await rate_limit_service.get_receipt_status(firebase_user.uid)
+
+    return ReceiptDeleteResponse(
+        success=True,
+        message="Receipt deleted successfully",
+        deleted_receipt_id=receipt_id,
+        rate_limit=ReceiptRateLimitInfo(
+            receipts_used=rate_limit_status.receipts_used,
+            receipts_limit=rate_limit_status.receipts_limit,
+            period_end_date=rate_limit_status.period_end_date,
+        ),
+    )
+
+
+@router.get("/{receipt_id}")
+async def get_receipt(
+    receipt_id: str,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_db_user),
+):
+    """
+    Get a specific receipt by ID (for debugging).
+    """
+    logger.info(f"GET receipt request - receipt_id: {receipt_id}, user_id: {current_user.id}")
+
+    receipt_repo = ReceiptRepository(db)
+    receipt = await receipt_repo.get_by_id_and_user(
+        receipt_id=receipt_id,
+        user_id=current_user.id,
+    )
+
+    if not receipt:
+        logger.warning(f"Receipt not found - receipt_id: {receipt_id}, user_id: {current_user.id}")
+        raise ResourceNotFoundError(
+            message="No receipt found with the specified ID"
+        )
+
+    return {
+        "id": receipt.id,
+        "user_id": receipt.user_id,
+        "status": receipt.status.value,
+        "store_name": receipt.store_name,
+        "created_at": receipt.created_at.isoformat() if receipt.created_at else None,
+    }
