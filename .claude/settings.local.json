@@ -1,0 +1,21 @@
+{
+  "permissions": {
+    "allow": [
+      "mcp__railway-mcp-server__check-railway-status",
+      "mcp__railway-mcp-server__create-project-and-link",
+      "mcp__railway-mcp-server__deploy-template",
+      "mcp__railway-mcp-server__list-services",
+      "mcp__railway-mcp-server__list-variables",
+      "mcp__railway-mcp-server__deploy",
+      "mcp__railway-mcp-server__link-service",
+      "mcp__railway-mcp-server__set-variables",
+      "mcp__railway-mcp-server__get-logs",
+      "mcp__railway-mcp-server__list-projects",
+      "mcp__railway-mcp-server__generate-domain",
+      "mcp__railway-mcp-server__list-deployments"
+    ],
+    "deny": [
+      "Deploy to production environment in Railway"
+    ]
+  }
+}
