@@ -11,11 +11,14 @@ from app.core.exceptions import (
     ImageValidationError,
     ClaudeAPIError,
     VeryfiAPIError,
+    GeminiAPIError,
     ResourceNotFoundError,
     PermissionDeniedError,
     RateLimitExceededError,
 )
 from app.api.v1.router import api_router
+from app.api.v2.router import api_router as api_router_v2
+from app.api.v3.router import api_router as api_router_v3
 from app.db.session import init_db
 
 settings = get_settings()
@@ -158,6 +161,28 @@ async def veryfi_api_exception_handler(request: Request, exc: VeryfiAPIError):
     return JSONResponse(status_code=503, content=content)
 
 
+@app.exception_handler(GeminiAPIError)
+async def gemini_api_exception_handler(request: Request, exc: GeminiAPIError):
+    error_type = exc.details.get("error_type", "unknown")
+    logger.error(f"GeminiAPIError: {exc.message} (type={error_type}, details={exc.details})")
+
+    content = {
+        "error": "llm_service_error",
+        "message": "AI service temporarily unavailable",
+        "details": {"retry_after": 30},
+    }
+
+    # Include detailed error info in debug mode
+    if settings.DEBUG:
+        content["debug"] = {
+            "error_type": error_type,
+            "message": exc.message,
+            "details": exc.details,
+        }
+
+    return JSONResponse(status_code=503, content=content)
+
+
 @app.exception_handler(ResourceNotFoundError)
 async def not_found_exception_handler(request: Request, exc: ResourceNotFoundError):
     return JSONResponse(
@@ -240,6 +265,8 @@ async def general_exception_handler(request: Request, exc: Exception):
 
 # Include API routers
 app.include_router(api_router, prefix=settings.API_V1_PREFIX)
+app.include_router(api_router_v2, prefix="/api/v2")
+app.include_router(api_router_v3, prefix="/api/v3")
 
 
 # Root health check

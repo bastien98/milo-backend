@@ -3,12 +3,13 @@ from datetime import date, timedelta
 from typing import List, Optional, AsyncGenerator
 from collections import defaultdict
 
-import anthropic
+import google.generativeai as genai
+from google.api_core import exceptions as google_exceptions
 from sqlalchemy import select, and_
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import get_settings
-from app.core.exceptions import ClaudeAPIError
+from app.core.exceptions import GeminiAPIError
 from app.models.transaction import Transaction
 from app.schemas.chat import ChatMessage
 
@@ -16,10 +17,10 @@ settings = get_settings()
 logger = logging.getLogger(__name__)
 
 
-class DobbyChatService:
-    """Dobby AI chat service for answering questions about transactional data."""
+class DobbyChatServiceGemini:
+    """Dobby AI chat service for answering questions about transactional data using Gemini."""
 
-    MODEL = "claude-sonnet-4-20250514"
+    MODEL = "gemini-2.0-flash"
     MAX_TOKENS = 4096
 
     SYSTEM_PROMPT = """You are Dobby, a witty and enthusiastic AI shopping buddy who LOVES diving into grocery data! Think of yourself as part financial advisor, part foodie friend, and part detective who gets genuinely excited about uncovering spending patterns.
@@ -58,10 +59,14 @@ RESPONSE STYLE:
 You will receive the user's transaction data as context. Use it to give them genuinely useful, entertaining insights!"""
 
     def __init__(self, api_key: Optional[str] = None):
-        self.api_key = api_key or settings.ANTHROPIC_API_KEY
+        self.api_key = api_key or settings.GEMINI_API_KEY
         if not self.api_key:
-            raise ValueError("Anthropic API key not configured")
-        self.client = anthropic.Anthropic(api_key=self.api_key)
+            raise ValueError("Gemini API key not configured")
+        genai.configure(api_key=self.api_key)
+        self.model = genai.GenerativeModel(
+            model_name=self.MODEL,
+            system_instruction=self.SYSTEM_PROMPT,
+        )
 
     async def _get_user_transaction_context(
         self,
@@ -166,67 +171,58 @@ You will receive the user's transaction data as context. Use it to give them gen
             # Get user's transaction context
             context = await self._get_user_transaction_context(db, user_id)
 
-            # Build messages
-            messages = []
+            # Build chat history for Gemini
+            history = []
 
             # Add conversation history if provided
             if conversation_history:
                 for msg in conversation_history:
-                    messages.append({
-                        "role": msg.role,
-                        "content": msg.content
-                    })
+                    role = "user" if msg.role == "user" else "model"
+                    history.append({"role": role, "parts": [msg.content]})
 
-            # Add current user message with context
+            # Start chat with history
+            chat = self.model.start_chat(history=history)
+
+            # Build user message with context
             user_content = f"""Here is my transaction data:
 
 {context}
 
 My question: {message}"""
 
-            messages.append({
-                "role": "user",
-                "content": user_content
-            })
-
-            # Call Claude API
-            response = self.client.messages.create(
-                model=self.MODEL,
-                max_tokens=self.MAX_TOKENS,
-                system=self.SYSTEM_PROMPT,
-                messages=messages,
+            # Call Gemini API
+            response = chat.send_message(
+                user_content,
+                generation_config=genai.GenerationConfig(
+                    max_output_tokens=self.MAX_TOKENS,
+                    temperature=0.7,
+                ),
             )
 
-            return response.content[0].text
+            return response.text
 
-        except anthropic.AuthenticationError as e:
-            logger.error(f"Claude API authentication failed: {e}")
-            raise ClaudeAPIError(
-                "Claude API authentication failed - invalid or missing API key",
+        except google_exceptions.InvalidArgument as e:
+            logger.error(f"Gemini API invalid argument: {e}")
+            raise GeminiAPIError(
+                "Gemini API invalid argument - check request format",
+                details={"error_type": "invalid_argument", "api_error": str(e)},
+            )
+        except google_exceptions.PermissionDenied as e:
+            logger.error(f"Gemini API permission denied: {e}")
+            raise GeminiAPIError(
+                "Gemini API permission denied - invalid or missing API key",
                 details={"error_type": "authentication", "api_error": str(e)},
             )
-        except anthropic.RateLimitError as e:
-            logger.warning(f"Claude API rate limit exceeded: {e}")
-            raise ClaudeAPIError(
-                "Claude API rate limit exceeded - please retry later",
+        except google_exceptions.ResourceExhausted as e:
+            logger.warning(f"Gemini API rate limit exceeded: {e}")
+            raise GeminiAPIError(
+                "Gemini API rate limit exceeded - please retry later",
                 details={"error_type": "rate_limit", "api_error": str(e)},
             )
-        except anthropic.APIStatusError as e:
-            logger.error(f"Claude API status error: status={e.status_code}, message={e.message}")
-            raise ClaudeAPIError(
-                f"Claude API error (status {e.status_code}): {e.message}",
-                details={"error_type": "api_status", "status_code": e.status_code, "api_error": str(e)},
-            )
-        except anthropic.APIConnectionError as e:
-            logger.error(f"Claude API connection failed: {e}")
-            raise ClaudeAPIError(
-                "Failed to connect to Claude API - check network connectivity",
-                details={"error_type": "connection", "api_error": str(e)},
-            )
-        except anthropic.APIError as e:
-            logger.error(f"Claude API error: {e}")
-            raise ClaudeAPIError(
-                f"Claude API error: {str(e)}",
+        except google_exceptions.GoogleAPIError as e:
+            logger.error(f"Gemini API error: {e}")
+            raise GeminiAPIError(
+                f"Gemini API error: {str(e)}",
                 details={"error_type": "api_error", "api_error": str(e)},
             )
 
@@ -245,66 +241,60 @@ My question: {message}"""
             # Get user's transaction context
             context = await self._get_user_transaction_context(db, user_id)
 
-            # Build messages
-            messages = []
+            # Build chat history for Gemini
+            history = []
 
             # Add conversation history if provided
             if conversation_history:
                 for msg in conversation_history:
-                    messages.append({
-                        "role": msg.role,
-                        "content": msg.content
-                    })
+                    role = "user" if msg.role == "user" else "model"
+                    history.append({"role": role, "parts": [msg.content]})
 
-            # Add current user message with context
+            # Start chat with history
+            chat = self.model.start_chat(history=history)
+
+            # Build user message with context
             user_content = f"""Here is my transaction data:
 
 {context}
 
 My question: {message}"""
 
-            messages.append({
-                "role": "user",
-                "content": user_content
-            })
+            # Call Gemini API with streaming
+            response = chat.send_message(
+                user_content,
+                generation_config=genai.GenerationConfig(
+                    max_output_tokens=self.MAX_TOKENS,
+                    temperature=0.7,
+                ),
+                stream=True,
+            )
 
-            # Call Claude API with streaming
-            with self.client.messages.stream(
-                model=self.MODEL,
-                max_tokens=self.MAX_TOKENS,
-                system=self.SYSTEM_PROMPT,
-                messages=messages,
-            ) as stream:
-                for text in stream.text_stream:
-                    yield text
+            for chunk in response:
+                if chunk.text:
+                    yield chunk.text
 
-        except anthropic.AuthenticationError as e:
-            logger.error(f"Claude API authentication failed: {e}")
-            raise ClaudeAPIError(
-                "Claude API authentication failed - invalid or missing API key",
+        except google_exceptions.InvalidArgument as e:
+            logger.error(f"Gemini API invalid argument: {e}")
+            raise GeminiAPIError(
+                "Gemini API invalid argument - check request format",
+                details={"error_type": "invalid_argument", "api_error": str(e)},
+            )
+        except google_exceptions.PermissionDenied as e:
+            logger.error(f"Gemini API permission denied: {e}")
+            raise GeminiAPIError(
+                "Gemini API permission denied - invalid or missing API key",
                 details={"error_type": "authentication", "api_error": str(e)},
             )
-        except anthropic.RateLimitError as e:
-            logger.warning(f"Claude API rate limit exceeded: {e}")
-            raise ClaudeAPIError(
-                "Claude API rate limit exceeded - please retry later",
+        except google_exceptions.ResourceExhausted as e:
+            logger.warning(f"Gemini API rate limit exceeded: {e}")
+            raise GeminiAPIError(
+                "Gemini API rate limit exceeded - please retry later",
                 details={"error_type": "rate_limit", "api_error": str(e)},
             )
-        except anthropic.APIStatusError as e:
-            logger.error(f"Claude API status error: status={e.status_code}, message={e.message}")
-            raise ClaudeAPIError(
-                f"Claude API error (status {e.status_code}): {e.message}",
-                details={"error_type": "api_status", "status_code": e.status_code, "api_error": str(e)},
-            )
-        except anthropic.APIConnectionError as e:
-            logger.error(f"Claude API connection failed: {e}")
-            raise ClaudeAPIError(
-                "Failed to connect to Claude API - check network connectivity",
-                details={"error_type": "connection", "api_error": str(e)},
-            )
-        except anthropic.APIError as e:
-            logger.error(f"Claude API error: {e}")
-            raise ClaudeAPIError(
-                f"Claude API error: {str(e)}",
+        except google_exceptions.GoogleAPIError as e:
+            logger.error(f"Gemini API error: {e}")
+            raise GeminiAPIError(
+                f"Gemini API error: {str(e)}",
                 details={"error_type": "api_error", "api_error": str(e)},
             )

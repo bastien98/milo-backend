@@ -16,6 +16,9 @@ firebase-admin==6.4.0
 # Anthropic Claude
 anthropic>=0.40.0
 
+# Google Gemini
+google-generativeai>=0.8.0
+
 # Image processing
 Pillow==10.2.0
 pdf2image==1.17.0

@@ -50,3 +50,9 @@ class VeryfiAPIError(ScandaliciousException):
     """Raised when Veryfi API call fails."""
 
     pass
+
+
+class GeminiAPIError(ScandaliciousException):
+    """Raised when Gemini API call fails."""
+
+    pass
