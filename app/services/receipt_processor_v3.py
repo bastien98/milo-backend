@@ -1,3 +1,4 @@
+import logging
 from datetime import date, datetime
 from typing import Optional
 
@@ -10,6 +11,8 @@ from app.services.veryfi_service import VeryfiService
 from app.services.categorization_service import CategorizationService
 from app.db.repositories.receipt_repo import ReceiptRepository
 from app.db.repositories.transaction_repo import TransactionRepository
+
+logger = logging.getLogger(__name__)
 
 
 class ReceiptProcessorV3:
@@ -95,6 +98,12 @@ class ReceiptProcessorV3:
             final_date = receipt_date_override or veryfi_result.date
 
             # Step 6: Create transactions
+            transaction_date = final_date or date.today()
+            logger.info(
+                f"Creating transactions: user_id={user_id}, receipt_id={receipt.id}, "
+                f"date={transaction_date}, items_count={len(categorization_result.items)}"
+            )
+
             transactions = []
             for item in categorization_result.items:
                 transaction = await self.transaction_repo.create(
@@ -106,8 +115,12 @@ class ReceiptProcessorV3:
                     quantity=item.quantity,
                     unit_price=item.unit_price,
                     category=item.category,
-                    date=final_date or date.today(),
+                    date=transaction_date,
                     health_score=item.health_score,
+                )
+                logger.debug(
+                    f"Created transaction: id={transaction.id}, item={item.item_name}, "
+                    f"price={item.item_price}, date={transaction_date}"
                 )
                 transactions.append(
                     ExtractedItem(
@@ -119,6 +132,8 @@ class ReceiptProcessorV3:
                         health_score=item.health_score,
                     )
                 )
+
+            logger.info(f"Created {len(transactions)} transactions for user_id={user_id}")
 
             # Use Veryfi's total if available, otherwise calculate from items
             if veryfi_result.total and veryfi_result.total > 0:

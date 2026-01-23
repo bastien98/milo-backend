@@ -9,7 +9,6 @@ from app.db.repositories.rate_limit_repo import (
     RateLimitRepository,
     RATE_LIMIT_MESSAGES,
     RATE_LIMIT_RECEIPTS,
-    RATE_LIMIT_PERIOD_DAYS,
 )
 from app.db.session import async_session_maker
 from app.models.user_rate_limit import UserRateLimit

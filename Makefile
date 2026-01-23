@@ -32,6 +32,7 @@ ifeq ($(ENV),production)
 	fi
 endif
 	@echo "Deploying to $(ENV) environment..."
+	@railway environment link $(ENV) > /dev/null
 	@echo "Starting deployment..."
 	@railway up --service $(SERVICE)
 

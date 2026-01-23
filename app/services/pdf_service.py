@@ -1,8 +1,6 @@
 import io
 from typing import List
 
-from PIL import Image
-
 from app.core.exceptions import ReceiptProcessingError
 
 

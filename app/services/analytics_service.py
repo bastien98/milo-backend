@@ -1,12 +1,12 @@
+import logging
 from datetime import date, timedelta
-from typing import List, Optional
+from typing import Optional
 from collections import defaultdict
 
-from sqlalchemy import select, func, and_
+from sqlalchemy import select, and_
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.transaction import Transaction
-from app.models.enums import Category
 from app.schemas.analytics import (
     PeriodSummary,
     StoreSpending,
@@ -16,6 +16,8 @@ from app.schemas.analytics import (
     SpendingTrend,
     TrendsResponse,
 )
+
+logger = logging.getLogger(__name__)
 
 
 class AnalyticsService:
@@ -29,6 +31,10 @@ class AnalyticsService:
         end_date: date,
     ) -> PeriodSummary:
         """Get spending summary for a period with store breakdown."""
+        logger.info(
+            f"Analytics query: user_id={user_id}, start_date={start_date}, end_date={end_date}"
+        )
+
         # Get all transactions in period
         result = await self.db.execute(
             select(Transaction).where(
@@ -41,6 +47,13 @@ class AnalyticsService:
         )
         transactions = list(result.scalars().all())
 
+        logger.info(
+            f"Analytics found {len(transactions)} transactions for user_id={user_id}"
+        )
+        if transactions:
+            dates = [t.date for t in transactions]
+            logger.debug(f"Transaction dates: {dates}")
+
         # Calculate totals (item_price already represents the line total from receipt)
         total_spend = sum(t.item_price for t in transactions)
         transaction_count = len(transactions)
@@ -50,10 +63,11 @@ class AnalyticsService:
         average_health_score = round(sum(health_scores) / len(health_scores), 2) if health_scores else None
 
         # Group by store
-        store_data = defaultdict(lambda: {"amount": 0.0, "dates": set()})
+        store_data = defaultdict(lambda: {"amount": 0.0, "receipt_ids": set()})
         for t in transactions:
             store_data[t.store_name]["amount"] += t.item_price
-            store_data[t.store_name]["dates"].add(t.date)
+            if t.receipt_id:
+                store_data[t.store_name]["receipt_ids"].add(t.receipt_id)
 
         # Build store spending list
         stores = []
@@ -63,7 +77,7 @@ class AnalyticsService:
                 StoreSpending(
                     store_name=store_name,
                     amount_spent=round(data["amount"], 2),
-                    store_visits=len(data["dates"]),
+                    store_visits=len(data["receipt_ids"]),
                     percentage=round(percentage, 1),
                 )
             )
@@ -173,7 +187,7 @@ class AnalyticsService:
 
         # Calculate totals (item_price already represents the line total from receipt)
         total_spend = sum(t.item_price for t in transactions)
-        visit_dates = set(t.date for t in transactions)
+        receipt_ids = set(t.receipt_id for t in transactions if t.receipt_id)
 
         # Calculate average health score for this store
         store_health_scores = [t.health_score for t in transactions if t.health_score is not None]
@@ -215,7 +229,7 @@ class AnalyticsService:
             start_date=start_date,
             end_date=end_date,
             total_store_spend=round(total_spend, 2),
-            store_visits=len(visit_dates),
+            store_visits=len(receipt_ids),
             categories=categories,
             average_health_score=store_avg_health,
         )

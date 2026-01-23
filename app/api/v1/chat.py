@@ -3,7 +3,7 @@ import logging
 from typing import AsyncGenerator, Optional, Callable, Awaitable
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Response
-from fastapi.responses import StreamingResponse, JSONResponse
+from fastapi.responses import StreamingResponse
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 

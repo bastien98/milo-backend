@@ -7,7 +7,6 @@ from fastapi.responses import JSONResponse
 
 from app.config import get_settings
 from app.core.exceptions import (
-    ScandaliciousException,
     ReceiptProcessingError,
     ImageValidationError,
     ClaudeAPIError,
@@ -17,13 +16,21 @@ from app.core.exceptions import (
     RateLimitExceededError,
 )
 from app.api.v1.router import api_router
-from app.api.v3.router import api_router as api_router_v3
 from app.db.session import init_db
 
 settings = get_settings()
 
+# Configure logging - suppress noisy third-party loggers
 logging.basicConfig(level=logging.DEBUG if settings.DEBUG else logging.INFO)
 logger = logging.getLogger(__name__)
+
+# Silence noisy third-party libraries
+logging.getLogger("urllib3").setLevel(logging.WARNING)
+logging.getLogger("cachecontrol").setLevel(logging.WARNING)
+logging.getLogger("httpx").setLevel(logging.WARNING)
+logging.getLogger("httpcore").setLevel(logging.WARNING)
+logging.getLogger("google").setLevel(logging.WARNING)
+logging.getLogger("firebase_admin").setLevel(logging.WARNING)
 
 
 @asynccontextmanager
@@ -39,7 +46,33 @@ async def lifespan(app: FastAPI):
 app = FastAPI(
     title=settings.APP_NAME,
     version="1.0.0",
+    description="""
+## Scandelicious API
+
+Receipt scanning and expense tracking API powered by Veryfi OCR and Claude AI.
+
+### Features
+- **Receipt Upload**: Scan receipts using Veryfi OCR with Claude AI categorization
+- **Transaction Management**: View, edit, and delete transactions
+- **Analytics**: Spending summaries, category breakdowns, and trends
+- **AI Chat**: Ask questions about your spending with Dobby AI assistant
+
+### Authentication
+All endpoints require Firebase Authentication. Include the ID token in the Authorization header:
+```
+Authorization: Bearer <firebase_id_token>
+```
+""",
     lifespan=lifespan,
+    openapi_tags=[
+        {"name": "receipts", "description": "Upload and manage receipts"},
+        {"name": "transactions", "description": "View and manage transactions"},
+        {"name": "analytics", "description": "Spending analytics and insights"},
+        {"name": "chat", "description": "AI-powered spending assistant"},
+        {"name": "rate-limit", "description": "Rate limit status"},
+        {"name": "profile", "description": "User profile management"},
+        {"name": "health", "description": "Health checks"},
+    ],
 )
 
 # CORS middleware
@@ -207,7 +240,6 @@ async def general_exception_handler(request: Request, exc: Exception):
 
 # Include API routers
 app.include_router(api_router, prefix=settings.API_V1_PREFIX)
-app.include_router(api_router_v3, prefix="/api/v3")
 
 
 # Root health check

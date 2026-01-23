@@ -2,7 +2,7 @@ from datetime import date
 from typing import Optional
 from math import ceil
 
-from fastapi import APIRouter, Depends, Query, HTTPException
+from fastapi import APIRouter, Depends, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_db, get_current_db_user

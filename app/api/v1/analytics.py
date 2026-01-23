@@ -1,3 +1,4 @@
+import logging
 from datetime import date, timedelta
 from typing import Optional
 
@@ -13,6 +14,8 @@ from app.schemas.analytics import (
     TrendsResponse,
 )
 from app.services.analytics_service import AnalyticsService
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
@@ -71,12 +74,24 @@ async def get_summary(
     """
     start, end = get_period_dates(period, start_date, end_date)
 
+    logger.info(
+        f"Analytics summary request: user_id={current_user.id}, "
+        f"period={period}, start_date={start}, end_date={end}"
+    )
+
     analytics = AnalyticsService(db)
-    return await analytics.get_period_summary(
+    result = await analytics.get_period_summary(
         user_id=current_user.id,
         start_date=start,
         end_date=end,
     )
+
+    logger.info(
+        f"Analytics summary result: user_id={current_user.id}, "
+        f"transaction_count={result.transaction_count}, total_spend={result.total_spend}"
+    )
+
+    return result
 
 
 @router.get("/categories", response_model=CategoryBreakdown)

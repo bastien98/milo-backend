@@ -4,7 +4,7 @@ from typing import List, Optional, AsyncGenerator
 from collections import defaultdict
 
 import anthropic
-from sqlalchemy import select, func, and_
+from sqlalchemy import select, and_
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import get_settings
