@@ -11,6 +11,7 @@ from app.db.base import Base
 if TYPE_CHECKING:
     from app.models.transaction import Transaction
     from app.models.receipt import Receipt
+    from app.models.user_profile import UserProfile
 
 
 class User(Base):
@@ -38,4 +39,7 @@ class User(Base):
     )
     receipts: Mapped[List["Receipt"]] = relationship(
         "Receipt", back_populates="user", cascade="all, delete-orphan"
+    )
+    profile: Mapped[Optional["UserProfile"]] = relationship(
+        "UserProfile", back_populates="user", cascade="all, delete-orphan", uselist=False
     )
