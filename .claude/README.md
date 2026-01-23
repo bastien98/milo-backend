@@ -4,73 +4,74 @@ This directory contains Claude Code settings for the project.
 
 ## Security Settings
 
-### Production Deployment Protection
+### 🚨 ALL DEPLOYMENTS BLOCKED 🚨
 
-The `settings.json` file contains restrictions that prevent Claude Code from deploying to production. These settings are enforced for all team members using Claude Code.
+**CRITICAL: Claude Code and all AI tools are blocked from deploying to Railway.**
 
-**Blocked Actions:**
-- Linking to production environment
-- Deploying to production via `make deploy ENV=production`
-- Any Railway commands that target production
-- Any Railway MCP server actions targeting production
+The `settings.json` file contains restrictions that prevent Claude Code and any MCP-based AI tools from deploying to ANY environment (production or non-production). All deployments must be done manually.
 
-**Why?**
-Production deployments should be:
-1. Intentional and reviewed
-2. Performed by authorized personnel
-3. Never done automatically by AI assistants
+**Blocked Actions (ALL ENVIRONMENTS):**
+- ❌ `railway up` - All deployment commands
+- ❌ `make deploy` - All deployment commands (any environment)
+- ❌ `railway domain` - Domain generation
+- ❌ `railway link` / `railway environment link` - Environment linking
+- ❌ All MCP deployment tools (deploy, deploy-template, create-environment)
+- ❌ All MCP modification tools (link-service, link-environment, set-variables, generate-domain, create-project-and-link)
 
-### Enabled Features
+**Why This Policy?**
+ALL deployments should be:
+1. Intentional and reviewed by a human
+2. Performed manually by authorized personnel
+3. NEVER done automatically by AI assistants
+4. Traceable and auditable
 
-The configuration pre-approves the following actions for all developers:
+### ✅ Allowed Actions (Read-Only)
+
+AI tools CAN perform read-only operations:
 
 **Railway CLI Commands:**
-- `railway logs`, `status`, `env`, `list`, `variables`, `whoami`
-- `railway link`, `up`, `domain`, `service`, `run`
+- `railway logs` - View deployment logs
+- `railway status` - Check deployment status
+- `railway variables` - List environment variables
+- `railway whoami` - Check authentication
 
 **Makefile Commands:**
-- `make deploy` (non-prod only)
-- `make logs`, `status`, `domain`
+- `make logs` - View logs
+- `make status` - Check status
+- `make variables` - List variables
 
-**Railway MCP Server Tools:**
-- Check Railway status
-- List services, variables, projects, deployments
-- Deploy to non-production environments
-- Link services
-- Set variables (non-production)
-- Get logs
-- Generate domains
-- Deploy from templates
+**Railway MCP Server Tools (Read-Only):**
+- `check-railway-status` - Check CLI status
+- `list-services` - List services
+- `list-variables` - View variables
+- `get-logs` - Fetch logs
+- `list-projects` - List projects
+- `list-deployments` - List deployments
 
 ### Files
 
 - `settings.json` - Project-wide settings (committed to git, shared with team)
-- `settings.local.json` - Personal settings (gitignored, not shared)
 
 ## For Developers
 
-### Deploying to Non-Production
-Claude Code can help you deploy to non-production environments:
+### Deploying (Manual Only)
+
+**ALL deployments MUST be done manually, outside of Claude Code:**
 ```bash
-make deploy              # Deploys to non-prod by default
-make deploy ENV=non-prod # Explicitly deploy to non-prod
+make deploy              # Deploy to non-prod (manual only)
+make deploy ENV=production  # Deploy to production (manual only)
 ```
 
-### Deploying to Production (Manual Only)
-If you need to deploy to production manually:
-1. Ensure you have proper authorization
-2. Use the Makefile: `make deploy ENV=production`
-3. Type "YES" to confirm when prompted
-4. Claude Code will not be able to perform this action
+### Using Claude Code for Development
 
-### Railway MCP Server
-The Railway MCP server is configured for this project, allowing Claude to:
-- View Railway project information
-- Deploy to non-production environments
-- Manage environment variables
-- View logs and deployment status
-
-All production-related MCP actions are blocked.
+Claude Code can help you with:
+- ✅ Code development and refactoring
+- ✅ Writing tests
+- ✅ Debugging issues
+- ✅ Viewing logs and status (read-only)
+- ✅ Documentation
+- ❌ **NO deployments** - all deployments must be done manually
+- ❌ **NO environment modifications** - no linking, variable changes, or domain generation
 
 ## Questions?
 
