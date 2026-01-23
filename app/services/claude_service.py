@@ -241,7 +241,11 @@ Return ONLY valid JSON in this exact format:
             if item_price is None:
                 continue  # Skip items without a price
 
-            unit_price = item_data.get("unit_price") or item_price
+            quantity = int(item_data.get("quantity", 1))
+            # Calculate unit_price if not provided by Claude
+            unit_price = item_data.get("unit_price")
+            if unit_price is None:
+                unit_price = item_price / quantity if quantity > 0 else item_price
 
             # Parse health score (can be null for non-food items)
             health_score_raw = item_data.get("health_score")
@@ -254,7 +258,7 @@ Return ONLY valid JSON in this exact format:
                 ExtractedItem(
                     item_name=item_data.get("item_name", "Unknown Item"),
                     item_price=float(item_price),
-                    quantity=int(item_data.get("quantity", 1)),
+                    quantity=quantity,
                     unit_price=float(unit_price),
                     category=category,
                     health_score=health_score,
