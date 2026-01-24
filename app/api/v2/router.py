@@ -9,24 +9,24 @@ from app.api.v1 import health, transactions, analytics, rate_limit, profile
 api_router = APIRouter()
 
 # Health check
-api_router.include_router(health.router, tags=["health"])
+api_router.include_router(health.router, tags=["v2 - health"])
 
 # Receipts - V2 using Gemini for categorization
-api_router.include_router(receipts.router, prefix="/receipts", tags=["receipts"])
+api_router.include_router(receipts.router, prefix="/receipts", tags=["v2 - receipts"])
 
 # Transactions - reuse from v1 (no LLM interaction)
 api_router.include_router(
-    transactions.router, prefix="/transactions", tags=["transactions"]
+    transactions.router, prefix="/transactions", tags=["v2 - transactions"]
 )
 
 # Analytics - reuse from v1 (no LLM interaction)
-api_router.include_router(analytics.router, prefix="/analytics", tags=["analytics"])
+api_router.include_router(analytics.router, prefix="/analytics", tags=["v2 - analytics"])
 
 # Chat - V2 using Gemini
-api_router.include_router(chat.router, prefix="/chat", tags=["chat"])
+api_router.include_router(chat.router, prefix="/chat", tags=["v2 - chat"])
 
 # Rate limit - reuse from v1 (no LLM interaction)
-api_router.include_router(rate_limit.router, prefix="/rate-limit", tags=["rate-limit"])
+api_router.include_router(rate_limit.router, prefix="/rate-limit", tags=["v2 - rate-limit"])
 
 # Profile - reuse from v1 (no LLM interaction)
-api_router.include_router(profile.router, prefix="/profile", tags=["profile"])
+api_router.include_router(profile.router, prefix="/profile", tags=["v2 - profile"])

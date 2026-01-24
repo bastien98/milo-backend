@@ -3,8 +3,8 @@ import logging
 from dataclasses import dataclass
 from typing import List, Optional
 
-import google.generativeai as genai
-from google.api_core import exceptions as google_exceptions
+from google import genai
+from google.genai import types
 
 from app.core.exceptions import GeminiAPIError
 from app.models.enums import Category
@@ -109,11 +109,7 @@ The "index" must match the position of the item in the input list (0-indexed).""
         self.api_key = api_key or settings.GEMINI_API_KEY
         if not self.api_key:
             raise ValueError("Gemini API key not configured")
-        genai.configure(api_key=self.api_key)
-        self.model = genai.GenerativeModel(
-            model_name=self.MODEL,
-            system_instruction=self.SYSTEM_PROMPT,
-        )
+        self.client = genai.Client(api_key=self.api_key)
 
     async def categorize_items(
         self, items: List[VeryfiLineItem], vendor_name: Optional[str] = None
@@ -140,9 +136,11 @@ The "index" must match the position of the item in the input list (0-indexed).""
             user_content = f"{store_line}Items:\n{items_text}"
 
             # Call Gemini API
-            response = self.model.generate_content(
-                f"Clean and categorize this receipt data:\n\n{user_content}",
-                generation_config=genai.GenerationConfig(
+            response = self.client.models.generate_content(
+                model=self.MODEL,
+                contents=f"Clean and categorize this receipt data:\n\n{user_content}",
+                config=types.GenerateContentConfig(
+                    system_instruction=self.SYSTEM_PROMPT,
                     max_output_tokens=self.MAX_TOKENS,
                     temperature=0.1,
                 ),
@@ -161,30 +159,6 @@ The "index" must match the position of the item in the input list (0-indexed).""
             categorized_items = self._build_categorized_items(items, categorizations)
             return CategorizationResult(store_name=cleaned_store_name, items=categorized_items)
 
-        except google_exceptions.InvalidArgument as e:
-            logger.error(f"Gemini API invalid argument: {e}")
-            raise GeminiAPIError(
-                "Gemini API invalid argument - check request format",
-                details={"error_type": "invalid_argument", "api_error": str(e)},
-            )
-        except google_exceptions.PermissionDenied as e:
-            logger.error(f"Gemini API permission denied: {e}")
-            raise GeminiAPIError(
-                "Gemini API permission denied - invalid or missing API key",
-                details={"error_type": "authentication", "api_error": str(e)},
-            )
-        except google_exceptions.ResourceExhausted as e:
-            logger.warning(f"Gemini API rate limit exceeded: {e}")
-            raise GeminiAPIError(
-                "Gemini API rate limit exceeded - please retry later",
-                details={"error_type": "rate_limit", "api_error": str(e)},
-            )
-        except google_exceptions.GoogleAPIError as e:
-            logger.error(f"Gemini API error: {e}")
-            raise GeminiAPIError(
-                f"Gemini API error: {str(e)}",
-                details={"error_type": "api_error", "api_error": str(e)},
-            )
         except json.JSONDecodeError as e:
             logger.error(f"Failed to parse Gemini response as JSON: {e}")
             raise GeminiAPIError(

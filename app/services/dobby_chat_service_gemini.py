@@ -3,8 +3,8 @@ from datetime import date, timedelta
 from typing import List, Optional, AsyncGenerator
 from collections import defaultdict
 
-import google.generativeai as genai
-from google.api_core import exceptions as google_exceptions
+from google import genai
+from google.genai import types
 from sqlalchemy import select, and_
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -62,11 +62,7 @@ You will receive the user's transaction data as context. Use it to give them gen
         self.api_key = api_key or settings.GEMINI_API_KEY
         if not self.api_key:
             raise ValueError("Gemini API key not configured")
-        genai.configure(api_key=self.api_key)
-        self.model = genai.GenerativeModel(
-            model_name=self.MODEL,
-            system_instruction=self.SYSTEM_PROMPT,
-        )
+        self.client = genai.Client(api_key=self.api_key)
 
     async def _get_user_transaction_context(
         self,
@@ -171,17 +167,14 @@ You will receive the user's transaction data as context. Use it to give them gen
             # Get user's transaction context
             context = await self._get_user_transaction_context(db, user_id)
 
-            # Build chat history for Gemini
-            history = []
+            # Build contents with conversation history
+            contents = []
 
             # Add conversation history if provided
             if conversation_history:
                 for msg in conversation_history:
                     role = "user" if msg.role == "user" else "model"
-                    history.append({"role": role, "parts": [msg.content]})
-
-            # Start chat with history
-            chat = self.model.start_chat(history=history)
+                    contents.append(types.Content(role=role, parts=[types.Part.from_text(text=msg.content)]))
 
             # Build user message with context
             user_content = f"""Here is my transaction data:
@@ -190,10 +183,14 @@ You will receive the user's transaction data as context. Use it to give them gen
 
 My question: {message}"""
 
+            contents.append(types.Content(role="user", parts=[types.Part.from_text(text=user_content)]))
+
             # Call Gemini API
-            response = chat.send_message(
-                user_content,
-                generation_config=genai.GenerationConfig(
+            response = self.client.models.generate_content(
+                model=self.MODEL,
+                contents=contents,
+                config=types.GenerateContentConfig(
+                    system_instruction=self.SYSTEM_PROMPT,
                     max_output_tokens=self.MAX_TOKENS,
                     temperature=0.7,
                 ),
@@ -201,26 +198,8 @@ My question: {message}"""
 
             return response.text
 
-        except google_exceptions.InvalidArgument as e:
-            logger.error(f"Gemini API invalid argument: {e}")
-            raise GeminiAPIError(
-                "Gemini API invalid argument - check request format",
-                details={"error_type": "invalid_argument", "api_error": str(e)},
-            )
-        except google_exceptions.PermissionDenied as e:
-            logger.error(f"Gemini API permission denied: {e}")
-            raise GeminiAPIError(
-                "Gemini API permission denied - invalid or missing API key",
-                details={"error_type": "authentication", "api_error": str(e)},
-            )
-        except google_exceptions.ResourceExhausted as e:
-            logger.warning(f"Gemini API rate limit exceeded: {e}")
-            raise GeminiAPIError(
-                "Gemini API rate limit exceeded - please retry later",
-                details={"error_type": "rate_limit", "api_error": str(e)},
-            )
-        except google_exceptions.GoogleAPIError as e:
-            logger.error(f"Gemini API error: {e}")
+        except Exception as e:
+            logger.exception(f"Gemini API error: {e}")
             raise GeminiAPIError(
                 f"Gemini API error: {str(e)}",
                 details={"error_type": "api_error", "api_error": str(e)},
@@ -241,17 +220,14 @@ My question: {message}"""
             # Get user's transaction context
             context = await self._get_user_transaction_context(db, user_id)
 
-            # Build chat history for Gemini
-            history = []
+            # Build contents with conversation history
+            contents = []
 
             # Add conversation history if provided
             if conversation_history:
                 for msg in conversation_history:
                     role = "user" if msg.role == "user" else "model"
-                    history.append({"role": role, "parts": [msg.content]})
-
-            # Start chat with history
-            chat = self.model.start_chat(history=history)
+                    contents.append(types.Content(role=role, parts=[types.Part.from_text(text=msg.content)]))
 
             # Build user message with context
             user_content = f"""Here is my transaction data:
@@ -260,40 +236,25 @@ My question: {message}"""
 
 My question: {message}"""
 
+            contents.append(types.Content(role="user", parts=[types.Part.from_text(text=user_content)]))
+
             # Call Gemini API with streaming
-            response = chat.send_message(
-                user_content,
-                generation_config=genai.GenerationConfig(
+            response = self.client.models.generate_content_stream(
+                model=self.MODEL,
+                contents=contents,
+                config=types.GenerateContentConfig(
+                    system_instruction=self.SYSTEM_PROMPT,
                     max_output_tokens=self.MAX_TOKENS,
                     temperature=0.7,
                 ),
-                stream=True,
             )
 
             for chunk in response:
                 if chunk.text:
                     yield chunk.text
 
-        except google_exceptions.InvalidArgument as e:
-            logger.error(f"Gemini API invalid argument: {e}")
-            raise GeminiAPIError(
-                "Gemini API invalid argument - check request format",
-                details={"error_type": "invalid_argument", "api_error": str(e)},
-            )
-        except google_exceptions.PermissionDenied as e:
-            logger.error(f"Gemini API permission denied: {e}")
-            raise GeminiAPIError(
-                "Gemini API permission denied - invalid or missing API key",
-                details={"error_type": "authentication", "api_error": str(e)},
-            )
-        except google_exceptions.ResourceExhausted as e:
-            logger.warning(f"Gemini API rate limit exceeded: {e}")
-            raise GeminiAPIError(
-                "Gemini API rate limit exceeded - please retry later",
-                details={"error_type": "rate_limit", "api_error": str(e)},
-            )
-        except google_exceptions.GoogleAPIError as e:
-            logger.error(f"Gemini API error: {e}")
+        except Exception as e:
+            logger.exception(f"Gemini API error: {e}")
             raise GeminiAPIError(
                 f"Gemini API error: {str(e)}",
                 details={"error_type": "api_error", "api_error": str(e)},
