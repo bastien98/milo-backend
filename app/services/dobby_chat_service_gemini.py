@@ -11,6 +11,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.config import get_settings
 from app.core.exceptions import GeminiAPIError
 from app.models.transaction import Transaction
+from app.models.user import User
+from app.models.user_profile import UserProfile
 from app.schemas.chat import ChatMessage
 
 settings = get_settings()
@@ -56,7 +58,42 @@ RESPONSE STYLE:
 - End with a helpful tip, fun observation, or follow-up question when appropriate
 - Keep it punchy - no one wants to read an essay about their grocery bill
 
-You will receive the user's transaction data as context. Use it to give them genuinely useful, entertaining insights!"""
+You will receive the user's profile information (name, etc.) and transaction data as context. Use this to personalize your responses and give them genuinely useful, entertaining insights!"""
+
+    async def _get_user_profile(
+        self,
+        db: AsyncSession,
+        user_id: str,
+    ) -> Optional[UserProfile]:
+        """Fetch the user's profile from the database.
+
+        Note: user_id here is the User.id (UUID), but UserProfile.user_id
+        references User.firebase_uid, so we need to join through User.
+        """
+        result = await db.execute(
+            select(UserProfile)
+            .join(User, User.firebase_uid == UserProfile.user_id)
+            .where(User.id == user_id)
+        )
+        return result.scalar_one_or_none()
+
+    def _build_profile_context(self, profile: Optional[UserProfile]) -> str:
+        """Build a context string with the user's profile data."""
+        if not profile:
+            return ""
+
+        profile_parts = []
+        if profile.first_name:
+            profile_parts.append(f"Name: {profile.first_name}")
+        if profile.last_name:
+            profile_parts.append(f"Last Name: {profile.last_name}")
+        if profile.gender and profile.gender.value != "prefer_not_to_say":
+            profile_parts.append(f"Gender: {profile.gender.value}")
+
+        if not profile_parts:
+            return ""
+
+        return "=== USER PROFILE ===\n" + "\n".join(profile_parts)
 
     def __init__(self, api_key: Optional[str] = None):
         self.api_key = api_key or settings.GEMINI_API_KEY
@@ -162,10 +199,14 @@ You will receive the user's transaction data as context. Use it to give them gen
     ) -> str:
         """
         Process a chat message and return a response (non-streaming).
+
         """
         try:
-            # Get user's transaction context
-            context = await self._get_user_transaction_context(db, user_id)
+            # Get user's profile and transaction context
+            profile = await self._get_user_profile(db, user_id)
+            profile_context = self._build_profile_context(profile)
+            logger.info(f"Profile for user {user_id}: {profile}, context: {profile_context}")
+            transaction_context = await self._get_user_transaction_context(db, user_id)
 
             # Build contents with conversation history
             contents = []
@@ -177,12 +218,22 @@ You will receive the user's transaction data as context. Use it to give them gen
                     contents.append(types.Content(role=role, parts=[types.Part.from_text(text=msg.content)]))
 
             # Build user message with context
-            user_content = f"""Here is my transaction data:
+            context_parts = []
+            if profile_context:
+                context_parts.append(profile_context)
+                logger.info(f"Including profile context: {profile_context[:100]}...")
+            else:
+                logger.warning(f"No profile context for user {user_id}")
+            context_parts.append(transaction_context)
+            full_context = "\n\n".join(context_parts)
 
-{context}
+            user_content = f"""Here is my data:
+
+{full_context}
 
 My question: {message}"""
 
+            logger.debug(f"Full user content length: {len(user_content)} chars")
             contents.append(types.Content(role="user", parts=[types.Part.from_text(text=user_content)]))
 
             # Call Gemini API
@@ -217,8 +268,11 @@ My question: {message}"""
         Yields text chunks as they are generated.
         """
         try:
-            # Get user's transaction context
-            context = await self._get_user_transaction_context(db, user_id)
+            # Get user's profile and transaction context
+            profile = await self._get_user_profile(db, user_id)
+            profile_context = self._build_profile_context(profile)
+            logger.info(f"Stream - Profile for user {user_id}: {profile}, context: {profile_context}")
+            transaction_context = await self._get_user_transaction_context(db, user_id)
 
             # Build contents with conversation history
             contents = []
@@ -230,9 +284,18 @@ My question: {message}"""
                     contents.append(types.Content(role=role, parts=[types.Part.from_text(text=msg.content)]))
 
             # Build user message with context
-            user_content = f"""Here is my transaction data:
+            context_parts = []
+            if profile_context:
+                context_parts.append(profile_context)
+                logger.info(f"Stream - Including profile context: {profile_context[:100]}...")
+            else:
+                logger.warning(f"Stream - No profile context for user {user_id}")
+            context_parts.append(transaction_context)
+            full_context = "\n\n".join(context_parts)
 
-{context}
+            user_content = f"""Here is my data:
+
+{full_context}
 
 My question: {message}"""
 

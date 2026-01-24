@@ -10,6 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.config import get_settings
 from app.core.exceptions import ClaudeAPIError
 from app.models.transaction import Transaction
+from app.models.user_profile import UserProfile
 from app.schemas.chat import ChatMessage
 
 settings = get_settings()
@@ -56,6 +57,35 @@ RESPONSE STYLE:
 - Keep it punchy - no one wants to read an essay about their grocery bill
 
 You will receive the user's transaction data as context. Use it to give them genuinely useful, entertaining insights!"""
+
+    async def _get_user_profile(
+        self,
+        db: AsyncSession,
+        user_id: str,
+    ) -> Optional[UserProfile]:
+        """Fetch the user's profile from the database."""
+        result = await db.execute(
+            select(UserProfile).where(UserProfile.user_id == user_id)
+        )
+        return result.scalar_one_or_none()
+
+    def _build_profile_context(self, profile: Optional[UserProfile]) -> str:
+        """Build a context string with the user's profile data."""
+        if not profile:
+            return ""
+
+        profile_parts = []
+        if profile.first_name:
+            profile_parts.append(f"Name: {profile.first_name}")
+        if profile.last_name:
+            profile_parts.append(f"Last Name: {profile.last_name}")
+        if profile.gender and profile.gender.value != "prefer_not_to_say":
+            profile_parts.append(f"Gender: {profile.gender.value}")
+
+        if not profile_parts:
+            return ""
+
+        return "=== USER PROFILE ===\n" + "\n".join(profile_parts)
 
     def __init__(self, api_key: Optional[str] = None):
         self.api_key = api_key or settings.ANTHROPIC_API_KEY
@@ -163,8 +193,10 @@ You will receive the user's transaction data as context. Use it to give them gen
         Process a chat message and return a response (non-streaming).
         """
         try:
-            # Get user's transaction context
-            context = await self._get_user_transaction_context(db, user_id)
+            # Get user's profile and transaction context
+            profile = await self._get_user_profile(db, user_id)
+            profile_context = self._build_profile_context(profile)
+            transaction_context = await self._get_user_transaction_context(db, user_id)
 
             # Build messages
             messages = []
@@ -178,9 +210,15 @@ You will receive the user's transaction data as context. Use it to give them gen
                     })
 
             # Add current user message with context
-            user_content = f"""Here is my transaction data:
+            context_parts = []
+            if profile_context:
+                context_parts.append(profile_context)
+            context_parts.append(transaction_context)
+            full_context = "\n\n".join(context_parts)
 
-{context}
+            user_content = f"""Here is my data:
+
+{full_context}
 
 My question: {message}"""
 
@@ -242,8 +280,10 @@ My question: {message}"""
         Yields text chunks as they are generated.
         """
         try:
-            # Get user's transaction context
-            context = await self._get_user_transaction_context(db, user_id)
+            # Get user's profile and transaction context
+            profile = await self._get_user_profile(db, user_id)
+            profile_context = self._build_profile_context(profile)
+            transaction_context = await self._get_user_transaction_context(db, user_id)
 
             # Build messages
             messages = []
@@ -257,9 +297,15 @@ My question: {message}"""
                     })
 
             # Add current user message with context
-            user_content = f"""Here is my transaction data:
+            context_parts = []
+            if profile_context:
+                context_parts.append(profile_context)
+            context_parts.append(transaction_context)
+            full_context = "\n\n".join(context_parts)
 
-{context}
+            user_content = f"""Here is my data:
+
+{full_context}
 
 My question: {message}"""
 
