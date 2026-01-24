@@ -63,3 +63,39 @@ class ReceiptDeleteResponse(BaseModel):
     message: str
     deleted_receipt_id: str
     rate_limit: ReceiptRateLimitInfo
+
+
+# Grouped receipts (transactions grouped by store + date)
+
+
+class GroupedReceiptTransaction(BaseModel):
+    """A single transaction within a grouped receipt."""
+
+    item_name: str
+    item_price: float
+    quantity: int
+    unit_price: Optional[float]
+    category: Category
+    health_score: Optional[int]
+
+
+class GroupedReceipt(BaseModel):
+    """Transactions grouped by store + date."""
+
+    receipt_id: str
+    store_name: str
+    receipt_date: date
+    total_amount: float
+    items_count: int
+    average_health_score: Optional[float]
+    transactions: List[GroupedReceiptTransaction]
+
+
+class GroupedReceiptListResponse(BaseModel):
+    """Paginated response for grouped receipts."""
+
+    receipts: List[GroupedReceipt]
+    total: int
+    page: int
+    page_size: int
+    total_pages: int

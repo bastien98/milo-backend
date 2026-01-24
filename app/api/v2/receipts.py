@@ -1,4 +1,6 @@
+from collections import defaultdict
 from datetime import date
+from math import ceil
 from typing import Optional
 
 from fastapi import APIRouter, Depends, UploadFile, File, Query
@@ -7,7 +9,13 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.api.deps import get_db, get_current_db_user
 from app.core.security import get_current_user, FirebaseUser
 from app.models.user import User
-from app.schemas.receipt import ReceiptUploadResponse, ReceiptResponse, ReceiptListResponse
+from app.schemas.receipt import (
+    ReceiptUploadResponse,
+    ReceiptResponse,
+    GroupedReceipt,
+    GroupedReceiptTransaction,
+    GroupedReceiptListResponse,
+)
 from app.services.receipt_processor_v2 import ReceiptProcessorV2
 from app.services.rate_limit_service import RateLimitService
 from app.db.repositories.receipt_repo import ReceiptRepository
@@ -73,27 +81,91 @@ async def upload_receipt(
     return result
 
 
-@router.get("", response_model=ReceiptListResponse)
+@router.get("", response_model=GroupedReceiptListResponse)
 async def list_receipts(
+    start_date: Optional[date] = Query(None, description="Filter by start date (YYYY-MM-DD)"),
+    end_date: Optional[date] = Query(None, description="Filter by end date (YYYY-MM-DD)"),
+    store_name: Optional[str] = Query(None, description="Filter by store name"),
     page: int = Query(1, ge=1),
     page_size: int = Query(20, ge=1, le=100),
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_db_user),
 ):
-    """List all receipts for the current user."""
-    receipt_repo = ReceiptRepository(db)
+    """
+    List transactions grouped by store + date.
 
-    receipts, total = await receipt_repo.get_by_user(
+    Returns receipts (transaction groups) sorted by date descending.
+    Each receipt contains all transactions for a specific store on a specific date.
+    """
+    transaction_repo = TransactionRepository(db)
+
+    # Fetch all matching transactions (without pagination - we paginate groups)
+    transactions, _ = await transaction_repo.get_by_user(
         user_id=current_user.id,
-        page=page,
-        page_size=page_size,
+        start_date=start_date,
+        end_date=end_date,
+        store_name=store_name,
+        page=1,
+        page_size=10000,  # Large enough to get all for grouping
     )
 
-    return ReceiptListResponse(
-        receipts=[ReceiptResponse.model_validate(r) for r in receipts],
+    # Group transactions by store_name + date
+    groups: dict[tuple[str, date], list] = defaultdict(list)
+    for txn in transactions:
+        key = (txn.store_name, txn.date)
+        groups[key].append(txn)
+
+    # Build grouped receipts
+    grouped_receipts = []
+    for (store, txn_date), txns in groups.items():
+        total_amount = sum(t.item_price for t in txns)
+        items_count = len(txns)
+
+        # Calculate average health score (excluding nulls)
+        health_scores = [t.health_score for t in txns if t.health_score is not None]
+        average_health_score = (
+            round(sum(health_scores) / len(health_scores), 1)
+            if health_scores
+            else None
+        )
+
+        grouped_receipts.append(
+            GroupedReceipt(
+                receipt_id=f"{store}-{txn_date.isoformat()}",
+                store_name=store,
+                receipt_date=txn_date,
+                total_amount=round(total_amount, 2),
+                items_count=items_count,
+                average_health_score=average_health_score,
+                transactions=[
+                    GroupedReceiptTransaction(
+                        item_name=t.item_name,
+                        item_price=t.item_price,
+                        quantity=t.quantity,
+                        unit_price=t.unit_price,
+                        category=t.category,
+                        health_score=t.health_score,
+                    )
+                    for t in txns
+                ],
+            )
+        )
+
+    # Sort by date descending (most recent first)
+    grouped_receipts.sort(key=lambda r: r.receipt_date, reverse=True)
+
+    # Apply pagination to grouped receipts
+    total = len(grouped_receipts)
+    total_pages = ceil(total / page_size) if total > 0 else 1
+    offset = (page - 1) * page_size
+    paginated_receipts = grouped_receipts[offset : offset + page_size]
+
+    return GroupedReceiptListResponse(
+        receipts=paginated_receipts,
         total=total,
         page=page,
         page_size=page_size,
+        total_pages=total_pages,
     )
 
 
