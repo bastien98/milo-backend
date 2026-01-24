@@ -302,6 +302,76 @@ class AnalyticsService:
             period_type=period_type,
         )
 
+    async def get_store_spending_trends(
+        self,
+        user_id: str,
+        store_name: str,
+        period_type: str,  # "week", "month", "year"
+        num_periods: int = 6,
+    ) -> TrendsResponse:
+        """Get spending trends over time for a specific store."""
+        trends = []
+        today = date.today()
+
+        for i in range(num_periods - 1, -1, -1):
+            if period_type == "week":
+                # Start of week (Monday)
+                start = today - timedelta(days=today.weekday() + 7 * i)
+                end = start + timedelta(days=6)
+            elif period_type == "month":
+                # Start of month
+                month = today.month - i
+                year = today.year
+                while month <= 0:
+                    month += 12
+                    year -= 1
+                start = date(year, month, 1)
+                # End of month
+                if month == 12:
+                    end = date(year + 1, 1, 1) - timedelta(days=1)
+                else:
+                    end = date(year, month + 1, 1) - timedelta(days=1)
+            else:  # year
+                year = today.year - i
+                start = date(year, 1, 1)
+                end = date(year, 12, 31)
+
+            # Get transactions for period filtered by store
+            result = await self.db.execute(
+                select(Transaction).where(
+                    and_(
+                        Transaction.user_id == user_id,
+                        Transaction.store_name == store_name,
+                        Transaction.date >= start,
+                        Transaction.date <= end,
+                    )
+                )
+            )
+            transactions = list(result.scalars().all())
+
+            # Calculate totals
+            total_spend = sum(t.item_price for t in transactions)
+
+            # Calculate average health score for this period
+            period_health_scores = [t.health_score for t in transactions if t.health_score is not None]
+            period_avg_health = round(sum(period_health_scores) / len(period_health_scores), 2) if period_health_scores else None
+
+            trends.append(
+                SpendingTrend(
+                    period=self._format_period(start, end),
+                    start_date=start,
+                    end_date=end,
+                    total_spend=round(total_spend, 2),
+                    transaction_count=len(transactions),
+                    average_health_score=period_avg_health,
+                )
+            )
+
+        return TrendsResponse(
+            trends=trends,
+            period_type=period_type,
+        )
+
     def _format_period(self, start_date: date, end_date: date) -> str:
         """Format a date range as a period string."""
         if start_date.year == end_date.year:

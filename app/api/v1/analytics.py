@@ -146,6 +146,36 @@ async def get_store_breakdown(
     )
 
 
+@router.get(
+    "/stores/{store_name}/trends",
+    response_model=TrendsResponse,
+    summary="Get spending trends for a specific store",
+    description="Returns spending trends filtered for a specific store over multiple time periods. "
+    "The total_spend, transaction_count, and average_health_score only include transactions from the specified store.",
+)
+async def get_store_trends(
+    store_name: str,
+    period_type: str = Query("month", description="Period type: week, month, year"),
+    num_periods: int = Query(6, ge=1, le=52, description="Number of periods to return"),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_db_user),
+):
+    """
+    Get spending trends for a specific store.
+
+    Returns historical spending data for the specified store over multiple time periods.
+    Useful for visualizing spending patterns at a particular store over time.
+    Returns an empty trends array if the store doesn't exist or has no transactions.
+    """
+    analytics = AnalyticsService(db)
+    return await analytics.get_store_spending_trends(
+        user_id=current_user.id,
+        store_name=store_name,
+        period_type=period_type,
+        num_periods=num_periods,
+    )
+
+
 @router.get("/trends", response_model=TrendsResponse)
 async def get_trends(
     period_type: str = Query("month", description="Period type: week, month, year"),
