@@ -34,6 +34,9 @@ async def upload_receipt(
     Rate limited to 15 uploads per month.
 
     Returns the extracted data synchronously.
+
+    **Duplicate Detection**: If Veryfi detects this receipt was previously processed,
+    returns `is_duplicate: true` with empty `receipt_id` and no transactions saved.
     """
     # Check receipt upload rate limit
     rate_limit_service = RateLimitService(db)

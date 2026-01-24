@@ -82,6 +82,28 @@ class ReceiptProcessorV2:
                 file_content, filename
             )
 
+            # Step 4b: Check for duplicate - if duplicate, don't save to database
+            if veryfi_result.is_duplicate:
+                # Delete the receipt record we created
+                await self.receipt_repo.delete(receipt.id)
+
+                # Veryfi only provides boolean duplicate flag, no similarity score
+                warning_msg = "Duplicate receipt detected - not saved"
+
+                # Return response with duplicate flag but no saved data
+                return ReceiptUploadResponse(
+                    receipt_id="",
+                    status=ReceiptStatus.COMPLETED,
+                    store_name=veryfi_result.vendor_name,
+                    receipt_date=veryfi_result.date,
+                    total_amount=veryfi_result.total,
+                    items_count=0,
+                    transactions=[],
+                    warnings=[warning_msg],
+                    is_duplicate=True,
+                    duplicate_score=veryfi_result.duplicate_score,
+                )
+
             # Step 5: Categorize items and clean data via Gemini
             categorization_result = await self.categorization_service.categorize_items(
                 veryfi_result.line_items,
@@ -94,7 +116,7 @@ class ReceiptProcessorV2:
             # Use override date if provided, otherwise use Veryfi's extracted date
             final_date = receipt_date_override or veryfi_result.date
 
-            # Step 6: Create transactions
+            # Step 6: Create transactions (only for non-duplicate receipts)
             transactions = []
             for item in categorization_result.items:
                 transaction = await self.transaction_repo.create(
@@ -146,6 +168,8 @@ class ReceiptProcessorV2:
                 items_count=len(transactions),
                 transactions=transactions,
                 warnings=warnings,
+                is_duplicate=veryfi_result.is_duplicate,
+                duplicate_score=veryfi_result.duplicate_score,
             )
 
         except Exception as e:

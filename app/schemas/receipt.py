@@ -24,6 +24,8 @@ class ReceiptUploadResponse(BaseModel):
     items_count: int = 0
     transactions: List[ExtractedItem] = []
     warnings: List[str] = []
+    is_duplicate: bool = False
+    duplicate_score: Optional[float] = None  # Reserved for future use (Veryfi doesn't provide score)
 
 
 class ReceiptResponse(BaseModel):

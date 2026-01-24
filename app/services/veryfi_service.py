@@ -35,6 +35,8 @@ class VeryfiExtractionResult:
     line_items: List[VeryfiLineItem]
     currency_code: Optional[str]
     ocr_text: Optional[str]
+    is_duplicate: bool = False
+    duplicate_score: Optional[float] = None  # Similarity score (0.0-1.0)
 
 
 class VeryfiService:
@@ -181,6 +183,18 @@ class VeryfiService:
         if not vendor_name:
             vendor_name = data.get("vendor_name")
 
+        # Veryfi duplicate detection - only provides boolean flag, no similarity score
+        is_duplicate = data.get("is_duplicate", False)
+        original_doc_id = data.get("duplicate_of")  # Integer ID of original document
+
+        if is_duplicate:
+            logger.info(
+                f"Duplicate detected! Original document ID: {original_doc_id}"
+            )
+
+        # Note: Veryfi doesn't provide a similarity score, only boolean is_duplicate
+        duplicate_score = None
+
         return VeryfiExtractionResult(
             vendor_name=vendor_name,
             date=receipt_date,
@@ -190,4 +204,6 @@ class VeryfiService:
             line_items=line_items,
             currency_code=data.get("currency_code"),
             ocr_text=data.get("ocr_text"),
+            is_duplicate=is_duplicate,
+            duplicate_score=duplicate_score,
         )

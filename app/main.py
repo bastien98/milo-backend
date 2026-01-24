@@ -55,13 +55,14 @@ Receipt scanning and expense tracking API powered by Veryfi OCR and AI.
 
 ### API Versions
 
-| Version | AI Provider | Status | Base Path |
-|---------|-------------|--------|-----------|
-| **v2** | Google Gemini 2.0 Flash | **Recommended** | `/api/v2` |
-| v1 | Anthropic Claude | Legacy | `/api/v1` |
+| Version | Receipts | Chat | Status | Base Path |
+|---------|----------|------|--------|-----------|
+| **v2** | Gemini 2.0 Flash | Gemini 2.0 Flash | **Recommended** | `/api/v2` |
+| v1 | Gemini 2.0 Flash | Claude | Legacy | `/api/v1` |
 
 ### Features
 - **Receipt Upload**: Scan receipts using Veryfi OCR with AI categorization & health scoring
+- **Duplicate Detection**: Automatically detects and rejects duplicate receipts - not saved to database
 - **Transaction Management**: View, edit, and delete transactions
 - **Analytics**: Spending summaries, category breakdowns, and trends
 - **AI Chat**: Ask questions about your spending with Dobby AI assistant
@@ -86,8 +87,8 @@ Authorization: Bearer <firebase_id_token>
         {"name": "v2 - rate-limit", "description": "⏱️ Rate limit status"},
         {"name": "v2 - profile", "description": "👤 User profile management"},
         {"name": "v2 - health", "description": "🏥 Health checks"},
-        # V1 API (Claude) - Legacy
-        {"name": "receipts", "description": "Upload and manage receipts (Claude AI - Legacy)"},
+        # V1 API - Legacy
+        {"name": "receipts", "description": "Upload and manage receipts (Gemini AI)"},
         {"name": "chat", "description": "AI-powered spending assistant (Claude AI - Legacy)"},
         {"name": "transactions", "description": "View and manage transactions"},
         {"name": "analytics", "description": "Spending analytics and insights"},

@@ -9,7 +9,7 @@ from app.api.deps import get_db, get_current_db_user
 from app.core.security import get_current_user, FirebaseUser
 from app.models.user import User
 from app.schemas.receipt import ReceiptUploadResponse, ReceiptResponse, ReceiptListResponse
-from app.services.receipt_processor_v3 import ReceiptProcessorV3
+from app.services.receipt_processor_v2 import ReceiptProcessorV2
 from app.services.rate_limit_service import RateLimitService
 from app.db.repositories.receipt_repo import ReceiptRepository
 from app.db.repositories.transaction_repo import TransactionRepository
@@ -96,16 +96,19 @@ async def upload_receipt(
     firebase_user: FirebaseUser = Depends(get_current_user),
 ):
     """
-    Upload and process a receipt using Veryfi OCR and Claude categorization.
+    Upload and process a receipt using Veryfi OCR and Gemini categorization.
 
     This endpoint uses:
     - Veryfi API for OCR extraction (item names, prices, quantities)
-    - Claude API for categorization and health scoring
+    - Gemini API for categorization and health scoring
 
     Rate limited to 15 uploads per month.
 
     Accepts PDF, JPG, or PNG files.
     Returns the extracted data synchronously.
+
+    **Duplicate Detection**: If Veryfi detects this receipt was previously processed,
+    returns `is_duplicate: true` with empty `receipt_id` and no transactions saved.
     """
     # Check receipt upload rate limit
     rate_limit_service = RateLimitService(db)
@@ -130,7 +133,7 @@ async def upload_receipt(
     receipt_repo = ReceiptRepository(db)
     transaction_repo = TransactionRepository(db)
 
-    processor = ReceiptProcessorV3(
+    processor = ReceiptProcessorV2(
         receipt_repo=receipt_repo,
         transaction_repo=transaction_repo,
     )
