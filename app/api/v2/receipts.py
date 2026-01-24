@@ -92,10 +92,13 @@ async def list_receipts(
     current_user: User = Depends(get_current_db_user),
 ):
     """
-    List transactions grouped by store + date.
+    List receipts with their transactions.
 
-    Returns receipts (transaction groups) sorted by date descending.
-    Each receipt contains all transactions for a specific store on a specific date.
+    Returns receipts sorted by date descending.
+    Each receipt contains all transactions from a single uploaded receipt.
+
+    The receipt_id returned is the actual database UUID, which can be used
+    directly with DELETE /api/v2/receipts/{receipt_id}.
     """
     transaction_repo = TransactionRepository(db)
 
@@ -109,15 +112,21 @@ async def list_receipts(
         page_size=10000,  # Large enough to get all for grouping
     )
 
-    # Group transactions by store_name + date
-    groups: dict[tuple[str, date], list] = defaultdict(list)
+    # Group transactions by receipt_id (the actual database UUID)
+    # Skip transactions without a receipt_id (shouldn't happen for receipt-based transactions)
+    groups: dict[str, list] = defaultdict(list)
     for txn in transactions:
-        key = (txn.store_name, txn.date)
-        groups[key].append(txn)
+        if txn.receipt_id:
+            groups[txn.receipt_id].append(txn)
 
     # Build grouped receipts
     grouped_receipts = []
-    for (store, txn_date), txns in groups.items():
+    for receipt_id, txns in groups.items():
+        # Get store_name and date from the first transaction (should be consistent within a receipt)
+        first_txn = txns[0]
+        store = first_txn.store_name
+        txn_date = first_txn.date
+
         total_amount = sum(t.item_price for t in txns)
         items_count = len(txns)
 
@@ -131,7 +140,7 @@ async def list_receipts(
 
         grouped_receipts.append(
             GroupedReceipt(
-                receipt_id=f"{store}-{txn_date.isoformat()}",
+                receipt_id=receipt_id,
                 store_name=store,
                 receipt_date=txn_date,
                 total_amount=round(total_amount, 2),

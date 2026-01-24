@@ -80,9 +80,13 @@ class GroupedReceiptTransaction(BaseModel):
 
 
 class GroupedReceipt(BaseModel):
-    """Transactions grouped by store + date."""
+    """Transactions grouped by receipt.
 
-    receipt_id: str
+    The receipt_id is the actual database UUID, which can be used
+    directly with DELETE /api/v2/receipts/{receipt_id}.
+    """
+
+    receipt_id: str  # UUID from the receipts table
     store_name: str
     receipt_date: date
     total_amount: float
