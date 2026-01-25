@@ -61,3 +61,21 @@ class SpendingTrend(BaseModel):
 class TrendsResponse(BaseModel):
     trends: List[SpendingTrend]
     period_type: str  # "week", "month", "year"
+
+
+class PeriodMetadata(BaseModel):
+    """Lightweight metadata for a single period."""
+    period: str
+    period_start: date
+    period_end: date
+    total_spend: float
+    receipt_count: int
+    store_count: int
+    transaction_count: int
+    average_health_score: Optional[float] = None
+
+
+class PeriodsResponse(BaseModel):
+    """Response containing all periods with basic metadata."""
+    periods: List[PeriodMetadata]
+    total_periods: int

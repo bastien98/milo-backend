@@ -3,7 +3,7 @@ from datetime import date, timedelta
 from typing import Optional
 from collections import defaultdict
 
-from sqlalchemy import select, and_
+from sqlalchemy import select, and_, func, case, cast, Date
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.transaction import Transaction
@@ -15,6 +15,8 @@ from app.schemas.analytics import (
     StoreBreakdown,
     SpendingTrend,
     TrendsResponse,
+    PeriodMetadata,
+    PeriodsResponse,
 )
 
 logger = logging.getLogger(__name__)
@@ -379,6 +381,104 @@ class AnalyticsService:
         return TrendsResponse(
             trends=trends,
             period_type=period_type,
+        )
+
+    async def get_periods_metadata(
+        self,
+        user_id: str,
+        period_type: str = "month",  # "week", "month", "year"
+        num_periods: int = 52,
+    ) -> PeriodsResponse:
+        """
+        Get lightweight metadata for all periods with data.
+
+        Uses a single optimized SQL query with GROUP BY for performance.
+        Returns periods sorted by most recent first.
+        """
+        today = date.today()
+
+        # Calculate the earliest date we should look back to
+        if period_type == "week":
+            earliest_start = today - timedelta(weeks=num_periods)
+            trunc_interval = 'week'
+        elif period_type == "month":
+            # Go back num_periods months
+            month = today.month - num_periods
+            year = today.year
+            while month <= 0:
+                month += 12
+                year -= 1
+            earliest_start = date(year, month, 1)
+            trunc_interval = 'month'
+        else:  # year
+            earliest_start = date(today.year - num_periods, 1, 1)
+            trunc_interval = 'year'
+
+        # Build the aggregation query using date_trunc for period grouping
+        period_start_col = func.date_trunc(trunc_interval, Transaction.date).label('period_start')
+
+        query = (
+            select(
+                period_start_col,
+                func.sum(Transaction.item_price).label('total_spend'),
+                func.count(func.distinct(Transaction.receipt_id)).label('receipt_count'),
+                func.count(func.distinct(Transaction.store_name)).label('store_count'),
+                func.count().label('transaction_count'),
+                func.avg(
+                    case(
+                        (Transaction.health_score.isnot(None), Transaction.health_score),
+                        else_=None
+                    )
+                ).label('avg_health_score'),
+            )
+            .where(
+                and_(
+                    Transaction.user_id == user_id,
+                    Transaction.date >= earliest_start,
+                )
+            )
+            .group_by(period_start_col)
+            .having(func.sum(Transaction.item_price) > 0)
+            .order_by(period_start_col.desc())
+            .limit(num_periods)
+        )
+
+        result = await self.db.execute(query)
+        rows = result.all()
+
+        periods = []
+        for row in rows:
+            period_start_date = row.period_start.date() if hasattr(row.period_start, 'date') else row.period_start
+
+            # Calculate period end date
+            if period_type == "week":
+                period_end_date = period_start_date + timedelta(days=6)
+            elif period_type == "month":
+                if period_start_date.month == 12:
+                    period_end_date = date(period_start_date.year + 1, 1, 1) - timedelta(days=1)
+                else:
+                    period_end_date = date(period_start_date.year, period_start_date.month + 1, 1) - timedelta(days=1)
+            else:  # year
+                period_end_date = date(period_start_date.year, 12, 31)
+
+            avg_health = round(float(row.avg_health_score), 2) if row.avg_health_score is not None else None
+
+            periods.append(
+                PeriodMetadata(
+                    period=self._format_period(period_start_date, period_end_date),
+                    period_start=period_start_date,
+                    period_end=period_end_date,
+                    total_spend=round(float(row.total_spend), 2),
+                    receipt_count=row.receipt_count,
+                    store_count=row.store_count,
+                    transaction_count=row.transaction_count,
+                    average_health_score=avg_health,
+                )
+            )
+
+        return PeriodsResponse(
+            periods=periods,
+            total_periods=len(periods),
         )
 
     def _format_period(self, start_date: date, end_date: date) -> str:
