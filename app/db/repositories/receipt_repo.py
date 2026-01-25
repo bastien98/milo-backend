@@ -1,7 +1,7 @@
 from datetime import date, datetime
 from typing import Optional, List
 
-from sqlalchemy import select, func
+from sqlalchemy import select, func, and_
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.receipt import Receipt
@@ -34,22 +34,35 @@ class ReceiptRepository:
     async def get_by_user(
         self,
         user_id: str,
+        start_date: Optional[date] = None,
+        end_date: Optional[date] = None,
         page: int = 1,
         page_size: int = 20,
     ) -> tuple[List[Receipt], int]:
-        """Get receipts for a user with pagination."""
-        # Get total count
+        """Get receipts for a user with optional date filtering and pagination.
+
+        Filters by receipt_date (the date on the receipt), not created_at.
+        """
+        # Build filter conditions
+        conditions = [Receipt.user_id == user_id]
+
+        if start_date:
+            conditions.append(Receipt.receipt_date >= start_date)
+        if end_date:
+            conditions.append(Receipt.receipt_date <= end_date)
+
+        # Get total count with filters applied
         count_result = await self.db.execute(
-            select(func.count(Receipt.id)).where(Receipt.user_id == user_id)
+            select(func.count(Receipt.id)).where(and_(*conditions))
         )
         total = count_result.scalar() or 0
 
-        # Get paginated results
+        # Get paginated results with filters applied
         offset = (page - 1) * page_size
         result = await self.db.execute(
             select(Receipt)
-            .where(Receipt.user_id == user_id)
-            .order_by(Receipt.created_at.desc())
+            .where(and_(*conditions))
+            .order_by(Receipt.receipt_date.desc(), Receipt.created_at.desc())
             .offset(offset)
             .limit(page_size)
         )

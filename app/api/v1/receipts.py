@@ -22,16 +22,25 @@ router = APIRouter()
 
 @router.get("", response_model=ReceiptListResponse)
 async def list_receipts(
+    start_date: Optional[date] = Query(None, description="Filter by start date (receipt date)"),
+    end_date: Optional[date] = Query(None, description="Filter by end date (receipt date)"),
     page: int = Query(1, ge=1),
     page_size: int = Query(20, ge=1, le=100),
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_db_user),
 ):
-    """List all receipts for the current user."""
+    """
+    List receipts for the current user with optional date filtering.
+
+    Filters by receipt_date (the date on the receipt), not created_at (upload date).
+    Date filtering is inclusive: receipts where start_date <= receipt_date <= end_date.
+    """
     receipt_repo = ReceiptRepository(db)
 
     receipts, total = await receipt_repo.get_by_user(
         user_id=current_user.id,
+        start_date=start_date,
+        end_date=end_date,
         page=page,
         page_size=page_size,
     )
