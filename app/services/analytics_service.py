@@ -251,60 +251,84 @@ class AnalyticsService:
         period_type: str,  # "week", "month", "year"
         num_periods: int = 12,
     ) -> TrendsResponse:
-        """Get spending trends over time."""
-        trends = []
+        """
+        Get spending trends over time.
+
+        Only returns periods that have actual transactions (no empty periods).
+        """
         today = date.today()
 
-        for i in range(num_periods - 1, -1, -1):
-            if period_type == "week":
-                # Start of week (Monday)
-                start = today - timedelta(days=today.weekday() + 7 * i)
-                end = start + timedelta(days=6)
-            elif period_type == "month":
-                # Start of month
-                month = today.month - i
-                year = today.year
-                while month <= 0:
-                    month += 12
-                    year -= 1
-                start = date(year, month, 1)
-                # End of month
-                if month == 12:
-                    end = date(year + 1, 1, 1) - timedelta(days=1)
-                else:
-                    end = date(year, month + 1, 1) - timedelta(days=1)
-            else:  # year
-                year = today.year - i
-                start = date(year, 1, 1)
-                end = date(year, 12, 31)
+        # Calculate the earliest date we should look back to
+        if period_type == "week":
+            earliest_start = today - timedelta(weeks=num_periods)
+            trunc_interval = 'week'
+        elif period_type == "month":
+            month = today.month - num_periods
+            year = today.year
+            while month <= 0:
+                month += 12
+                year -= 1
+            earliest_start = date(year, month, 1)
+            trunc_interval = 'month'
+        else:  # year
+            earliest_start = date(today.year - num_periods, 1, 1)
+            trunc_interval = 'year'
 
-            # Get transactions for period
-            result = await self.db.execute(
-                select(Transaction).where(
-                    and_(
-                        Transaction.user_id == user_id,
-                        Transaction.date >= start,
-                        Transaction.date <= end,
+        # Use GROUP BY to only get periods with data (single efficient query)
+        period_start_col = func.date_trunc(trunc_interval, Transaction.date).label('period_start')
+
+        query = (
+            select(
+                period_start_col,
+                func.sum(Transaction.item_price).label('total_spend'),
+                func.count().label('transaction_count'),
+                func.avg(
+                    case(
+                        (Transaction.health_score.isnot(None), Transaction.health_score),
+                        else_=None
                     )
+                ).label('avg_health_score'),
+            )
+            .where(
+                and_(
+                    Transaction.user_id == user_id,
+                    Transaction.date >= earliest_start,
                 )
             )
-            transactions = list(result.scalars().all())
+            .group_by(period_start_col)
+            .having(func.count() > 0)
+            .order_by(period_start_col.asc())  # Oldest first for chart display
+            .limit(num_periods)
+        )
 
-            # Calculate totals (item_price already represents the line total from receipt)
-            total_spend = sum(t.item_price for t in transactions)
+        result = await self.db.execute(query)
+        rows = result.all()
 
-            # Calculate average health score for this period
-            period_health_scores = [t.health_score for t in transactions if t.health_score is not None]
-            period_avg_health = round(sum(period_health_scores) / len(period_health_scores), 2) if period_health_scores else None
+        trends = []
+        for row in rows:
+            period_start_date = row.period_start.date() if hasattr(row.period_start, 'date') else row.period_start
+
+            # Calculate period end date
+            if period_type == "week":
+                period_end_date = period_start_date + timedelta(days=6)
+            elif period_type == "month":
+                if period_start_date.month == 12:
+                    period_end_date = date(period_start_date.year + 1, 1, 1) - timedelta(days=1)
+                else:
+                    period_end_date = date(period_start_date.year, period_start_date.month + 1, 1) - timedelta(days=1)
+            else:  # year
+                period_end_date = date(period_start_date.year, 12, 31)
+
+            avg_health = round(float(row.avg_health_score), 2) if row.avg_health_score is not None else None
 
             trends.append(
                 SpendingTrend(
-                    period=self._format_period(start, end),
-                    start_date=start,
-                    end_date=end,
-                    total_spend=round(total_spend, 2),
-                    transaction_count=len(transactions),
-                    average_health_score=period_avg_health,
+                    period=self._format_period(period_start_date, period_end_date),
+                    start_date=period_start_date,
+                    end_date=period_end_date,
+                    total_spend=round(float(row.total_spend), 2),
+                    transaction_count=row.transaction_count,
+                    average_health_score=avg_health,
                 )
             )
 
@@ -320,61 +344,85 @@ class AnalyticsService:
         period_type: str,  # "week", "month", "year"
         num_periods: int = 6,
     ) -> TrendsResponse:
-        """Get spending trends over time for a specific store."""
-        trends = []
+        """
+        Get spending trends over time for a specific store.
+
+        Only returns periods that have actual transactions (no empty periods).
+        """
         today = date.today()
 
-        for i in range(num_periods - 1, -1, -1):
-            if period_type == "week":
-                # Start of week (Monday)
-                start = today - timedelta(days=today.weekday() + 7 * i)
-                end = start + timedelta(days=6)
-            elif period_type == "month":
-                # Start of month
-                month = today.month - i
-                year = today.year
-                while month <= 0:
-                    month += 12
-                    year -= 1
-                start = date(year, month, 1)
-                # End of month
-                if month == 12:
-                    end = date(year + 1, 1, 1) - timedelta(days=1)
-                else:
-                    end = date(year, month + 1, 1) - timedelta(days=1)
-            else:  # year
-                year = today.year - i
-                start = date(year, 1, 1)
-                end = date(year, 12, 31)
+        # Calculate the earliest date we should look back to
+        if period_type == "week":
+            earliest_start = today - timedelta(weeks=num_periods)
+            trunc_interval = 'week'
+        elif period_type == "month":
+            month = today.month - num_periods
+            year = today.year
+            while month <= 0:
+                month += 12
+                year -= 1
+            earliest_start = date(year, month, 1)
+            trunc_interval = 'month'
+        else:  # year
+            earliest_start = date(today.year - num_periods, 1, 1)
+            trunc_interval = 'year'
 
-            # Get transactions for period filtered by store
-            result = await self.db.execute(
-                select(Transaction).where(
-                    and_(
-                        Transaction.user_id == user_id,
-                        Transaction.store_name == store_name,
-                        Transaction.date >= start,
-                        Transaction.date <= end,
+        # Use GROUP BY to only get periods with data (single efficient query)
+        period_start_col = func.date_trunc(trunc_interval, Transaction.date).label('period_start')
+
+        query = (
+            select(
+                period_start_col,
+                func.sum(Transaction.item_price).label('total_spend'),
+                func.count().label('transaction_count'),
+                func.avg(
+                    case(
+                        (Transaction.health_score.isnot(None), Transaction.health_score),
+                        else_=None
                     )
+                ).label('avg_health_score'),
+            )
+            .where(
+                and_(
+                    Transaction.user_id == user_id,
+                    Transaction.store_name == store_name,
+                    Transaction.date >= earliest_start,
                 )
             )
-            transactions = list(result.scalars().all())
+            .group_by(period_start_col)
+            .having(func.count() > 0)
+            .order_by(period_start_col.asc())  # Oldest first for chart display
+            .limit(num_periods)
+        )
 
-            # Calculate totals
-            total_spend = sum(t.item_price for t in transactions)
+        result = await self.db.execute(query)
+        rows = result.all()
 
-            # Calculate average health score for this period
-            period_health_scores = [t.health_score for t in transactions if t.health_score is not None]
-            period_avg_health = round(sum(period_health_scores) / len(period_health_scores), 2) if period_health_scores else None
+        trends = []
+        for row in rows:
+            period_start_date = row.period_start.date() if hasattr(row.period_start, 'date') else row.period_start
+
+            # Calculate period end date
+            if period_type == "week":
+                period_end_date = period_start_date + timedelta(days=6)
+            elif period_type == "month":
+                if period_start_date.month == 12:
+                    period_end_date = date(period_start_date.year + 1, 1, 1) - timedelta(days=1)
+                else:
+                    period_end_date = date(period_start_date.year, period_start_date.month + 1, 1) - timedelta(days=1)
+            else:  # year
+                period_end_date = date(period_start_date.year, 12, 31)
+
+            avg_health = round(float(row.avg_health_score), 2) if row.avg_health_score is not None else None
 
             trends.append(
                 SpendingTrend(
-                    period=self._format_period(start, end),
-                    start_date=start,
-                    end_date=end,
-                    total_spend=round(total_spend, 2),
-                    transaction_count=len(transactions),
-                    average_health_score=period_avg_health,
+                    period=self._format_period(period_start_date, period_end_date),
+                    start_date=period_start_date,
+                    end_date=period_end_date,
+                    total_spend=round(float(row.total_spend), 2),
+                    transaction_count=row.transaction_count,
+                    average_health_score=avg_health,
                 )
             )
 

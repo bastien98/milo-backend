@@ -157,12 +157,13 @@ async def get_store_breakdown(
     response_model=TrendsResponse,
     summary="Get spending trends for a specific store",
     description="Returns spending trends filtered for a specific store over multiple time periods. "
+    "Only periods with actual transactions are included (no empty periods). "
     "The total_spend, transaction_count, and average_health_score only include transactions from the specified store.",
 )
 async def get_store_trends(
     store_name: str,
     period_type: str = Query("month", description="Period type: week, month, year"),
-    num_periods: int = Query(6, ge=1, le=52, description="Number of periods to return"),
+    num_periods: int = Query(6, ge=1, le=52, description="Maximum number of periods to return"),
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_db_user),
 ):
@@ -171,6 +172,11 @@ async def get_store_trends(
 
     Returns historical spending data for the specified store over multiple time periods.
     Useful for visualizing spending patterns at a particular store over time.
+
+    Only periods with actual transactions are returned - periods with no transactions
+    for this store are excluded. Results are sorted oldest first for chart display.
+    The num_periods parameter acts as a maximum limit, not an exact count.
+
     Returns an empty trends array if the store doesn't exist or has no transactions.
     """
     analytics = AnalyticsService(db)
@@ -182,18 +188,29 @@ async def get_store_trends(
     )
 
 
-@router.get("/trends", response_model=TrendsResponse)
+@router.get(
+    "/trends",
+    response_model=TrendsResponse,
+    summary="Get spending trends over time",
+    description="Returns spending trends over multiple time periods. "
+    "Only periods with actual transactions are included (no empty periods).",
+)
 async def get_trends(
     period_type: str = Query("month", description="Period type: week, month, year"),
-    num_periods: int = Query(12, ge=1, le=52, description="Number of periods to return"),
+    num_periods: int = Query(12, ge=1, le=52, description="Maximum number of periods to return"),
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_db_user),
 ):
     """
     Get spending trends over time.
 
-    Returns historical spending data for the specified number of periods.
+    Returns historical spending data for the user over multiple time periods.
     Useful for visualizing spending patterns over time.
+
+    Only periods with actual transactions are returned - empty periods are excluded.
+    For example, if a user has transactions in January and March but not February,
+    only January and March will be returned. Results are sorted oldest first for
+    chart display. The num_periods parameter acts as a maximum limit, not an exact count.
     """
     analytics = AnalyticsService(db)
     return await analytics.get_spending_trends(
