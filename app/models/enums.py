@@ -17,6 +17,7 @@ class Category(str, Enum):
     FROZEN = "Frozen"
     BABY_KIDS = "Baby & Kids"
     PET_SUPPLIES = "Pet Supplies"
+    TOBACCO = "Tobacco"
     OTHER = "Other"
 
 

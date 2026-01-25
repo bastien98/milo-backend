@@ -74,6 +74,7 @@ For each item, provide:
    - "Frozen" (frozen foods not in other categories)
    - "Baby & Kids" (diapers, baby food, kids products)
    - "Pet Supplies" (pet food, pet accessories)
+   - "Tobacco" (cigarettes, rolling tobacco, lighters, rolling papers, filters, e-cigarettes, vapes)
    - "Other" (anything that doesn't fit above)
 
 3. health_score: Rate the healthiness of each item from 0 to 5:
