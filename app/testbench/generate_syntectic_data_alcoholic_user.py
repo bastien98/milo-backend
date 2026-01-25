@@ -11,7 +11,6 @@ END_DATE = datetime(2026, 1, 24)
 STORES = ["COLRUYT", "DELHAIZE", "CARREFOUR", "ALDI", "LIDL", "SPAR"]
 
 # Product Catalog mapped to EXACT requested Categories
-# Format: (Name, Price, Health Score)
 PRODUCTS = {
     "ALCOHOL": [
         ("JUPILER BAK 24X25CL", 14.99, 0), ("STELLA ARTOIS 24X25CL", 15.49, 0),
@@ -78,24 +77,20 @@ def generate_user_data():
     current_date = START_DATE
     total_days = (END_DATE - START_DATE).days
 
-    # Categories for mix (excluding ALCOHOL/TOBACCO handled separately)
+    # Categories for mix (excluding ALCOHOL/TOBACCO)
     food_cats = [
         "SNACKS_SWEETS", "READY_MEALS", "DRINKS_SOFT_SODA", "DRINKS_WATER",
         "MEAT_FISH", "DAIRY_EGGS", "FRESH_PRODUCE", "HOUSEHOLD",
         "BAKERY", "PANTRY", "PERSONAL_CARE", "FROZEN"
     ]
 
-    # Evolution Weights (Indices align with food_cats list)
-    # 0:Snacks, 1:Ready, 2:Soda, 3:Water, 4:Meat, 5:Dairy, 6:Fresh, 7:Household, 8:Bakery, 9:Pantry, 10:Personal, 11:Frozen
-
-    # Start: High Unhealthy
+    # Evolution Weights
     w_start = np.array([
         0.25, 0.20, 0.15, 0.02,  # Snacks, Ready, Soda, Water
         0.05, 0.05, 0.05, 0.05,  # Meat, Dairy, Fresh, Household
         0.08, 0.05, 0.03, 0.02   # Bakery, Pantry, Personal, Frozen
     ])
 
-    # End: High Healthy
     w_end = np.array([
         0.05, 0.05, 0.05, 0.10,  # Snacks, Ready, Soda, Water
         0.15, 0.15, 0.25, 0.05,  # Meat, Dairy, Fresh, Household
@@ -106,23 +101,20 @@ def generate_user_data():
         days_passed = (current_date - START_DATE).days
         progress = days_passed / total_days if total_days > 0 else 0
 
-        # Shopping frequency ~40%
         if random.random() < 0.4:
             receipt_id = str(uuid.uuid4())
             store = random.choice(STORES)
 
             basket_items = []
 
-            # Alcohol & Tobacco Logic (decreasing with progress)
+            # Alcohol & Tobacco Logic
             unhealthy_prob = 0.9 - (0.6 * progress)
 
-            # Alcohol
             if random.random() < unhealthy_prob:
                 num = random.randint(1, 3)
                 for _ in range(num):
                     basket_items.append(("ALCOHOL", random.choice(PRODUCTS["ALCOHOL"])))
 
-            # Tobacco
             if random.random() < unhealthy_prob * 0.8:
                 num = random.randint(1, 2)
                 for _ in range(num):
@@ -140,7 +132,7 @@ def generate_user_data():
                     item = random.choice(PRODUCTS[cat])
                     basket_items.append((cat, item))
 
-            # Create Records
+            # Timestamps
             shop_time = current_date + timedelta(hours=random.randint(8, 20), minutes=random.randint(0, 59))
             upload_time = shop_time + timedelta(minutes=random.randint(10, 120))
             process_time = upload_time + timedelta(seconds=random.randint(30, 300))
@@ -191,3 +183,25 @@ def generate_user_data():
 df_receipts, df_transactions = generate_user_data()
 df_receipts.to_csv('receipts.csv', index=False)
 df_transactions.to_csv('transactions.csv', index=False)
+
+# Validation of Dates
+df_receipts['receipt_date'] = pd.to_datetime(df_receipts['receipt_date'])
+df_receipts['month'] = df_receipts['receipt_date'].dt.month
+df_receipts['day'] = df_receipts['receipt_date'].dt.day
+
+# Check for "Day 31" in months with 30 days
+invalid_30_days = df_receipts[
+    (df_receipts['day'] == 31) &
+    (df_receipts['month'].isin([4, 6, 9, 11]))
+    ]
+
+# Check for Feb issues (2025 not leap)
+invalid_feb = df_receipts[
+    (df_receipts['month'] == 2) &
+    (df_receipts['day'] > 28)
+    ]
+
+print(f"Invalid dates found (30-day months having 31): {len(invalid_30_days)}")
+print(f"Invalid dates found (Feb > 28): {len(invalid_feb)}")
+print("Generated Data Head:")
+print(df_transactions.head())

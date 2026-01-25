@@ -72,11 +72,17 @@ async def get_summary(
     Shows total spending, transaction count, and per-store breakdown
     with visit counts and percentages.
     """
+    logger.info(
+        f"Analytics summary raw params: period={period}, "
+        f"start_date={start_date} (type={type(start_date).__name__ if start_date else 'None'}), "
+        f"end_date={end_date} (type={type(end_date).__name__ if end_date else 'None'})"
+    )
+
     start, end = get_period_dates(period, start_date, end_date)
 
     logger.info(
         f"Analytics summary request: user_id={current_user.id}, "
-        f"period={period}, start_date={start}, end_date={end}"
+        f"period={period}, computed_start={start}, computed_end={end}"
     )
 
     analytics = AnalyticsService(db)

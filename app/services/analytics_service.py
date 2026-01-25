@@ -32,27 +32,32 @@ class AnalyticsService:
     ) -> PeriodSummary:
         """Get spending summary for a period with store breakdown."""
         logger.info(
-            f"Analytics query: user_id={user_id}, start_date={start_date}, end_date={end_date}"
+            f"Analytics query: user_id={user_id}, start_date={start_date} (type={type(start_date).__name__}), "
+            f"end_date={end_date} (type={type(end_date).__name__})"
         )
 
         # Get all transactions in period
-        result = await self.db.execute(
-            select(Transaction).where(
-                and_(
-                    Transaction.user_id == user_id,
-                    Transaction.date >= start_date,
-                    Transaction.date <= end_date,
-                )
+        query = select(Transaction).where(
+            and_(
+                Transaction.user_id == user_id,
+                Transaction.date >= start_date,
+                Transaction.date <= end_date,
             )
         )
+        result = await self.db.execute(query)
         transactions = list(result.scalars().all())
 
         logger.info(
-            f"Analytics found {len(transactions)} transactions for user_id={user_id}"
+            f"Analytics found {len(transactions)} transactions for user_id={user_id} "
+            f"in date range {start_date} to {end_date}"
         )
         if transactions:
             dates = [t.date for t in transactions]
-            logger.debug(f"Transaction dates: {dates}")
+            unique_receipt_ids = set(t.receipt_id for t in transactions if t.receipt_id)
+            logger.debug(
+                f"Transaction dates: min={min(dates)}, max={max(dates)}, "
+                f"unique_receipts={len(unique_receipt_ids)}"
+            )
 
         # Calculate totals (item_price already represents the line total from receipt)
         total_spend = sum(t.item_price for t in transactions)
@@ -73,11 +78,15 @@ class AnalyticsService:
         stores = []
         for store_name, data in store_data.items():
             percentage = (data["amount"] / total_spend * 100) if total_spend > 0 else 0
+            visit_count = len(data["receipt_ids"])
+            logger.debug(
+                f"Store '{store_name}': visits={visit_count}, receipt_ids={data['receipt_ids']}"
+            )
             stores.append(
                 StoreSpending(
                     store_name=store_name,
                     amount_spent=round(data["amount"], 2),
-                    store_visits=len(data["receipt_ids"]),
+                    store_visits=visit_count,
                     percentage=round(percentage, 1),
                 )
             )
