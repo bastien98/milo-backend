@@ -110,8 +110,8 @@ class ReceiptProcessorV2:
                 vendor_name=veryfi_result.vendor_name,
             )
 
-            # Use cleaned store name from Gemini
-            cleaned_store_name = categorization_result.store_name or "Unknown"
+            # Use cleaned store name from Gemini (always lowercase for consistency)
+            cleaned_store_name = (categorization_result.store_name or "Unknown").lower()
 
             # Use override date if provided, otherwise use Veryfi's extracted date
             final_date = receipt_date_override or veryfi_result.date

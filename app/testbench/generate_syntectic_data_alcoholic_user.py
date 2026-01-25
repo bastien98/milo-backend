@@ -8,9 +8,10 @@ from datetime import datetime, timedelta
 USER_ID = "66dd1d99-4282-434c-8228-ee5b99623aae"
 START_DATE = datetime(2025, 1, 1)
 END_DATE = datetime(2026, 1, 24)
-STORES = ["COLRUYT", "DELHAIZE", "CARREFOUR", "ALDI", "LIDL", "SPAR"]
+# Stores are already lowercase here, but the code now enforces it during generation
+STORES = ["colruyt", "delhaize", "carrefour", "aldi", "lidl", "spar"]
 
-# Product Catalog mapped to EXACT requested Categories
+# Product Catalog
 PRODUCTS = {
     "ALCOHOL": [
         ("JUPILER BAK 24X25CL", 14.99, 0), ("STELLA ARTOIS 24X25CL", 15.49, 0),
@@ -73,29 +74,17 @@ PRODUCTS = {
 def generate_user_data():
     receipts_list = []
     transactions_list = []
-
     current_date = START_DATE
     total_days = (END_DATE - START_DATE).days
 
-    # Categories for mix (excluding ALCOHOL/TOBACCO)
     food_cats = [
         "SNACKS_SWEETS", "READY_MEALS", "DRINKS_SOFT_SODA", "DRINKS_WATER",
         "MEAT_FISH", "DAIRY_EGGS", "FRESH_PRODUCE", "HOUSEHOLD",
         "BAKERY", "PANTRY", "PERSONAL_CARE", "FROZEN"
     ]
 
-    # Evolution Weights
-    w_start = np.array([
-        0.25, 0.20, 0.15, 0.02,  # Snacks, Ready, Soda, Water
-        0.05, 0.05, 0.05, 0.05,  # Meat, Dairy, Fresh, Household
-        0.08, 0.05, 0.03, 0.02   # Bakery, Pantry, Personal, Frozen
-    ])
-
-    w_end = np.array([
-        0.05, 0.05, 0.05, 0.10,  # Snacks, Ready, Soda, Water
-        0.15, 0.15, 0.25, 0.05,  # Meat, Dairy, Fresh, Household
-        0.05, 0.05, 0.03, 0.02   # Bakery, Pantry, Personal, Frozen
-    ])
+    w_start = np.array([0.25, 0.20, 0.15, 0.02, 0.05, 0.05, 0.05, 0.05, 0.08, 0.05, 0.03, 0.02])
+    w_end = np.array([0.05, 0.05, 0.05, 0.10, 0.15, 0.15, 0.25, 0.05, 0.05, 0.05, 0.03, 0.02])
 
     while current_date <= END_DATE:
         days_passed = (current_date - START_DATE).days
@@ -103,24 +92,20 @@ def generate_user_data():
 
         if random.random() < 0.4:
             receipt_id = str(uuid.uuid4())
-            store = random.choice(STORES)
+            # Enforce lowercase on store selection
+            store = random.choice(STORES).lower()
 
             basket_items = []
-
-            # Alcohol & Tobacco Logic
             unhealthy_prob = 0.9 - (0.6 * progress)
 
             if random.random() < unhealthy_prob:
-                num = random.randint(1, 3)
-                for _ in range(num):
+                for _ in range(random.randint(1, 3)):
                     basket_items.append(("ALCOHOL", random.choice(PRODUCTS["ALCOHOL"])))
 
             if random.random() < unhealthy_prob * 0.8:
-                num = random.randint(1, 2)
-                for _ in range(num):
+                for _ in range(random.randint(1, 2)):
                     basket_items.append(("TOBACCO", random.choice(PRODUCTS["TOBACCO"])))
 
-            # General Items Logic
             current_weights = (1 - progress) * w_start + progress * w_end
             current_weights /= current_weights.sum()
 
@@ -129,10 +114,8 @@ def generate_user_data():
 
             for cat in chosen_cats:
                 if PRODUCTS[cat]:
-                    item = random.choice(PRODUCTS[cat])
-                    basket_items.append((cat, item))
+                    basket_items.append((cat, random.choice(PRODUCTS[cat])))
 
-            # Timestamps
             shop_time = current_date + timedelta(hours=random.randint(8, 20), minutes=random.randint(0, 59))
             upload_time = shop_time + timedelta(minutes=random.randint(10, 120))
             process_time = upload_time + timedelta(seconds=random.randint(30, 300))
@@ -140,9 +123,7 @@ def generate_user_data():
             receipt_total = 0.0
 
             for category, (name, price, base_health) in basket_items:
-                quantity = 1
-                if category == "ALCOHOL" and random.random() < 0.2: quantity = 2
-
+                quantity = 2 if category == "ALCOHOL" and random.random() < 0.2 else 1
                 line_total = price * quantity
                 receipt_total += line_total
 
@@ -150,7 +131,7 @@ def generate_user_data():
                     "id": str(uuid.uuid4()),
                     "user_id": USER_ID,
                     "receipt_id": receipt_id,
-                    "store_name": store,
+                    "store_name": store, # Lowercase enforced
                     "item_name": name,
                     "item_price": round(line_total, 2),
                     "quantity": quantity,
@@ -158,7 +139,7 @@ def generate_user_data():
                     "category": category,
                     "date": current_date.strftime("%Y-%m-%d"),
                     "created_at": shop_time.strftime("%Y-%m-%d %H:%M:%S.%f") + " +00:00",
-                    "health_score": int(base_health) if base_health is not None else 0
+                    "health_score": int(base_health)
                 })
 
             receipts_list.append({
@@ -169,7 +150,7 @@ def generate_user_data():
                 "file_size_bytes": random.randint(50000, 2000000),
                 "status": "COMPLETED",
                 "error_message": None,
-                "store_name": store,
+                "store_name": store, # Lowercase enforced
                 "receipt_date": current_date.strftime("%Y-%m-%d"),
                 "total_amount": round(receipt_total, 2),
                 "created_at": upload_time.strftime("%Y-%m-%d %H:%M:%S.%f") + " +00:00",
@@ -180,28 +161,10 @@ def generate_user_data():
 
     return pd.DataFrame(receipts_list), pd.DataFrame(transactions_list)
 
+# Generate and Save
 df_receipts, df_transactions = generate_user_data()
 df_receipts.to_csv('receipts.csv', index=False)
 df_transactions.to_csv('transactions.csv', index=False)
 
-# Validation of Dates
-df_receipts['receipt_date'] = pd.to_datetime(df_receipts['receipt_date'])
-df_receipts['month'] = df_receipts['receipt_date'].dt.month
-df_receipts['day'] = df_receipts['receipt_date'].dt.day
-
-# Check for "Day 31" in months with 30 days
-invalid_30_days = df_receipts[
-    (df_receipts['day'] == 31) &
-    (df_receipts['month'].isin([4, 6, 9, 11]))
-    ]
-
-# Check for Feb issues (2025 not leap)
-invalid_feb = df_receipts[
-    (df_receipts['month'] == 2) &
-    (df_receipts['day'] > 28)
-    ]
-
-print(f"Invalid dates found (30-day months having 31): {len(invalid_30_days)}")
-print(f"Invalid dates found (Feb > 28): {len(invalid_feb)}")
-print("Generated Data Head:")
-print(df_transactions.head())
+print("Sample of generated store names:")
+print(df_receipts['store_name'].unique())
