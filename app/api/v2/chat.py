@@ -9,6 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_db, get_current_db_user
 from app.config import get_settings
+from app.db.session import async_session_maker
 from app.models.user import User
 from app.schemas.chat import ChatRequest, ChatResponse
 from app.services.dobby_chat_service_gemini import DobbyChatServiceGemini
@@ -99,39 +100,49 @@ async def chat(
 
 
 async def stream_response(
-    db: AsyncSession,
     user_id: str,
     message: str,
     conversation_history,
-    increment_callback: Optional[Callable[[], Awaitable[None]]] = None,
+    firebase_uid: str,
 ) -> AsyncGenerator[str, None]:
-    """Generate Server-Sent Events for streaming chat response."""
-    try:
-        chat_service = DobbyChatServiceGemini()
-        async for chunk in chat_service.chat_stream(
-            db=db,
-            user_id=user_id,
-            message=message,
-            conversation_history=conversation_history,
-        ):
-            # Format as SSE data event
-            data = json.dumps({"type": "text", "content": chunk})
-            yield f"data: {data}\n\n"
+    """
+    Generate Server-Sent Events for streaming chat response.
 
-        # Increment rate limit counter on successful completion
-        if increment_callback:
-            await increment_callback()
+    IMPORTANT: This function manages its own database session because FastAPI's
+    dependency injection lifecycle ends when StreamingResponse is returned,
+    not when the stream completes. Managing the session here prevents connection leaks.
+    """
+    async with async_session_maker() as db:
+        try:
+            # Check and increment rate limit within our own session
+            rate_limit_service = RateLimitService(db)
+            rate_status = await rate_limit_service.check_rate_limit(firebase_uid)
 
-        # Send done event
-        yield f"data: {json.dumps({'type': 'done'})}\n\n"
+            chat_service = DobbyChatServiceGemini()
+            async for chunk in chat_service.chat_stream(
+                db=db,
+                user_id=user_id,
+                message=message,
+                conversation_history=conversation_history,
+            ):
+                # Format as SSE data event
+                data = json.dumps({"type": "text", "content": chunk})
+                yield f"data: {data}\n\n"
 
-    except GeminiAPIError as e:
-        error_data = json.dumps({"type": "error", "error": str(e.message)})
-        yield f"data: {error_data}\n\n"
-    except Exception as e:
-        logger.exception(f"Streaming chat error: {e}")
-        error_data = json.dumps({"type": "error", "error": "Failed to process chat request"})
-        yield f"data: {error_data}\n\n"
+            # Increment rate limit counter on successful completion
+            await rate_status.increment_on_success()
+            await db.commit()
+
+            # Send done event
+            yield f"data: {json.dumps({'type': 'done'})}\n\n"
+
+        except GeminiAPIError as e:
+            error_data = json.dumps({"type": "error", "error": str(e.message)})
+            yield f"data: {error_data}\n\n"
+        except Exception as e:
+            logger.exception(f"Streaming chat error: {e}")
+            error_data = json.dumps({"type": "error", "error": "Failed to process chat request"})
+            yield f"data: {error_data}\n\n"
 
 
 @router.post("/stream")
@@ -156,7 +167,7 @@ async def chat_stream(
     - X-RateLimit-Remaining: Messages remaining in current period
     - X-RateLimit-Reset: Unix timestamp when the rate limit resets
     """
-    # Check rate limit
+    # Check rate limit (initial check only - actual increment happens in stream_response)
     rate_limit_service = RateLimitService(db)
     rate_status = await rate_limit_service.check_rate_limit(current_user.firebase_uid)
 
@@ -179,13 +190,15 @@ async def chat_stream(
         **build_rate_limit_headers(rate_status),
     }
 
+    # NOTE: stream_response manages its own database session because FastAPI's
+    # dependency injection lifecycle ends when StreamingResponse is returned,
+    # not when the stream completes. This prevents connection pool exhaustion.
     return StreamingResponse(
         stream_response(
-            db=db,
             user_id=str(current_user.id),
             message=request.message,
             conversation_history=request.conversation_history,
-            increment_callback=rate_status.increment_on_success,
+            firebase_uid=current_user.firebase_uid,
         ),
         media_type="text/event-stream",
         headers=headers,
@@ -259,12 +272,13 @@ async def chat_test_stream(
     if not user:
         raise HTTPException(status_code=404, detail="No users found in database")
 
+    # NOTE: stream_response manages its own database session
     return StreamingResponse(
         stream_response(
-            db=db,
             user_id=str(user.id),
             message=request.message,
             conversation_history=request.conversation_history,
+            firebase_uid=user.firebase_uid,
         ),
         media_type="text/event-stream",
         headers={
