@@ -48,3 +48,5 @@ firebase-service-account.json
 
 # Claude Code local settings (personal, not shared)
 .claude/settings.local.json
+
+BACKEND_CONTEXT.txt
