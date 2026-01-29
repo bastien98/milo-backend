@@ -72,6 +72,7 @@ class PeriodMetadata(BaseModel):
     receipt_count: int
     store_count: int
     transaction_count: int
+    total_items: int
     average_health_score: Optional[float] = None
 
 

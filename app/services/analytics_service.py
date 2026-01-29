@@ -472,6 +472,7 @@ class AnalyticsService:
                 func.count(func.distinct(Transaction.receipt_id)).label('receipt_count'),
                 func.count(func.distinct(Transaction.store_name)).label('store_count'),
                 func.count().label('transaction_count'),
+                func.sum(Transaction.quantity).label('total_items'),
                 func.avg(
                     case(
                         (Transaction.health_score.isnot(None), Transaction.health_score),
@@ -520,6 +521,7 @@ class AnalyticsService:
                     receipt_count=row.receipt_count,
                     store_count=row.store_count,
                     transaction_count=row.transaction_count,
+                    total_items=row.total_items,
                     average_health_score=avg_health,
                 )
             )
