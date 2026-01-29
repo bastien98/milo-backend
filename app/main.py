@@ -33,6 +33,8 @@ logging.getLogger("httpx").setLevel(logging.WARNING)
 logging.getLogger("httpcore").setLevel(logging.WARNING)
 logging.getLogger("google").setLevel(logging.WARNING)
 logging.getLogger("firebase_admin").setLevel(logging.WARNING)
+logging.getLogger("multipart").setLevel(logging.WARNING)
+logging.getLogger("multipart.multipart").setLevel(logging.WARNING)
 
 
 @asynccontextmanager
