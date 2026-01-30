@@ -2,16 +2,45 @@ import pandas as pd
 import numpy as np
 import uuid
 import random
+import os
 from datetime import datetime, timedelta
 
-# User and Configuration
-USER_ID = "66dd1d99-4282-434c-8228-ee5b99623aae"
-START_DATE = datetime(2025, 1, 1)
-END_DATE = datetime(2026, 1, 24)
-# Stores are already lowercase here, but the code now enforces it during generation
-STORES = ["colruyt", "delhaize", "carrefour", "aldi", "lidl", "spar"]
+# ==========================================
+# CONFIGURATION
+# ==========================================
 
-# Product Catalog
+# 1. User Input for USER_ID
+print("--- Configuration ---")
+user_input_id = input("Enter User ID: ").strip()
+
+if user_input_id:
+    USER_ID = user_input_id
+else:
+    # Throw an exception if no input is provided
+    raise ValueError("User ID cannot be empty. Please run the script again and provide a valid ID.")
+
+print(f"Using User ID: {USER_ID}\n")
+
+# 2. Timeframe Configuration
+START_DATE = datetime(2024, 1, 1)
+END_DATE = datetime(2026, 1, 30)
+
+# 3. Frequency Configuration
+AVG_RECEIPTS_PER_MONTH = 50 # How many times the user shops per month on average
+
+# 4. Store Configuration
+STORES = [
+    "colruyt", "delhaize", "carrefour", "aldi", "lidl", "spar",
+    "albert heijn", "bio-planet", "okay",
+    "jumbo", "intermarché", "cora", "match", "louis delhaize"
+]
+
+# 5. Output Configuration
+OUTPUT_FOLDER = USER_ID  # Folder name will be the USER_ID
+
+# ==========================================
+# PRODUCT CATALOG
+# ==========================================
 PRODUCTS = {
     "ALCOHOL": [
         ("JUPILER BAK 24X25CL", 14.99, 0), ("STELLA ARTOIS 24X25CL", 15.49, 0),
@@ -77,6 +106,9 @@ def generate_user_data():
     current_date = START_DATE
     total_days = (END_DATE - START_DATE).days
 
+    # Calculate daily probability based on monthly average (assuming ~30.44 days/month)
+    daily_prob = AVG_RECEIPTS_PER_MONTH / 30.44
+
     food_cats = [
         "SNACKS_SWEETS", "READY_MEALS", "DRINKS_SOFT_SODA", "DRINKS_WATER",
         "MEAT_FISH", "DAIRY_EGGS", "FRESH_PRODUCE", "HOUSEHOLD",
@@ -86,11 +118,15 @@ def generate_user_data():
     w_start = np.array([0.25, 0.20, 0.15, 0.02, 0.05, 0.05, 0.05, 0.05, 0.08, 0.05, 0.03, 0.02])
     w_end = np.array([0.05, 0.05, 0.05, 0.10, 0.15, 0.15, 0.25, 0.05, 0.05, 0.05, 0.03, 0.02])
 
+    print(f"Generating data from {START_DATE.date()} to {END_DATE.date()}...")
+    print(f"Targeting ~{AVG_RECEIPTS_PER_MONTH} receipts/month (Daily prob: {daily_prob:.2f})")
+
     while current_date <= END_DATE:
         days_passed = (current_date - START_DATE).days
         progress = days_passed / total_days if total_days > 0 else 0
 
-        if random.random() < 0.4:
+        # Use the calculated daily probability
+        if random.random() < daily_prob:
             receipt_id = str(uuid.uuid4())
             # Enforce lowercase on store selection
             store = random.choice(STORES).lower()
@@ -131,7 +167,7 @@ def generate_user_data():
                     "id": str(uuid.uuid4()),
                     "user_id": USER_ID,
                     "receipt_id": receipt_id,
-                    "store_name": store, # Lowercase enforced
+                    "store_name": store,
                     "item_name": name,
                     "item_price": round(line_total, 2),
                     "quantity": quantity,
@@ -150,7 +186,7 @@ def generate_user_data():
                 "file_size_bytes": random.randint(50000, 2000000),
                 "status": "COMPLETED",
                 "error_message": None,
-                "store_name": store, # Lowercase enforced
+                "store_name": store,
                 "receipt_date": current_date.strftime("%Y-%m-%d"),
                 "total_amount": round(receipt_total, 2),
                 "created_at": upload_time.strftime("%Y-%m-%d %H:%M:%S.%f") + " +00:00",
@@ -161,10 +197,22 @@ def generate_user_data():
 
     return pd.DataFrame(receipts_list), pd.DataFrame(transactions_list)
 
-# Generate and Save
+# Generate Data
 df_receipts, df_transactions = generate_user_data()
-df_receipts.to_csv('receipts.csv', index=False)
-df_transactions.to_csv('transactions.csv', index=False)
 
+# Ensure Output Directory Exists
+if not os.path.exists(OUTPUT_FOLDER):
+    os.makedirs(OUTPUT_FOLDER)
+    print(f"Created folder: {OUTPUT_FOLDER}")
+
+# Save Files to the User Folder
+receipts_path = os.path.join(OUTPUT_FOLDER, 'receipts.csv')
+transactions_path = os.path.join(OUTPUT_FOLDER, 'transactions.csv')
+
+df_receipts.to_csv(receipts_path, index=False)
+df_transactions.to_csv(transactions_path, index=False)
+
+print(f"Files saved successfully in '{OUTPUT_FOLDER}/'")
+print(f"Total Receipts Generated: {len(df_receipts)}")
 print("Sample of generated store names:")
 print(df_receipts['store_name'].unique())
