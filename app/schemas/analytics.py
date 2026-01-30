@@ -47,6 +47,8 @@ class StoreBreakdown(BaseModel):
     store_visits: int
     categories: List[CategorySpending]
     average_health_score: Optional[float] = None  # Average health score at this store (0-5)
+    total_items: int = 0  # Sum of all item quantities for this store in the period
+    average_item_price: Optional[float] = None  # total_store_spend / total_items
 
 
 class SpendingTrend(BaseModel):
@@ -80,3 +82,104 @@ class PeriodsResponse(BaseModel):
     """Response containing all periods with basic metadata."""
     periods: List[PeriodMetadata]
     total_periods: int
+
+
+# ============== Aggregate Analytics Schemas ==============
+
+class AggregateTotals(BaseModel):
+    """Total values across the aggregate period."""
+    total_spend: float
+    total_transactions: int
+    total_receipts: int
+    total_items: int
+
+
+class AggregateAverages(BaseModel):
+    """Average values across the aggregate period."""
+    average_spend_per_period: float
+    average_transaction_value: float
+    average_item_price: float
+    average_health_score: Optional[float] = None
+    average_receipts_per_period: float
+    average_transactions_per_period: float
+    average_items_per_receipt: float
+
+
+class PeriodExtreme(BaseModel):
+    """Represents an extreme (max/min) spending period."""
+    period: str
+    period_start: date
+    period_end: date
+    total_spend: float
+
+
+class HealthScoreExtreme(BaseModel):
+    """Represents an extreme (highest/lowest) health score period."""
+    period: str
+    period_start: date
+    period_end: date
+    average_health_score: float
+
+
+class AggregateExtremes(BaseModel):
+    """Extreme values (max/min) across the aggregate period."""
+    max_spending_period: Optional[PeriodExtreme] = None
+    min_spending_period: Optional[PeriodExtreme] = None
+    highest_health_score_period: Optional[HealthScoreExtreme] = None
+    lowest_health_score_period: Optional[HealthScoreExtreme] = None
+
+
+class HealthScoreDistribution(BaseModel):
+    """Distribution of health scores across transactions."""
+    score_1: int = 0  # Unhealthy
+    score_2: int = 0
+    score_3: int = 0  # Neutral
+    score_4: int = 0
+    score_5: int = 0  # Healthy
+    unscored: int = 0
+
+
+class AggregateResponse(BaseModel):
+    """Response for aggregate analytics across multiple periods."""
+    period_type: str
+    num_periods: int
+    start_date: date
+    end_date: date
+
+    totals: AggregateTotals
+    averages: AggregateAverages
+    extremes: AggregateExtremes
+
+    top_categories: List[CategorySpending]
+    top_stores: List[StoreSpending]
+    health_score_distribution: HealthScoreDistribution
+
+
+# ============== All-Time Analytics Schemas ==============
+
+class StoreByVisits(BaseModel):
+    """Store ranked by visit count."""
+    store_name: str
+    visit_count: int
+    rank: int
+
+
+class StoreBySpend(BaseModel):
+    """Store ranked by total spend."""
+    store_name: str
+    total_spent: float
+    rank: int
+
+
+class AllTimeResponse(BaseModel):
+    """Response for all-time user statistics."""
+    total_receipts: int
+    total_items: int
+    total_spend: float
+    total_transactions: int
+    average_item_price: Optional[float] = None
+    average_health_score: Optional[float] = None
+    top_stores_by_visits: List[StoreByVisits]
+    top_stores_by_spend: List[StoreBySpend]
+    first_receipt_date: Optional[date] = None
+    last_receipt_date: Optional[date] = None

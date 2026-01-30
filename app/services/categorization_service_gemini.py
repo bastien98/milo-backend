@@ -39,7 +39,15 @@ class CategorizationServiceGemini:
     MODEL = "gemini-2.0-flash"
     MAX_TOKENS = 4096
 
-    SYSTEM_PROMPT = """You are a grocery item categorization assistant. Given a store name and list of items from a receipt, clean up the data, categorize each item, and assign a health score.
+    SYSTEM_PROMPT = """You are a grocery item categorization assistant. Given a store name and list of items from a receipt, clean up the data, categorize each item, assign a health score, and DEDUPLICATE items.
+
+IMPORTANT - MULTI-SECTION RECEIPT HANDLING:
+Receipt images may consist of multiple overlapping sections captured from a long receipt. This means the SAME LINE ITEM may appear multiple times in the input list due to overlap between sections. You MUST identify and merge these duplicates:
+- Look for items with the same or very similar product names (accounting for OCR variations)
+- Items with identical or nearly identical prices are likely duplicates from overlapping sections
+- When you find duplicates, merge them into a SINGLE entry and list all original indices in "original_indices"
+- DO NOT sum quantities/prices for duplicates - they represent the SAME purchase captured multiple times
+- Only sum quantities when items are genuinely purchased multiple times (e.g., "2x Milk" on the receipt)
 
 First, clean the store name:
 - Remove garbage characters, random symbols, and OCR artifacts
@@ -48,7 +56,7 @@ First, clean the store name:
 - Use title case for proper formatting
 - Common Belgian stores: Colruyt, Delhaize, Carrefour, Aldi, Lidl, Albert Heijn, Spar, Match, Intermarché
 
-For each item, provide:
+For each UNIQUE item (after deduplication), provide:
 1. item_name: Clean up the raw OCR text to produce a clear, readable product name:
    - Remove garbage characters, random symbols, and OCR artifacts
    - Remove product codes, SKUs, and internal reference numbers
@@ -86,25 +94,34 @@ For each item, provide:
    - 0: Very unhealthy (alcohol, energy drinks, heavily processed foods)
    Note: Non-food items (household, personal care, pet supplies) should have health_score: null
 
+4. original_indices: List of indices from the input that correspond to this item.
+   - For unique items: single index, e.g., [0]
+   - For duplicates found in overlapping sections: all indices, e.g., [2, 7, 12]
+
 IMPORTANT:
 - Belgian receipts may have Dutch/French product names - translate to the original language but clean up the text
 - Deposit items (leeggoed/vidange) should be categorized with the related product (usually Alcohol or Drinks)
 - Use the item type hint if provided (e.g., "food", "alcohol", "product")
+- The number of items in output should be LESS than or EQUAL to input if duplicates were found
 
 Return ONLY valid JSON with this exact format:
 {
   "store_name": "Clean Store Name",
   "items": [
     {
-      "index": 0,
+      "original_indices": [0],
       "item_name": "Clean Product Name",
       "category": "Category Name",
       "health_score": 3
+    },
+    {
+      "original_indices": [1, 5, 9],
+      "item_name": "Merged Duplicate Product",
+      "category": "Category Name",
+      "health_score": 2
     }
   ]
-}
-
-The "index" must match the position of the item in the input list (0-indexed)."""
+}"""
 
     def __init__(self, api_key: Optional[str] = None):
         self.api_key = api_key or settings.GEMINI_API_KEY
@@ -194,18 +211,39 @@ The "index" must match the position of the item in the input list (0-indexed).""
         items: List[VeryfiLineItem],
         categorizations: List[dict],
     ) -> List[CategorizedItem]:
-        """Build CategorizedItem list by combining Veryfi data with Gemini categorizations."""
-        # Create a lookup for categorizations by index
-        cat_lookup = {cat.get("index", i): cat for i, cat in enumerate(categorizations)}
+        """Build CategorizedItem list by combining Veryfi data with Gemini categorizations.
 
+        Handles deduplicated items where Gemini has merged duplicates from overlapping
+        receipt sections. Uses 'original_indices' to map back to Veryfi data.
+        """
         result = []
-        for i, item in enumerate(items):
-            # Skip items without a price
-            if item.total is None and item.price is None:
+
+        for cat_data in categorizations:
+            # Get the original indices - supports both new format (original_indices)
+            # and legacy format (index) for backward compatibility
+            original_indices = cat_data.get("original_indices")
+            if original_indices is None:
+                # Fallback to legacy single index format
+                legacy_index = cat_data.get("index")
+                if legacy_index is not None:
+                    original_indices = [legacy_index]
+                else:
+                    continue
+
+            if not original_indices:
                 continue
 
-            # Get categorization from Gemini response
-            cat_data = cat_lookup.get(i, {})
+            # Use the first index as the primary source for price/quantity data
+            primary_index = original_indices[0]
+            if primary_index >= len(items):
+                logger.warning(f"Invalid index {primary_index} in categorization, skipping")
+                continue
+
+            primary_item = items[primary_index]
+
+            # Skip items without a price
+            if primary_item.total is None and primary_item.price is None:
+                continue
 
             # Parse category
             category_str = cat_data.get("category", "Other")
@@ -222,12 +260,19 @@ The "index" must match the position of the item in the input list (0-indexed).""
                 health_score = None
 
             # Get cleaned item name from Gemini, fallback to raw description
-            cleaned_name = cat_data.get("item_name") or item.description
+            cleaned_name = cat_data.get("item_name") or primary_item.description
 
-            # Calculate prices
-            total_price = item.total if item.total is not None else item.price
-            quantity = int(item.quantity) if item.quantity else 1
-            unit_price = item.price if item.price else (total_price / quantity if quantity > 0 else total_price)
+            # Calculate prices from primary item (not summing duplicates)
+            total_price = primary_item.total if primary_item.total is not None else primary_item.price
+            quantity = int(primary_item.quantity) if primary_item.quantity else 1
+            unit_price = primary_item.price if primary_item.price else (total_price / quantity if quantity > 0 else total_price)
+
+            # Log if duplicates were merged
+            if len(original_indices) > 1:
+                logger.info(
+                    f"Merged {len(original_indices)} duplicate entries for '{cleaned_name}' "
+                    f"(indices: {original_indices})"
+                )
 
             result.append(
                 CategorizedItem(

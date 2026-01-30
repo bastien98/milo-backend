@@ -12,6 +12,8 @@ from app.schemas.analytics import (
     CategoryBreakdown,
     StoreBreakdown,
     TrendsResponse,
+    AggregateResponse,
+    AllTimeResponse,
 )
 from app.services.analytics_service import AnalyticsService
 
@@ -217,4 +219,89 @@ async def get_trends(
         user_id=current_user.id,
         period_type=period_type,
         num_periods=num_periods,
+    )
+
+
+@router.get(
+    "/aggregate",
+    response_model=AggregateResponse,
+    summary="Get aggregate statistics across multiple periods",
+    description="Returns aggregate statistics including totals, averages, extremes, "
+    "top categories, top stores, and health score distribution across multiple time periods.",
+)
+async def get_aggregate(
+    period_type: str = Query("month", description="Period granularity: week, month, year"),
+    num_periods: int = Query(12, ge=1, le=52, description="Number of periods to aggregate"),
+    start_date: Optional[date] = Query(None, description="Optional start date (YYYY-MM-DD)"),
+    end_date: Optional[date] = Query(None, description="Optional end date (YYYY-MM-DD)"),
+    all_time: bool = Query(False, description="If true, return all-time stats (ignores date filters)"),
+    top_categories_limit: int = Query(5, ge=1, le=20, description="Number of top categories to return"),
+    top_stores_limit: int = Query(5, ge=1, le=20, description="Number of top stores to return"),
+    min_category_percentage: float = Query(0, ge=0, le=100, description="Minimum percentage threshold for categories"),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_db_user),
+):
+    """
+    Get aggregate statistics across multiple periods.
+
+    Returns comprehensive aggregate data including:
+    - **totals**: Total spend, transactions, receipts, and items
+    - **averages**: Average spend per period, transaction value, item price, health score, etc.
+    - **extremes**: Max/min spending periods and highest/lowest health score periods
+    - **top_categories**: Top spending categories with percentages and health scores
+    - **top_stores**: Top stores by amount spent with visit counts
+    - **health_score_distribution**: Distribution of health scores across all transactions
+
+    Use `all_time=true` to get statistics across the entire user history.
+    Use `start_date` and `end_date` for custom date ranges.
+    """
+    logger.info(
+        f"Aggregate request: user_id={current_user.id}, period_type={period_type}, "
+        f"num_periods={num_periods}, all_time={all_time}"
+    )
+
+    analytics = AnalyticsService(db)
+    return await analytics.get_aggregate_stats(
+        user_id=current_user.id,
+        period_type=period_type,
+        num_periods=num_periods,
+        start_date=start_date,
+        end_date=end_date,
+        all_time=all_time,
+        top_categories_limit=top_categories_limit,
+        top_stores_limit=top_stores_limit,
+        min_category_percentage=min_category_percentage,
+    )
+
+
+@router.get(
+    "/all-time",
+    response_model=AllTimeResponse,
+    summary="Get all-time statistics",
+    description="Returns all-time statistics for the user including total receipts, items, "
+    "spend, top stores by visits and spend, and date range.",
+)
+async def get_all_time(
+    top_stores_limit: int = Query(3, ge=1, le=10, description="Number of top stores to return"),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_db_user),
+):
+    """
+    Get all-time statistics for the user.
+
+    Returns comprehensive all-time data including:
+    - Total receipts, items, spend, and transactions
+    - Average item price and health score
+    - Top stores by visit count (with ranks)
+    - Top stores by total spend (with ranks)
+    - First and last receipt dates
+
+    This endpoint is optimized for the scan view hero cards on the frontend.
+    """
+    logger.info(f"All-time request: user_id={current_user.id}, top_stores_limit={top_stores_limit}")
+
+    analytics = AnalyticsService(db)
+    return await analytics.get_all_time_stats(
+        user_id=current_user.id,
+        top_stores_limit=top_stores_limit,
     )
