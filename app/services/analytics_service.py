@@ -39,29 +39,54 @@ class AnalyticsService:
     async def get_period_summary(
         self,
         user_id: str,
-        start_date: date,
-        end_date: date,
+        start_date: Optional[date] = None,
+        end_date: Optional[date] = None,
+        all_time: bool = False,
     ) -> PeriodSummary:
-        """Get spending summary for a period with store breakdown."""
+        """Get spending summary for a period with store breakdown.
+
+        Args:
+            user_id: The user's ID
+            start_date: Start date for the period (None if all_time)
+            end_date: End date for the period (None if all_time)
+            all_time: If True, query all transactions regardless of date
+        """
         logger.info(
-            f"Analytics query: user_id={user_id}, start_date={start_date} (type={type(start_date).__name__}), "
-            f"end_date={end_date} (type={type(end_date).__name__})"
+            f"Analytics query: user_id={user_id}, start_date={start_date}, "
+            f"end_date={end_date}, all_time={all_time}"
         )
 
-        # Get all transactions in period
-        query = select(Transaction).where(
-            and_(
-                Transaction.user_id == user_id,
-                Transaction.date >= start_date,
-                Transaction.date <= end_date,
+        # Build query based on whether this is an all-time query
+        if all_time:
+            query = select(Transaction).where(Transaction.user_id == user_id)
+        else:
+            query = select(Transaction).where(
+                and_(
+                    Transaction.user_id == user_id,
+                    Transaction.date >= start_date,
+                    Transaction.date <= end_date,
+                )
             )
-        )
+
         result = await self.db.execute(query)
         transactions = list(result.scalars().all())
 
+        # For all-time queries, compute actual date range from transactions
+        if all_time and transactions:
+            dates = [t.date for t in transactions]
+            actual_start = min(dates)
+            actual_end = max(dates)
+        elif all_time:
+            # No transactions - use today
+            actual_start = date.today()
+            actual_end = date.today()
+        else:
+            actual_start = start_date
+            actual_end = end_date
+
         logger.info(
             f"Analytics found {len(transactions)} transactions for user_id={user_id} "
-            f"in date range {start_date} to {end_date}"
+            f"{'(all time)' if all_time else f'in date range {actual_start} to {actual_end}'}"
         )
         if transactions:
             dates = [t.date for t in transactions]
@@ -79,18 +104,25 @@ class AnalyticsService:
         health_scores = [t.health_score for t in transactions if t.health_score is not None]
         average_health_score = round(sum(health_scores) / len(health_scores), 2) if health_scores else None
 
-        # Group by store
-        store_data = defaultdict(lambda: {"amount": 0.0, "receipt_ids": set()})
+        # Group by store (including health scores for per-store average)
+        store_data = defaultdict(lambda: {"amount": 0.0, "receipt_ids": set(), "health_scores": []})
         for t in transactions:
             store_data[t.store_name]["amount"] += t.item_price
             if t.receipt_id:
                 store_data[t.store_name]["receipt_ids"].add(t.receipt_id)
+            if t.health_score is not None:
+                store_data[t.store_name]["health_scores"].append(t.health_score)
 
         # Build store spending list
         stores = []
         for store_name, data in store_data.items():
             percentage = (data["amount"] / total_spend * 100) if total_spend > 0 else 0
             visit_count = len(data["receipt_ids"])
+            store_avg_health = (
+                round(sum(data["health_scores"]) / len(data["health_scores"]), 2)
+                if data["health_scores"]
+                else None
+            )
             logger.debug(
                 f"Store '{store_name}': visits={visit_count}, receipt_ids={data['receipt_ids']}"
             )
@@ -100,16 +132,20 @@ class AnalyticsService:
                     amount_spent=round(data["amount"], 2),
                     store_visits=visit_count,
                     percentage=round(percentage, 1),
+                    average_health_score=store_avg_health,
                 )
             )
 
         # Sort by amount spent descending
         stores.sort(key=lambda x: x.amount_spent, reverse=True)
 
+        # Format period string
+        period_str = "All Time" if all_time else self._format_period(actual_start, actual_end)
+
         return PeriodSummary(
-            period=self._format_period(start_date, end_date),
-            start_date=start_date,
-            end_date=end_date,
+            period=period_str,
+            start_date=actual_start,
+            end_date=actual_end,
             total_spend=round(total_spend, 2),
             transaction_count=transaction_count,
             stores=stores,
@@ -119,17 +155,27 @@ class AnalyticsService:
     async def get_category_breakdown(
         self,
         user_id: str,
-        start_date: date,
-        end_date: date,
+        start_date: Optional[date] = None,
+        end_date: Optional[date] = None,
         store_name: Optional[str] = None,
+        all_time: bool = False,
     ) -> CategoryBreakdown:
-        """Get spending breakdown by category for a period."""
+        """Get spending breakdown by category for a period.
+
+        Args:
+            user_id: The user's ID
+            start_date: Start date for the period (None if all_time)
+            end_date: End date for the period (None if all_time)
+            store_name: Optional store filter
+            all_time: If True, query all transactions regardless of date
+        """
         # Build conditions
-        conditions = [
-            Transaction.user_id == user_id,
-            Transaction.date >= start_date,
-            Transaction.date <= end_date,
-        ]
+        conditions = [Transaction.user_id == user_id]
+
+        if not all_time:
+            conditions.append(Transaction.date >= start_date)
+            conditions.append(Transaction.date <= end_date)
+
         if store_name:
             conditions.append(Transaction.store_name == store_name)
 
@@ -138,6 +184,18 @@ class AnalyticsService:
             select(Transaction).where(and_(*conditions))
         )
         transactions = list(result.scalars().all())
+
+        # For all-time queries, compute actual date range from transactions
+        if all_time and transactions:
+            dates = [t.date for t in transactions]
+            actual_start = min(dates)
+            actual_end = max(dates)
+        elif all_time:
+            actual_start = date.today()
+            actual_end = date.today()
+        else:
+            actual_start = start_date
+            actual_end = end_date
 
         # Calculate totals (item_price already represents the line total from receipt)
         total_spend = sum(t.item_price for t in transactions)
@@ -176,10 +234,13 @@ class AnalyticsService:
         # Sort by spent descending
         categories.sort(key=lambda x: x.spent, reverse=True)
 
+        # Format period string
+        period_str = "All Time" if all_time else self._format_period(actual_start, actual_end)
+
         return CategoryBreakdown(
-            period=self._format_period(start_date, end_date),
-            start_date=start_date,
-            end_date=end_date,
+            period=period_str,
+            start_date=actual_start,
+            end_date=actual_end,
             total_spend=round(total_spend, 2),
             categories=categories,
             average_health_score=overall_avg_health,
@@ -189,22 +250,46 @@ class AnalyticsService:
         self,
         user_id: str,
         store_name: str,
-        start_date: date,
-        end_date: date,
+        start_date: Optional[date] = None,
+        end_date: Optional[date] = None,
+        all_time: bool = False,
     ) -> StoreBreakdown:
-        """Get detailed breakdown for a specific store."""
+        """Get detailed breakdown for a specific store.
+
+        Args:
+            user_id: The user's ID
+            store_name: The store to get breakdown for
+            start_date: Start date for the period (None if all_time)
+            end_date: End date for the period (None if all_time)
+            all_time: If True, query all transactions regardless of date
+        """
+        # Build conditions
+        conditions = [
+            Transaction.user_id == user_id,
+            Transaction.store_name == store_name,
+        ]
+
+        if not all_time:
+            conditions.append(Transaction.date >= start_date)
+            conditions.append(Transaction.date <= end_date)
+
         # Get all transactions for store
         result = await self.db.execute(
-            select(Transaction).where(
-                and_(
-                    Transaction.user_id == user_id,
-                    Transaction.store_name == store_name,
-                    Transaction.date >= start_date,
-                    Transaction.date <= end_date,
-                )
-            )
+            select(Transaction).where(and_(*conditions))
         )
         transactions = list(result.scalars().all())
+
+        # For all-time queries, compute actual date range from transactions
+        if all_time and transactions:
+            dates = [t.date for t in transactions]
+            actual_start = min(dates)
+            actual_end = max(dates)
+        elif all_time:
+            actual_start = date.today()
+            actual_end = date.today()
+        else:
+            actual_start = start_date
+            actual_end = end_date
 
         # Calculate totals (item_price already represents the line total from receipt)
         total_spend = sum(t.item_price for t in transactions)
@@ -248,11 +333,14 @@ class AnalyticsService:
         # Sort by spent descending
         categories.sort(key=lambda x: x.spent, reverse=True)
 
+        # Format period string
+        period_str = "All Time" if all_time else self._format_period(actual_start, actual_end)
+
         return StoreBreakdown(
             store_name=store_name,
-            period=self._format_period(start_date, end_date),
-            start_date=start_date,
-            end_date=end_date,
+            period=period_str,
+            start_date=actual_start,
+            end_date=actual_end,
             total_store_spend=round(total_spend, 2),
             store_visits=len(receipt_ids),
             categories=categories,
@@ -955,22 +1043,30 @@ class AnalyticsService:
         limit: int,
     ) -> list[StoreSpending]:
         """Calculate top stores from transactions."""
-        store_data = defaultdict(lambda: {"amount": 0.0, "receipt_ids": set()})
+        store_data = defaultdict(lambda: {"amount": 0.0, "receipt_ids": set(), "health_scores": []})
 
         for t in transactions:
             store_data[t.store_name]["amount"] += t.item_price
             if t.receipt_id:
                 store_data[t.store_name]["receipt_ids"].add(t.receipt_id)
+            if t.health_score is not None:
+                store_data[t.store_name]["health_scores"].append(t.health_score)
 
         stores = []
         for store_name, data in store_data.items():
             percentage = (data["amount"] / total_spend * 100) if total_spend > 0 else 0
+            store_avg_health = (
+                round(sum(data["health_scores"]) / len(data["health_scores"]), 2)
+                if data["health_scores"]
+                else None
+            )
             stores.append(
                 StoreSpending(
                     store_name=store_name,
                     amount_spent=round(data["amount"], 2),
                     store_visits=len(data["receipt_ids"]),
                     percentage=round(percentage, 1),
+                    average_health_score=store_avg_health,
                 )
             )
 
