@@ -304,10 +304,11 @@ async def get_aggregate(
     response_model=AllTimeResponse,
     summary="Get all-time statistics",
     description="Returns all-time statistics for the user including total receipts, items, "
-    "spend, top stores by visits and spend, and date range.",
+    "spend, top stores by visits and spend, top categories, and date range.",
 )
 async def get_all_time(
     top_stores_limit: int = Query(3, ge=1, le=10, description="Number of top stores to return"),
+    top_categories_limit: int = Query(5, ge=1, le=20, description="Number of top categories to return"),
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_db_user),
 ):
@@ -319,14 +320,16 @@ async def get_all_time(
     - Average item price and health score
     - Top stores by visit count (with ranks)
     - Top stores by total spend (with ranks)
+    - Top categories by total spend (with ranks, percentages, and health scores)
     - First and last receipt dates
 
     This endpoint is optimized for the scan view hero cards on the frontend.
     """
-    logger.info(f"All-time request: user_id={current_user.id}, top_stores_limit={top_stores_limit}")
+    logger.info(f"All-time request: user_id={current_user.id}, top_stores_limit={top_stores_limit}, top_categories_limit={top_categories_limit}")
 
     analytics = AnalyticsService(db)
     return await analytics.get_all_time_stats(
         user_id=current_user.id,
         top_stores_limit=top_stores_limit,
+        top_categories_limit=top_categories_limit,
     )

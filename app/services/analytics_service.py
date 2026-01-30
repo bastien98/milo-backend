@@ -26,6 +26,7 @@ from app.schemas.analytics import (
     AggregateResponse,
     StoreByVisits,
     StoreBySpend,
+    TopCategory,
     AllTimeResponse,
 )
 
@@ -1104,6 +1105,7 @@ class AnalyticsService:
         self,
         user_id: str,
         top_stores_limit: int = 3,
+        top_categories_limit: int = 5,
     ) -> AllTimeResponse:
         """
         Get all-time statistics for a user.
@@ -1112,9 +1114,10 @@ class AnalyticsService:
         - Total receipts, items, spend, transactions
         - Average item price and health score
         - Top stores by visits and spend
+        - Top categories by spend
         - First and last receipt dates
         """
-        logger.info(f"All-time stats request: user_id={user_id}, top_stores_limit={top_stores_limit}")
+        logger.info(f"All-time stats request: user_id={user_id}, top_stores_limit={top_stores_limit}, top_categories_limit={top_categories_limit}")
 
         # Get all transactions for the user
         query = select(Transaction).where(Transaction.user_id == user_id)
@@ -1131,6 +1134,7 @@ class AnalyticsService:
                 average_health_score=None,
                 top_stores_by_visits=[],
                 top_stores_by_spend=[],
+                top_categories=[],
                 first_receipt_date=None,
                 last_receipt_date=None,
             )
@@ -1190,6 +1194,43 @@ class AnalyticsService:
             for i, s in enumerate(stores_by_spend_list[:top_stores_limit])
         ]
 
+        # Calculate top categories
+        category_data = defaultdict(lambda: {"amount": 0.0, "count": 0, "health_scores": []})
+        for t in transactions:
+            category_data[t.category.value]["amount"] += t.item_price
+            category_data[t.category.value]["count"] += 1
+            if t.health_score is not None:
+                category_data[t.category.value]["health_scores"].append(t.health_score)
+
+        categories_list = []
+        for category_name, data in category_data.items():
+            percentage = (data["amount"] / total_spend * 100) if total_spend > 0 else 0
+            avg_health = (
+                round(sum(data["health_scores"]) / len(data["health_scores"]), 2)
+                if data["health_scores"]
+                else None
+            )
+            categories_list.append({
+                "name": category_name,
+                "total_spent": round(data["amount"], 2),
+                "percentage": round(percentage, 1),
+                "transaction_count": data["count"],
+                "average_health_score": avg_health,
+            })
+
+        categories_list.sort(key=lambda x: x["total_spent"], reverse=True)
+        top_categories = [
+            TopCategory(
+                name=c["name"],
+                total_spent=c["total_spent"],
+                percentage=c["percentage"],
+                transaction_count=c["transaction_count"],
+                average_health_score=c["average_health_score"],
+                rank=i + 1,
+            )
+            for i, c in enumerate(categories_list[:top_categories_limit])
+        ]
+
         return AllTimeResponse(
             total_receipts=total_receipts,
             total_items=total_items,
@@ -1199,6 +1240,7 @@ class AnalyticsService:
             average_health_score=average_health_score,
             top_stores_by_visits=top_stores_by_visits,
             top_stores_by_spend=top_stores_by_spend,
+            top_categories=top_categories,
             first_receipt_date=first_receipt_date,
             last_receipt_date=last_receipt_date,
         )

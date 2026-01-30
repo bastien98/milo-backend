@@ -172,6 +172,16 @@ class StoreBySpend(BaseModel):
     rank: int
 
 
+class TopCategory(BaseModel):
+    """Category ranked by total spend for all-time statistics."""
+    name: str
+    total_spent: float
+    percentage: float
+    transaction_count: int
+    average_health_score: Optional[float] = None
+    rank: int
+
+
 class AllTimeResponse(BaseModel):
     """Response for all-time user statistics."""
     total_receipts: int
@@ -182,5 +192,6 @@ class AllTimeResponse(BaseModel):
     average_health_score: Optional[float] = None
     top_stores_by_visits: List[StoreByVisits]
     top_stores_by_spend: List[StoreBySpend]
+    top_categories: List[TopCategory]
     first_receipt_date: Optional[date] = None
     last_receipt_date: Optional[date] = None
