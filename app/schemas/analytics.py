@@ -9,6 +9,7 @@ class StoreSpending(BaseModel):
     amount_spent: float
     store_visits: int
     percentage: float
+    average_health_score: Optional[float] = None  # Average health score for this store (0-5)
 
 
 class PeriodSummary(BaseModel):

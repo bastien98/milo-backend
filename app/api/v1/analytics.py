@@ -23,21 +23,34 @@ router = APIRouter()
 
 
 def get_period_dates(
-    period: str,
+    period: Optional[str],
     start_date: Optional[date] = None,
     end_date: Optional[date] = None,
-) -> tuple[date, date]:
-    """Calculate start and end dates for a period."""
+) -> tuple[Optional[date], Optional[date], bool]:
+    """Calculate start and end dates for a period.
+
+    Returns:
+        tuple: (start_date, end_date, is_all_time)
+        - If is_all_time is True, start_date and end_date will be None
+          and the service should query all data
+    """
     today = date.today()
 
-    if start_date and end_date:
-        return start_date, end_date
+    # All-time query: no period, no start_date, no end_date
+    if period is None and start_date is None and end_date is None:
+        return None, None, True
 
-    if period == "week":
+    if start_date and end_date:
+        return start_date, end_date, False
+
+    # Default to month if no period specified but custom dates provided
+    effective_period = period or "month"
+
+    if effective_period == "week":
         # Current week (Monday to Sunday)
         start = today - timedelta(days=today.weekday())
         end = start + timedelta(days=6)
-    elif period == "month":
+    elif effective_period == "month":
         # Current month
         start = today.replace(day=1)
         # End of month
@@ -45,7 +58,7 @@ def get_period_dates(
             end = date(today.year + 1, 1, 1) - timedelta(days=1)
         else:
             end = date(today.year, today.month + 1, 1) - timedelta(days=1)
-    elif period == "year":
+    elif effective_period == "year":
         # Current year
         start = date(today.year, 1, 1)
         end = date(today.year, 12, 31)
@@ -57,12 +70,12 @@ def get_period_dates(
         else:
             end = date(today.year, today.month + 1, 1) - timedelta(days=1)
 
-    return start, end
+    return start, end, False
 
 
 @router.get("/summary", response_model=PeriodSummary)
 async def get_summary(
-    period: str = Query("month", description="Period: week, month, year, or custom"),
+    period: Optional[str] = Query(None, description="Period: week, month, year, or custom. If not provided with no date params, returns all-time data."),
     start_date: Optional[date] = Query(None, description="Start date for custom period"),
     end_date: Optional[date] = Query(None, description="End date for custom period"),
     db: AsyncSession = Depends(get_db),
@@ -73,6 +86,9 @@ async def get_summary(
 
     Shows total spending, transaction count, and per-store breakdown
     with visit counts and percentages.
+
+    **All-Time Mode**: When called without any query parameters (no period, start_date, or end_date),
+    returns aggregated data across ALL receipts ever uploaded.
     """
     logger.info(
         f"Analytics summary raw params: period={period}, "
@@ -80,11 +96,11 @@ async def get_summary(
         f"end_date={end_date} (type={type(end_date).__name__ if end_date else 'None'})"
     )
 
-    start, end = get_period_dates(period, start_date, end_date)
+    start, end, is_all_time = get_period_dates(period, start_date, end_date)
 
     logger.info(
         f"Analytics summary request: user_id={current_user.id}, "
-        f"period={period}, computed_start={start}, computed_end={end}"
+        f"period={period}, computed_start={start}, computed_end={end}, is_all_time={is_all_time}"
     )
 
     analytics = AnalyticsService(db)
@@ -92,6 +108,7 @@ async def get_summary(
         user_id=current_user.id,
         start_date=start,
         end_date=end,
+        all_time=is_all_time,
     )
 
     logger.info(
@@ -104,7 +121,7 @@ async def get_summary(
 
 @router.get("/categories", response_model=CategoryBreakdown)
 async def get_categories(
-    period: str = Query("month", description="Period: week, month, year, or custom"),
+    period: Optional[str] = Query(None, description="Period: week, month, year, or custom. If not provided with no date params, returns all-time data."),
     start_date: Optional[date] = Query(None, description="Start date for custom period"),
     end_date: Optional[date] = Query(None, description="End date for custom period"),
     store_name: Optional[str] = Query(None, description="Filter by store"),
@@ -116,8 +133,11 @@ async def get_categories(
 
     Shows how spending is distributed across the 16 categories.
     Optionally filter by store.
+
+    **All-Time Mode**: When called without any date/period parameters,
+    returns aggregated data across ALL receipts ever uploaded.
     """
-    start, end = get_period_dates(period, start_date, end_date)
+    start, end, is_all_time = get_period_dates(period, start_date, end_date)
 
     analytics = AnalyticsService(db)
     return await analytics.get_category_breakdown(
@@ -125,13 +145,14 @@ async def get_categories(
         start_date=start,
         end_date=end,
         store_name=store_name,
+        all_time=is_all_time,
     )
 
 
 @router.get("/stores/{store_name}", response_model=StoreBreakdown)
 async def get_store_breakdown(
     store_name: str,
-    period: str = Query("month", description="Period: week, month, year, or custom"),
+    period: Optional[str] = Query(None, description="Period: week, month, year, or custom. If not provided with no date params, returns all-time data."),
     start_date: Optional[date] = Query(None, description="Start date for custom period"),
     end_date: Optional[date] = Query(None, description="End date for custom period"),
     db: AsyncSession = Depends(get_db),
@@ -142,8 +163,11 @@ async def get_store_breakdown(
 
     Shows total spending, visit count, and category breakdown
     for the specified store.
+
+    **All-Time Mode**: When called without any date/period parameters,
+    returns aggregated data across ALL receipts ever uploaded for this store.
     """
-    start, end = get_period_dates(period, start_date, end_date)
+    start, end, is_all_time = get_period_dates(period, start_date, end_date)
 
     analytics = AnalyticsService(db)
     return await analytics.get_store_breakdown(
@@ -151,6 +175,7 @@ async def get_store_breakdown(
         store_name=store_name,
         start_date=start,
         end_date=end,
+        all_time=is_all_time,
     )
 
 
