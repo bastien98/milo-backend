@@ -12,6 +12,7 @@ if TYPE_CHECKING:
     from app.models.transaction import Transaction
     from app.models.receipt import Receipt
     from app.models.user_profile import UserProfile
+    from app.models.budget import Budget
 
 
 class User(Base):
@@ -42,4 +43,7 @@ class User(Base):
     )
     profile: Mapped[Optional["UserProfile"]] = relationship(
         "UserProfile", back_populates="user", cascade="all, delete-orphan", uselist=False
+    )
+    budget: Mapped[Optional["Budget"]] = relationship(
+        "Budget", back_populates="user", cascade="all, delete-orphan", uselist=False
     )
