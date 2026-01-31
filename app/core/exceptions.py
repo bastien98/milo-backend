@@ -56,3 +56,9 @@ class GeminiAPIError(ScandaliciousException):
     """Raised when Gemini API call fails."""
 
     pass
+
+
+class AICheckInRateLimitError(ScandaliciousException):
+    """Raised when user exceeds AI check-in rate limit (1 per day)."""
+
+    pass

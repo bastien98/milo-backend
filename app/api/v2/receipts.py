@@ -21,6 +21,7 @@ from app.services.receipt_processor_v2 import ReceiptProcessorV2
 from app.services.rate_limit_service import RateLimitService
 from app.db.repositories.receipt_repo import ReceiptRepository
 from app.db.repositories.transaction_repo import TransactionRepository
+from app.db.repositories.budget_ai_insight_repo import BudgetAIInsightRepository
 from app.core.exceptions import ResourceNotFoundError, RateLimitExceededError
 
 router = APIRouter()
@@ -78,6 +79,11 @@ async def upload_receipt(
 
     # Increment the rate limit counter after successful upload
     await rate_limit_status.increment_on_success()
+
+    # Invalidate cached AI budget suggestions (new receipt = new data)
+    if not result.is_duplicate:
+        insight_repo = BudgetAIInsightRepository(db)
+        await insight_repo.invalidate_suggestions(current_user.id)
 
     return result
 

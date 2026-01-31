@@ -13,6 +13,7 @@ if TYPE_CHECKING:
     from app.models.receipt import Receipt
     from app.models.user_profile import UserProfile
     from app.models.budget import Budget
+    from app.models.budget_ai_insight import BudgetAIInsight
 
 
 class User(Base):
@@ -46,4 +47,7 @@ class User(Base):
     )
     budget: Mapped[Optional["Budget"]] = relationship(
         "Budget", back_populates="user", cascade="all, delete-orphan", uselist=False
+    )
+    ai_insights: Mapped[List["BudgetAIInsight"]] = relationship(
+        "BudgetAIInsight", back_populates="user", cascade="all, delete-orphan"
     )

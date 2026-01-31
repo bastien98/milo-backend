@@ -23,7 +23,7 @@ async_session_maker = async_sessionmaker(
 async def init_db():
     """Initialize database tables."""
     # Import all models to ensure they're registered
-    from app.models import user, receipt, transaction, user_rate_limit, user_profile, budget  # noqa
+    from app.models import user, receipt, transaction, user_rate_limit, user_profile, budget, budget_ai_insight  # noqa
 
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
