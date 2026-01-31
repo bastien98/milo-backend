@@ -378,7 +378,7 @@ Return ONLY valid JSON with this exact structure:
                 personalized_tips=ai_data["personalized_tips"],
                 budget_health_score=ai_data["budget_health_score"],
                 summary=ai_data["summary"],
-                based_on_months=months,
+                based_on_months=spending_data["months_analyzed"],  # Actual months with data
                 total_spend_analyzed=spending_data["total_spend"],
                 cached_at=None,
                 # Include target-based fields when target_amount was provided
@@ -635,11 +635,14 @@ Return ONLY valid JSON with this exact structure:
             month_key = t.date.strftime("%Y-%m")
             monthly_totals[month_key] += t.item_price
 
+        # Count actual distinct months with data
+        actual_months_with_data = len(monthly_totals)
+
         return {
             "transactions": transactions,
             "total_spend": total_spend,
-            "months_analyzed": months,
-            "monthly_average": total_spend / max(len(monthly_totals), 1),
+            "months_analyzed": actual_months_with_data,  # Actual months with data, not requested
+            "monthly_average": total_spend / max(actual_months_with_data, 1),
             "by_category": dict(by_category),
             "by_week": dict(by_week),
             "by_store": {k: {"total": v["total"], "visits": len(v["visits"])} for k, v in by_store.items()},
