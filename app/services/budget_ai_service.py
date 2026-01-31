@@ -342,10 +342,8 @@ Return ONLY valid JSON with this exact structure:
             spending_data = await self._gather_spending_data(db, user_id, months)
 
             if not spending_data["transactions"]:
-                raise GeminiAPIError(
-                    "No spending data available",
-                    details={"error_type": "no_data"},
-                )
+                # Return onboarding response for users in data collection phase
+                return self._build_onboarding_response(target_amount)
 
             # Build prompt (with optional target_amount context)
             prompt = self._build_suggestion_prompt(spending_data, target_amount)
@@ -912,6 +910,149 @@ Return ONLY valid JSON with this exact structure:
             "top_items": top_items,
             "receipt_count": len(receipts),
         }
+
+    # =========================================================================
+    # Onboarding Response (No Data)
+    # =========================================================================
+
+    def _build_onboarding_response(
+        self, target_amount: Optional[float] = None
+    ) -> AIBudgetSuggestionResponse:
+        """Build a helpful response for users with no spending data.
+
+        Provides guidance based on typical Belgian household grocery spending
+        patterns to help users get started while they collect data.
+        """
+        # Belgian average monthly grocery spending (2024 data)
+        # Single person: ~€250-350, Couple: ~€400-500, Family: ~€600-800
+        # We use a moderate estimate for a general recommendation
+        suggested_budget = target_amount if target_amount else 400.0
+
+        # Typical category breakdown based on Belgian spending patterns
+        category_allocations = [
+            CategoryAllocationSuggestion(
+                category="Fresh Produce",
+                suggested_amount=round(suggested_budget * 0.20, 0),
+                percentage=20.0,
+                insight="Fruits and vegetables should be a foundation of healthy eating",
+                savings_potential="low",
+            ),
+            CategoryAllocationSuggestion(
+                category="Meat & Fish",
+                suggested_amount=round(suggested_budget * 0.18, 0),
+                percentage=18.0,
+                insight="Protein sources - consider mixing with plant-based options",
+                savings_potential="medium",
+            ),
+            CategoryAllocationSuggestion(
+                category="Dairy & Eggs",
+                suggested_amount=round(suggested_budget * 0.12, 0),
+                percentage=12.0,
+                insight="Essential staples for most households",
+                savings_potential="low",
+            ),
+            CategoryAllocationSuggestion(
+                category="Bakery",
+                suggested_amount=round(suggested_budget * 0.10, 0),
+                percentage=10.0,
+                insight="Bread and baked goods - Belgian favorites",
+                savings_potential="medium",
+            ),
+            CategoryAllocationSuggestion(
+                category="Pantry",
+                suggested_amount=round(suggested_budget * 0.12, 0),
+                percentage=12.0,
+                insight="Dry goods, canned items, and cooking essentials",
+                savings_potential="low",
+            ),
+            CategoryAllocationSuggestion(
+                category="Drinks",
+                suggested_amount=round(suggested_budget * 0.08, 0),
+                percentage=8.0,
+                insight="Beverages including water, juice, and soft drinks",
+                savings_potential="high",
+            ),
+            CategoryAllocationSuggestion(
+                category="Snacks & Sweets",
+                suggested_amount=round(suggested_budget * 0.08, 0),
+                percentage=8.0,
+                insight="Treats and snacks - easy area to adjust",
+                savings_potential="high",
+            ),
+            CategoryAllocationSuggestion(
+                category="Frozen",
+                suggested_amount=round(suggested_budget * 0.06, 0),
+                percentage=6.0,
+                insight="Frozen meals and ingredients",
+                savings_potential="medium",
+            ),
+            CategoryAllocationSuggestion(
+                category="Household",
+                suggested_amount=round(suggested_budget * 0.06, 0),
+                percentage=6.0,
+                insight="Cleaning supplies and household essentials",
+                savings_potential="medium",
+            ),
+        ]
+
+        return AIBudgetSuggestionResponse(
+            recommended_budget=RecommendedBudget(
+                amount=suggested_budget,
+                confidence="low",
+                reasoning="This is a starting point based on typical Belgian grocery spending. "
+                "Scan a few receipts and we'll personalize this for you!",
+            ),
+            category_allocations=category_allocations,
+            savings_opportunities=[
+                SavingsOpportunity(
+                    title="Start tracking your spending",
+                    description="Scan your grocery receipts to unlock personalized insights and savings tips",
+                    potential_savings=50.0,
+                    difficulty="easy",
+                ),
+                SavingsOpportunity(
+                    title="Compare store prices",
+                    description="Once you have data from multiple stores, we can show you where to save",
+                    potential_savings=30.0,
+                    difficulty="easy",
+                ),
+                SavingsOpportunity(
+                    title="Identify spending patterns",
+                    description="After a few weeks of data, we'll spot trends and opportunities",
+                    potential_savings=40.0,
+                    difficulty="medium",
+                ),
+            ],
+            spending_insights=[
+                SpendingInsight(
+                    type="positive",
+                    title="You're taking the first step!",
+                    description="Setting up a budget is the most important step toward financial awareness",
+                    recommendation="Start by scanning your next grocery receipt to begin tracking",
+                ),
+                SpendingInsight(
+                    type="pattern",
+                    title="Belgian average context",
+                    description="The average Belgian household spends €400-600/month on groceries",
+                    recommendation="Use this as a baseline and adjust based on your household size",
+                ),
+            ],
+            personalized_tips=[
+                "📱 Scan receipts right after shopping while they're fresh",
+                "🛒 Try tracking for 2-3 weeks to see your true spending patterns",
+                "🎯 Once we have your data, we'll give you personalized savings tips",
+            ],
+            budget_health_score=50,  # Neutral score indicating we need more data
+            summary="Welcome! This is a starting budget based on typical Belgian grocery spending. "
+            "Scan a few receipts and we'll create a personalized plan just for you. "
+            "The more data we have, the smarter your budget becomes!",
+            based_on_months=0,  # Indicates no actual data analyzed
+            total_spend_analyzed=0.0,
+            cached_at=None,
+            target_amount=target_amount,
+            allocation_strategy="Based on typical Belgian household grocery spending patterns. "
+            "Scan receipts to get personalized allocations!" if target_amount else None,
+        )
 
     # =========================================================================
     # Prompt Building Helpers
