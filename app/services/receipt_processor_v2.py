@@ -133,6 +133,7 @@ class ReceiptProcessorV2:
                 )
                 transactions.append(
                     ExtractedItem(
+                        item_id=transaction.id,
                         item_name=item.item_name,
                         item_price=item.item_price,
                         quantity=item.quantity,

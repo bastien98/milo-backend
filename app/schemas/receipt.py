@@ -7,6 +7,7 @@ from app.models.enums import ReceiptStatus, Category
 
 
 class ExtractedItem(BaseModel):
+    item_id: str  # UUID from the transactions table
     item_name: str
     item_price: float
     quantity: int = 1
@@ -71,6 +72,7 @@ class ReceiptDeleteResponse(BaseModel):
 class GroupedReceiptTransaction(BaseModel):
     """A single transaction within a grouped receipt."""
 
+    item_id: str  # UUID from the transactions table
     item_name: str
     item_price: float
     quantity: int
@@ -103,3 +105,14 @@ class GroupedReceiptListResponse(BaseModel):
     page: int
     page_size: int
     total_pages: int
+
+
+class LineItemDeleteResponse(BaseModel):
+    """Response for deleting a line item from a receipt."""
+
+    success: bool
+    message: str
+    updated_total_amount: float  # New receipt total after deletion
+    updated_items_count: int  # New item count after deletion
+    updated_average_health_score: Optional[float]  # New average health score
+    receipt_deleted: bool = False  # True if the entire receipt was deleted (last item)

@@ -15,6 +15,7 @@ from app.schemas.receipt import (
     GroupedReceipt,
     GroupedReceiptTransaction,
     GroupedReceiptListResponse,
+    LineItemDeleteResponse,
 )
 from app.services.receipt_processor_v2 import ReceiptProcessorV2
 from app.services.rate_limit_service import RateLimitService
@@ -148,6 +149,7 @@ async def list_receipts(
                 average_health_score=average_health_score,
                 transactions=[
                     GroupedReceiptTransaction(
+                        item_id=t.id,
                         item_name=t.item_name,
                         item_price=t.item_price,
                         quantity=t.quantity,
@@ -219,3 +221,94 @@ async def delete_receipt(
     await receipt_repo.delete(receipt_id)
 
     return {"message": "Receipt deleted successfully"}
+
+
+@router.delete("/{receipt_id}/items/{item_id}", response_model=LineItemDeleteResponse)
+async def delete_line_item(
+    receipt_id: str,
+    item_id: str,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_db_user),
+):
+    """
+    Delete a single line item from a receipt.
+
+    This will:
+    - Remove the item from the receipt
+    - Recalculate the receipt's total_amount, items_count, and average_health_score
+    - If this was the last item, the entire receipt will be deleted
+
+    Returns the updated receipt totals after deletion.
+    """
+    receipt_repo = ReceiptRepository(db)
+    transaction_repo = TransactionRepository(db)
+
+    # Verify receipt ownership
+    receipt = await receipt_repo.get_by_id_and_user(
+        receipt_id=receipt_id,
+        user_id=current_user.id,
+    )
+
+    if not receipt:
+        raise ResourceNotFoundError(f"Receipt {receipt_id} not found")
+
+    # Get the transaction and verify it belongs to this receipt
+    transaction = await transaction_repo.get_by_id_and_user(
+        transaction_id=item_id,
+        user_id=current_user.id,
+    )
+
+    if not transaction:
+        raise ResourceNotFoundError(f"Item {item_id} not found")
+
+    if transaction.receipt_id != receipt_id:
+        raise ResourceNotFoundError(f"Item {item_id} not found in receipt {receipt_id}")
+
+    # Get all transactions for this receipt to calculate new totals
+    all_transactions = await transaction_repo.get_by_receipt(receipt_id)
+
+    # Check if this is the last item
+    if len(all_transactions) <= 1:
+        # Delete the entire receipt (cascade will delete the transaction)
+        await receipt_repo.delete(receipt_id)
+
+        return LineItemDeleteResponse(
+            success=True,
+            message="Last item deleted - receipt removed",
+            updated_total_amount=0.0,
+            updated_items_count=0,
+            updated_average_health_score=None,
+            receipt_deleted=True,
+        )
+
+    # Delete the transaction
+    await transaction_repo.delete(item_id)
+
+    # Calculate new totals (excluding the deleted item)
+    remaining_transactions = [t for t in all_transactions if t.id != item_id]
+
+    new_total_amount = sum(t.item_price for t in remaining_transactions)
+    new_items_count = len(remaining_transactions)
+
+    # Calculate new average health score (excluding nulls)
+    health_scores = [t.health_score for t in remaining_transactions if t.health_score is not None]
+    new_average_health_score = (
+        round(sum(health_scores) / len(health_scores), 1)
+        if health_scores
+        else None
+    )
+
+    # Update the receipt with new total
+    await receipt_repo.update(
+        receipt_id=receipt_id,
+        total_amount=round(new_total_amount, 2),
+    )
+
+    return LineItemDeleteResponse(
+        success=True,
+        message="Item deleted successfully",
+        updated_total_amount=round(new_total_amount, 2),
+        updated_items_count=new_items_count,
+        updated_average_health_score=new_average_health_score,
+        receipt_deleted=False,
+    )
