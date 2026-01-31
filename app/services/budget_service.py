@@ -8,6 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.transaction import Transaction
 from app.models.budget import Budget
+from app.models.enums import Category
 from app.schemas.budget import (
     BudgetResponse,
     BudgetProgressResponse,
@@ -17,6 +18,9 @@ from app.schemas.budget import (
     SavingsOption,
     CategoryAllocation,
 )
+
+# Reverse mapping from display name to enum
+CATEGORY_NAME_TO_ENUM = {cat.value: cat for cat in Category}
 
 
 class BudgetService:
@@ -159,18 +163,29 @@ class BudgetService:
 
                 if allocation:
                     # Use explicit allocation
-                    budget_amount = allocation.get("amount", 0)
+                    limit_amount = allocation.get("amount", 0)
                     is_locked = allocation.get("is_locked", False)
                 else:
-                    # Category has spending but no allocation - set budget_amount to 0
-                    budget_amount = 0
+                    # Category has spending but no allocation - set limit_amount to 0
+                    limit_amount = 0
                     is_locked = False
+
+                # Calculate over budget status
+                is_over_budget = category_spend > limit_amount
+                over_budget_amount = round(category_spend - limit_amount, 2) if is_over_budget else None
+
+                # Get category_id from enum
+                category_enum = CATEGORY_NAME_TO_ENUM.get(category_name)
+                category_id = category_enum.name if category_enum else category_name.upper().replace(" ", "_").replace("&", "").replace("(", "").replace(")", "").replace("/", "_")
 
                 category_progress.append(
                     CategoryProgress(
-                        category=category_name,
-                        budget_amount=budget_amount,
-                        current_spend=category_spend,
+                        category_id=category_id,
+                        name=category_name,
+                        limit_amount=limit_amount,
+                        spent_amount=category_spend,
+                        is_over_budget=is_over_budget,
+                        over_budget_amount=over_budget_amount,
                         is_locked=is_locked,
                     )
                 )
@@ -183,26 +198,39 @@ class BudgetService:
                 historical_pct = historical_percentages.get(category_name, 0)
 
                 if historical_pct > 0:
-                    budget_amount = budget.monthly_amount * historical_pct
+                    limit_amount = budget.monthly_amount * historical_pct
                 else:
                     # No historical data for this category - allocate proportionally
                     # based on current month's spending pattern
                     if current_spend > 0:
-                        budget_amount = (category_spend / current_spend) * budget.monthly_amount
+                        limit_amount = (category_spend / current_spend) * budget.monthly_amount
                     else:
-                        budget_amount = 0
+                        limit_amount = 0
+
+                limit_amount = round(limit_amount, 2)
+
+                # Calculate over budget status
+                is_over_budget = category_spend > limit_amount
+                over_budget_amount = round(category_spend - limit_amount, 2) if is_over_budget else None
+
+                # Get category_id from enum
+                category_enum = CATEGORY_NAME_TO_ENUM.get(category_name)
+                category_id = category_enum.name if category_enum else category_name.upper().replace(" ", "_").replace("&", "").replace("(", "").replace(")", "").replace("/", "_")
 
                 category_progress.append(
                     CategoryProgress(
-                        category=category_name,
-                        budget_amount=round(budget_amount, 2),
-                        current_spend=category_spend,
+                        category_id=category_id,
+                        name=category_name,
+                        limit_amount=limit_amount,
+                        spent_amount=category_spend,
+                        is_over_budget=is_over_budget,
+                        over_budget_amount=over_budget_amount,
                         is_locked=False,  # Auto-distributed allocations are never locked
                     )
                 )
 
-        # Sort by current_spend descending for better UX
-        category_progress.sort(key=lambda x: x.current_spend, reverse=True)
+        # Sort by spent_amount descending for better UX
+        category_progress.sort(key=lambda x: x.spent_amount, reverse=True)
 
         # Convert budget to response format
         budget_response = BudgetResponse(
