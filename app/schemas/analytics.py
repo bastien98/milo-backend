@@ -195,3 +195,47 @@ class AllTimeResponse(BaseModel):
     top_categories: List[TopCategory]
     first_receipt_date: Optional[date] = None
     last_receipt_date: Optional[date] = None
+
+
+# ============== Year Summary Analytics Schemas ==============
+
+class YearStoreSpending(BaseModel):
+    """Store spending breakdown for year summary."""
+    store_name: str
+    amount_spent: float
+    store_visits: int
+    percentage: float
+    average_health_score: Optional[float] = None
+
+
+class YearMonthlyBreakdown(BaseModel):
+    """Monthly spending breakdown for year summary."""
+    month: str  # e.g., "January"
+    month_number: int  # 1-12
+    total_spend: float
+    receipt_count: int
+    average_health_score: Optional[float] = None
+
+
+class YearCategorySpending(BaseModel):
+    """Category spending for year summary."""
+    name: str
+    spent: float
+    percentage: float
+    transaction_count: int
+    average_health_score: Optional[float] = None
+
+
+class YearSummaryResponse(BaseModel):
+    """Response for year summary analytics."""
+    year: int
+    start_date: date
+    end_date: date
+    total_spend: float
+    transaction_count: int
+    receipt_count: int
+    total_items: int
+    average_health_score: Optional[float] = None
+    stores: List[YearStoreSpending]
+    monthly_breakdown: Optional[List[YearMonthlyBreakdown]] = None
+    top_categories: List[YearCategorySpending]

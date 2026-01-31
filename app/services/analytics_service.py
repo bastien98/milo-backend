@@ -28,6 +28,10 @@ from app.schemas.analytics import (
     StoreBySpend,
     TopCategory,
     AllTimeResponse,
+    YearStoreSpending,
+    YearMonthlyBreakdown,
+    YearCategorySpending,
+    YearSummaryResponse,
 )
 
 logger = logging.getLogger(__name__)
@@ -1243,4 +1247,179 @@ class AnalyticsService:
             top_categories=top_categories,
             first_receipt_date=first_receipt_date,
             last_receipt_date=last_receipt_date,
+        )
+
+    async def get_year_summary(
+        self,
+        user_id: str,
+        year: int,
+        include_monthly_breakdown: bool = True,
+        top_categories_limit: int = 5,
+    ) -> YearSummaryResponse:
+        """
+        Get aggregated analytics data for a specific year.
+
+        Args:
+            user_id: The user's ID
+            year: The year to fetch data for (e.g., 2025)
+            include_monthly_breakdown: Whether to include per-month spending breakdown
+            top_categories_limit: Number of top categories to return
+
+        Returns:
+            YearSummaryResponse with total spending, store breakdowns, and optional monthly breakdown
+        """
+        logger.info(
+            f"Year summary request: user_id={user_id}, year={year}, "
+            f"include_monthly_breakdown={include_monthly_breakdown}, "
+            f"top_categories_limit={top_categories_limit}"
+        )
+
+        # Define year boundaries
+        start_date = date(year, 1, 1)
+        end_date = date(year, 12, 31)
+
+        # Get all transactions for the year
+        query = select(Transaction).where(
+            and_(
+                Transaction.user_id == user_id,
+                Transaction.date >= start_date,
+                Transaction.date <= end_date,
+            )
+        )
+        result = await self.db.execute(query)
+        transactions = list(result.scalars().all())
+
+        # Return empty response if no transactions
+        if not transactions:
+            return YearSummaryResponse(
+                year=year,
+                start_date=start_date,
+                end_date=end_date,
+                total_spend=0,
+                transaction_count=0,
+                receipt_count=0,
+                total_items=0,
+                average_health_score=None,
+                stores=[],
+                monthly_breakdown=[] if include_monthly_breakdown else None,
+                top_categories=[],
+            )
+
+        # Calculate totals
+        total_spend = sum(t.item_price for t in transactions)
+        transaction_count = len(transactions)
+        total_items = sum(t.quantity for t in transactions)
+        receipt_ids = set(t.receipt_id for t in transactions if t.receipt_id)
+        receipt_count = len(receipt_ids)
+
+        # Calculate average health score
+        health_scores = [t.health_score for t in transactions if t.health_score is not None]
+        average_health_score = round(sum(health_scores) / len(health_scores), 2) if health_scores else None
+
+        # Aggregate store data
+        store_data = defaultdict(lambda: {"amount": 0.0, "receipt_ids": set(), "health_scores": []})
+        for t in transactions:
+            store_data[t.store_name]["amount"] += t.item_price
+            if t.receipt_id:
+                store_data[t.store_name]["receipt_ids"].add(t.receipt_id)
+            if t.health_score is not None:
+                store_data[t.store_name]["health_scores"].append(t.health_score)
+
+        # Build store list sorted by amount_spent descending
+        stores = []
+        for store_name, data in store_data.items():
+            percentage = (data["amount"] / total_spend * 100) if total_spend > 0 else 0
+            store_avg_health = (
+                round(sum(data["health_scores"]) / len(data["health_scores"]), 2)
+                if data["health_scores"]
+                else None
+            )
+            stores.append(
+                YearStoreSpending(
+                    store_name=store_name,
+                    amount_spent=round(data["amount"], 2),
+                    store_visits=len(data["receipt_ids"]),
+                    percentage=round(percentage, 1),
+                    average_health_score=store_avg_health,
+                )
+            )
+        stores.sort(key=lambda x: x.amount_spent, reverse=True)
+
+        # Calculate monthly breakdown if requested
+        monthly_breakdown = None
+        if include_monthly_breakdown:
+            month_data = defaultdict(lambda: {"amount": 0.0, "receipt_ids": set(), "health_scores": []})
+            for t in transactions:
+                month_num = t.date.month
+                month_data[month_num]["amount"] += t.item_price
+                if t.receipt_id:
+                    month_data[month_num]["receipt_ids"].add(t.receipt_id)
+                if t.health_score is not None:
+                    month_data[month_num]["health_scores"].append(t.health_score)
+
+            # Build monthly breakdown list, only including months with data
+            month_names = [
+                "January", "February", "March", "April", "May", "June",
+                "July", "August", "September", "October", "November", "December"
+            ]
+            monthly_breakdown = []
+            for month_num in sorted(month_data.keys()):
+                data = month_data[month_num]
+                month_avg_health = (
+                    round(sum(data["health_scores"]) / len(data["health_scores"]), 2)
+                    if data["health_scores"]
+                    else None
+                )
+                monthly_breakdown.append(
+                    YearMonthlyBreakdown(
+                        month=month_names[month_num - 1],
+                        month_number=month_num,
+                        total_spend=round(data["amount"], 2),
+                        receipt_count=len(data["receipt_ids"]),
+                        average_health_score=month_avg_health,
+                    )
+                )
+
+        # Calculate top categories
+        category_data = defaultdict(lambda: {"amount": 0.0, "count": 0, "health_scores": []})
+        for t in transactions:
+            category_data[t.category.value]["amount"] += t.item_price
+            category_data[t.category.value]["count"] += 1
+            if t.health_score is not None:
+                category_data[t.category.value]["health_scores"].append(t.health_score)
+
+        categories = []
+        for category_name, data in category_data.items():
+            percentage = (data["amount"] / total_spend * 100) if total_spend > 0 else 0
+            cat_avg_health = (
+                round(sum(data["health_scores"]) / len(data["health_scores"]), 2)
+                if data["health_scores"]
+                else None
+            )
+            categories.append(
+                YearCategorySpending(
+                    name=category_name,
+                    spent=round(data["amount"], 2),
+                    percentage=round(percentage, 1),
+                    transaction_count=data["count"],
+                    average_health_score=cat_avg_health,
+                )
+            )
+
+        # Sort by spent descending and limit
+        categories.sort(key=lambda x: x.spent, reverse=True)
+        top_categories = categories[:top_categories_limit]
+
+        return YearSummaryResponse(
+            year=year,
+            start_date=start_date,
+            end_date=end_date,
+            total_spend=round(total_spend, 2),
+            transaction_count=transaction_count,
+            receipt_count=receipt_count,
+            total_items=total_items,
+            average_health_score=average_health_score,
+            stores=stores,
+            monthly_breakdown=monthly_breakdown,
+            top_categories=top_categories,
         )

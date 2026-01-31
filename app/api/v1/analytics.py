@@ -14,6 +14,7 @@ from app.schemas.analytics import (
     TrendsResponse,
     AggregateResponse,
     AllTimeResponse,
+    YearSummaryResponse,
 )
 from app.services.analytics_service import AnalyticsService
 
@@ -331,5 +332,49 @@ async def get_all_time(
     return await analytics.get_all_time_stats(
         user_id=current_user.id,
         top_stores_limit=top_stores_limit,
+        top_categories_limit=top_categories_limit,
+    )
+
+
+@router.get(
+    "/year/{year}",
+    response_model=YearSummaryResponse,
+    summary="Get year summary statistics",
+    description="Returns aggregated analytics data for a specific year including total spending, "
+    "store breakdowns, optional monthly breakdown, and top categories.",
+)
+async def get_year_summary(
+    year: int,
+    include_monthly_breakdown: bool = Query(True, description="Whether to include per-month spending breakdown"),
+    top_categories_limit: int = Query(5, ge=1, le=20, description="Number of top categories to return"),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_db_user),
+):
+    """
+    Get aggregated analytics data for a specific year.
+
+    Returns comprehensive year data including:
+    - **total_spend**: Total spending for the year
+    - **transaction_count**: Number of item transactions
+    - **receipt_count**: Number of unique receipts
+    - **total_items**: Sum of all item quantities
+    - **average_health_score**: Average health score across all items (0-5)
+    - **stores**: List of stores with amount spent, visits, percentage, and health score (sorted by amount_spent descending)
+    - **monthly_breakdown**: Per-month spending data (optional, only months with data, sorted by month_number ascending)
+    - **top_categories**: Top spending categories with percentages and health scores
+
+    All data is filtered by receipt_date within the specified year (Jan 1 - Dec 31).
+    """
+    logger.info(
+        f"Year summary request: user_id={current_user.id}, year={year}, "
+        f"include_monthly_breakdown={include_monthly_breakdown}, "
+        f"top_categories_limit={top_categories_limit}"
+    )
+
+    analytics = AnalyticsService(db)
+    return await analytics.get_year_summary(
+        user_id=current_user.id,
+        year=year,
+        include_monthly_breakdown=include_monthly_breakdown,
         top_categories_limit=top_categories_limit,
     )
