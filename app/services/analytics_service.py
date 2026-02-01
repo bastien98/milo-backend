@@ -32,7 +32,12 @@ from app.schemas.analytics import (
     YearMonthlyBreakdown,
     YearCategorySpending,
     YearSummaryResponse,
+    PieChartCategory,
+    PieChartStore,
+    PieChartSummaryResponse,
+    CATEGORY_COLORS,
 )
+from app.models.enums import Category
 
 logger = logging.getLogger(__name__)
 
@@ -155,6 +160,122 @@ class AnalyticsService:
             transaction_count=transaction_count,
             stores=stores,
             average_health_score=average_health_score,
+        )
+
+    async def get_pie_chart_summary(
+        self,
+        user_id: str,
+        month: int,
+        year: int,
+    ) -> PieChartSummaryResponse:
+        """Get spending by category for a specific month/year (for Pie Chart).
+
+        Args:
+            user_id: The user's ID
+            month: Month (1-12)
+            year: Year (e.g., 2026)
+
+        Returns:
+            PieChartSummaryResponse with categories containing total_spent and color_hex
+        """
+        import calendar
+
+        # Calculate date range for the specified month
+        start_date = date(year, month, 1)
+        days_in_month = calendar.monthrange(year, month)[1]
+        end_date = date(year, month, days_in_month)
+
+        logger.info(
+            f"Pie chart summary: user_id={user_id}, month={month}, year={year}, "
+            f"date_range={start_date} to {end_date}"
+        )
+
+        # Query transactions for the month
+        query = select(Transaction).where(
+            and_(
+                Transaction.user_id == user_id,
+                Transaction.date >= start_date,
+                Transaction.date <= end_date,
+            )
+        )
+        result = await self.db.execute(query)
+        transactions = list(result.scalars().all())
+
+        # Calculate total spend
+        total_spend = sum(t.item_price for t in transactions)
+
+        # Group by category
+        category_data = defaultdict(lambda: {"amount": 0.0, "count": 0, "health_scores": []})
+        for t in transactions:
+            category_data[t.category]["amount"] += t.item_price
+            category_data[t.category]["count"] += 1
+            if t.health_score is not None:
+                category_data[t.category]["health_scores"].append(t.health_score)
+
+        # Build category list with color_hex
+        categories = []
+        for category_enum, data in category_data.items():
+            percentage = (data["amount"] / total_spend * 100) if total_spend > 0 else 0
+            avg_health = (
+                round(sum(data["health_scores"]) / len(data["health_scores"]), 2)
+                if data["health_scores"]
+                else None
+            )
+            # Get color from mapping, default to gray if not found
+            color_hex = CATEGORY_COLORS.get(category_enum.value, "#BDC3C7")
+
+            categories.append(
+                PieChartCategory(
+                    category_id=category_enum.name,  # e.g., "MEAT_FISH"
+                    name=category_enum.value,  # e.g., "Meat & Fish"
+                    total_spent=round(data["amount"], 2),
+                    color_hex=color_hex,
+                    percentage=round(percentage, 1),
+                    transaction_count=data["count"],
+                    average_health_score=avg_health,
+                )
+            )
+
+        # Sort by total_spent descending
+        categories.sort(key=lambda x: x.total_spent, reverse=True)
+
+        # Group by store
+        store_data = defaultdict(lambda: {"amount": 0.0, "receipts": set(), "health_scores": []})
+        for t in transactions:
+            store_data[t.store_name]["amount"] += t.item_price
+            store_data[t.store_name]["receipts"].add(t.receipt_id)
+            if t.health_score is not None:
+                store_data[t.store_name]["health_scores"].append(t.health_score)
+
+        # Build store list
+        stores = []
+        for store_name, data in store_data.items():
+            percentage = (data["amount"] / total_spend * 100) if total_spend > 0 else 0
+            avg_health = (
+                round(sum(data["health_scores"]) / len(data["health_scores"]), 2)
+                if data["health_scores"]
+                else None
+            )
+
+            stores.append(
+                PieChartStore(
+                    store_name=store_name,
+                    total_spent=round(data["amount"], 2),
+                    percentage=round(percentage, 1),
+                    visit_count=len(data["receipts"]),
+                    average_health_score=avg_health,
+                )
+            )
+
+        # Sort by total_spent descending
+        stores.sort(key=lambda x: x.total_spent, reverse=True)
+
+        return PieChartSummaryResponse(
+            month=month,
+            year=year,
+            total_spent=round(total_spend, 2),
+            categories=categories,
+            stores=stores,
         )
 
     async def get_category_breakdown(

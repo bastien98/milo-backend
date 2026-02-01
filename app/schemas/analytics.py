@@ -1,7 +1,58 @@
-from typing import List, Optional
+from typing import List, Optional, Dict
 from datetime import date
 
 from pydantic import BaseModel
+
+
+# Category color mapping for Pie Chart visualization
+CATEGORY_COLORS: Dict[str, str] = {
+    "Meat & Fish": "#FF6B6B",
+    "Alcohol": "#9B59B6",
+    "Drinks (Soft/Soda)": "#3498DB",
+    "Drinks (Water)": "#5DADE2",
+    "Household": "#95A5A6",
+    "Snacks & Sweets": "#F39C12",
+    "Fresh Produce": "#2ECC71",
+    "Dairy & Eggs": "#F5B041",
+    "Ready Meals": "#E74C3C",
+    "Bakery": "#D4AC0D",
+    "Pantry": "#8D6E63",
+    "Personal Care": "#EC407A",
+    "Frozen": "#00BCD4",
+    "Baby & Kids": "#FF8A65",
+    "Pet Supplies": "#A1887F",
+    "Tobacco": "#607D8B",
+    "Other": "#BDC3C7",
+}
+
+
+class PieChartCategory(BaseModel):
+    """Category data for Pie Chart visualization."""
+    category_id: str  # Enum name, e.g., "MEAT_FISH"
+    name: str  # Display name, e.g., "Meat & Fish"
+    total_spent: float
+    color_hex: str
+    percentage: float
+    transaction_count: int
+    average_health_score: Optional[float] = None
+
+
+class PieChartStore(BaseModel):
+    """Store data for Pie Chart visualization."""
+    store_name: str
+    total_spent: float
+    percentage: float
+    visit_count: int
+    average_health_score: Optional[float] = None
+
+
+class PieChartSummaryResponse(BaseModel):
+    """Response for analytics summary endpoint (Pie Chart)."""
+    month: int
+    year: int
+    total_spent: float
+    categories: List[PieChartCategory]
+    stores: List[PieChartStore]
 
 
 class StoreSpending(BaseModel):

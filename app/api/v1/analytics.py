@@ -15,6 +15,7 @@ from app.schemas.analytics import (
     AggregateResponse,
     AllTimeResponse,
     YearSummaryResponse,
+    PieChartSummaryResponse,
 )
 from app.services.analytics_service import AnalyticsService
 
@@ -74,47 +75,41 @@ def get_period_dates(
     return start, end, False
 
 
-@router.get("/summary", response_model=PeriodSummary)
+@router.get("/summary", response_model=PieChartSummaryResponse)
 async def get_summary(
-    period: Optional[str] = Query(None, description="Period: week, month, year, or custom. If not provided with no date params, returns all-time data."),
-    start_date: Optional[date] = Query(None, description="Start date for custom period"),
-    end_date: Optional[date] = Query(None, description="End date for custom period"),
+    month: int = Query(..., ge=1, le=12, description="Month (1-12)"),
+    year: int = Query(..., ge=2020, le=2100, description="Year (e.g., 2026)"),
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_db_user),
 ):
     """
-    Get spending summary for a period with store breakdown.
+    Get spending summary by category for a specific month/year (Pie Chart data).
 
-    Shows total spending, transaction count, and per-store breakdown
-    with visit counts and percentages.
+    Returns a list of categories with:
+    - `category_id`: Unique identifier (enum name)
+    - `name`: Display name
+    - `total_spent`: Total amount spent in this category
+    - `color_hex`: Hex color code for visualization
+    - `percentage`: Percentage of total spending
+    - `transaction_count`: Number of transactions
+    - `average_health_score`: Average health score (0-5)
 
-    **All-Time Mode**: When called without any query parameters (no period, start_date, or end_date),
-    returns aggregated data across ALL receipts ever uploaded.
+    This endpoint powers the Pie Chart visualization in the Analytics tab.
     """
     logger.info(
-        f"Analytics summary raw params: period={period}, "
-        f"start_date={start_date} (type={type(start_date).__name__ if start_date else 'None'}), "
-        f"end_date={end_date} (type={type(end_date).__name__ if end_date else 'None'})"
-    )
-
-    start, end, is_all_time = get_period_dates(period, start_date, end_date)
-
-    logger.info(
-        f"Analytics summary request: user_id={current_user.id}, "
-        f"period={period}, computed_start={start}, computed_end={end}, is_all_time={is_all_time}"
+        f"Analytics summary request: user_id={current_user.id}, month={month}, year={year}"
     )
 
     analytics = AnalyticsService(db)
-    result = await analytics.get_period_summary(
+    result = await analytics.get_pie_chart_summary(
         user_id=current_user.id,
-        start_date=start,
-        end_date=end,
-        all_time=is_all_time,
+        month=month,
+        year=year,
     )
 
     logger.info(
         f"Analytics summary result: user_id={current_user.id}, "
-        f"transaction_count={result.transaction_count}, total_spend={result.total_spend}"
+        f"categories_count={len(result.categories)}, total_spent={result.total_spent}"
     )
 
     return result

@@ -50,11 +50,14 @@ class BudgetNotFoundResponse(BaseModel):
 
 
 class CategoryProgress(BaseModel):
-    """Progress for a single category."""
-    category: str
-    budget_amount: float
-    current_spend: float
-    is_locked: bool
+    """Progress for a single category (Activity Rings data)."""
+    category_id: str  # Enum name, e.g., "MEAT_FISH"
+    name: str  # Display name, e.g., "Meat & Fish"
+    limit_amount: float  # The budget allocation for this category
+    spent_amount: float  # Actual spending in this category
+    is_over_budget: bool  # True if spent_amount > limit_amount
+    over_budget_amount: Optional[float] = None  # Amount over budget (only if over)
+    is_locked: bool  # Whether this category allocation is locked
 
 
 class BudgetProgressResponse(BaseModel):
