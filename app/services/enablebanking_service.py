@@ -117,10 +117,22 @@ class EnableBankingService:
         """
         if settings.ENABLEBANKING_PRIVATE_KEY:
             key = settings.ENABLEBANKING_PRIVATE_KEY
+            logger.debug(f"Raw private key length: {len(key)}, starts_with_begin: {key.startswith('-----BEGIN')}")
+            logger.debug(f"Contains literal backslash-n: {'\\\\n' in repr(key)}")
+
             # Convert escaped newlines to actual newlines
             # This handles PEM keys stored as env vars with \n as literal characters
             if "\\n" in key:
                 key = key.replace("\\n", "\n")
+                logger.debug("Replaced \\\\n with actual newlines")
+
+            # Validate key structure
+            if not key.startswith("-----BEGIN"):
+                logger.error(f"Private key doesn't start with -----BEGIN. First 50 chars: {key[:50]}")
+            if "-----END" not in key:
+                logger.error("Private key doesn't contain -----END marker")
+
+            logger.debug(f"Processed key length: {len(key)}, line_count: {key.count(chr(10))}")
             return key
 
         if settings.ENABLEBANKING_PRIVATE_KEY_PATH:
@@ -152,14 +164,18 @@ class EnableBankingService:
         }
 
         try:
-            return jwt.encode(
+            token = jwt.encode(
                 payload,
                 self.private_key,
                 algorithm="RS256",
                 headers=headers,
             )
+            logger.debug(f"Generated JWT token (first 50 chars): {token[:50]}...")
+            logger.debug(f"JWT kid (app_id): {self.app_id}")
+            return token
         except Exception as e:
             logger.error(f"Failed to generate JWT: {e}")
+            logger.error(f"Private key first 100 chars: {self.private_key[:100] if self.private_key else 'EMPTY'}")
             raise EnableBankingAPIError(
                 "Failed to generate authentication token. Check private key format.",
                 details={"error_type": "authentication", "error": str(e)},
@@ -195,7 +211,7 @@ class EnableBankingService:
                 )
 
                 if response.status_code == 401:
-                    logger.error("EnableBanking API authentication failed")
+                    logger.error(f"EnableBanking API authentication failed. Response: {response.text[:500]}")
                     raise EnableBankingAPIError(
                         "EnableBanking API authentication failed",
                         details={"error_type": "authentication"},
