@@ -1,4 +1,5 @@
-from datetime import datetime
+from datetime import datetime, date
+from dateutil.relativedelta import relativedelta
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -6,6 +7,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.api.deps import get_db, get_current_db_user
 from app.models.user import User
 from app.db.repositories.budget_repo import BudgetRepository
+from app.db.repositories.budget_history_repo import BudgetHistoryRepository
 from app.db.repositories.budget_ai_insight_repo import BudgetAIInsightRepository
 from app.services.budget_service import BudgetService
 from app.services.budget_ai_service import BudgetAIService
@@ -18,6 +20,8 @@ from app.schemas.budget import (
     BudgetProgressResponse,
     BudgetSuggestionResponse,
     CategoryAllocation,
+    BudgetHistoryEntry,
+    BudgetHistoryResponse,
 )
 from app.schemas.budget_ai import (
     AIBudgetSuggestionResponse,
@@ -78,9 +82,136 @@ async def get_budget(
         else None,
         notifications_enabled=budget.notifications_enabled,
         alert_thresholds=budget.alert_thresholds,
+        is_smart_budget=budget.is_smart_budget,
         created_at=budget.created_at,
         updated_at=budget.updated_at,
     )
+
+
+@router.get(
+    "/history",
+    response_model=BudgetHistoryResponse,
+)
+async def get_budget_history(
+    current_user: User = Depends(get_current_db_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Get the user's budget history.
+
+    Returns all historical budget records for the authenticated user,
+    ordered by month (newest first).
+
+    Returns:
+    - 200: Budget history list
+    - 401: Invalid or missing authentication token
+    """
+    history_repo = BudgetHistoryRepository(db)
+    history_entries = await history_repo.get_by_user_id(current_user.id)
+
+    return BudgetHistoryResponse(
+        budget_history=[
+            BudgetHistoryEntry(
+                id=entry.id,
+                user_id=entry.user_id,
+                monthly_amount=entry.monthly_amount,
+                category_allocations=[
+                    CategoryAllocation(**alloc)
+                    for alloc in (entry.category_allocations or [])
+                ]
+                if entry.category_allocations
+                else None,
+                month=entry.month,
+                was_smart_budget=entry.was_smart_budget,
+                was_deleted=entry.was_deleted,
+                created_at=entry.created_at,
+            )
+            for entry in history_entries
+        ]
+    )
+
+
+@router.post(
+    "/auto-rollover",
+    status_code=status.HTTP_204_NO_CONTENT,
+)
+async def auto_rollover_budget(
+    current_user: User = Depends(get_current_db_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Check if current month needs a budget auto-created from previous month.
+
+    This endpoint is idempotent - calling it multiple times will not create
+    duplicate budgets. It checks if:
+    1. A budget already exists for the current month (if so, does nothing)
+    2. Previous month had a smart budget that wasn't deleted (if so, creates new budget)
+
+    Returns:
+    - 204: Success (budget created or nothing to do)
+    - 401: Invalid or missing authentication token
+    """
+    budget_repo = BudgetRepository(db)
+    history_repo = BudgetHistoryRepository(db)
+
+    # Get current month in "YYYY-MM" format
+    today = date.today()
+    current_month = today.strftime("%Y-%m")
+
+    # Check if budget already exists for current month
+    existing_budget = await budget_repo.get_by_user_id(current_user.id)
+    if existing_budget:
+        # Budget already exists, check if it's for current month
+        budget_month = existing_budget.created_at.strftime("%Y-%m")
+        if budget_month == current_month:
+            # Budget exists for current month, nothing to do
+            return None
+
+    # Get previous month
+    previous_month_date = today - relativedelta(months=1)
+    previous_month = previous_month_date.strftime("%Y-%m")
+
+    # Get previous month's budget from history
+    previous_budget = await history_repo.get_by_user_and_month(
+        current_user.id, previous_month
+    )
+
+    # Check rollover conditions
+    if not previous_budget:
+        # No previous budget exists
+        return None
+
+    if not previous_budget.was_smart_budget:
+        # Previous budget was not a smart budget
+        return None
+
+    if previous_budget.was_deleted:
+        # Previous budget was deleted
+        return None
+
+    # Create new budget for current month (copying from previous month)
+    new_budget = await budget_repo.upsert(
+        user_id=current_user.id,
+        monthly_amount=previous_budget.monthly_amount,
+        category_allocations=previous_budget.category_allocations,
+        notifications_enabled=previous_budget.notifications_enabled,
+        alert_thresholds=previous_budget.alert_thresholds,
+        is_smart_budget=True,  # Inherit smart budget status
+    )
+
+    # Create history entry for the new budget
+    await history_repo.upsert(
+        user_id=current_user.id,
+        monthly_amount=new_budget.monthly_amount,
+        month=current_month,
+        was_smart_budget=new_budget.is_smart_budget,
+        category_allocations=new_budget.category_allocations,
+        was_deleted=False,
+        notifications_enabled=new_budget.notifications_enabled,
+        alert_thresholds=new_budget.alert_thresholds,
+    )
+
+    return None
 
 
 @router.post(
@@ -104,6 +235,7 @@ async def create_budget(
     - 401: Invalid or missing authentication token
     """
     repo = BudgetRepository(db)
+    history_repo = BudgetHistoryRepository(db)
 
     # Convert category allocations to dict format for storage
     category_allocations = None
@@ -124,6 +256,20 @@ async def create_budget(
         category_allocations=category_allocations,
         notifications_enabled=budget_data.notifications_enabled,
         alert_thresholds=budget_data.alert_thresholds,
+        is_smart_budget=budget_data.is_smart_budget,
+    )
+
+    # Create/update budget history entry for current month
+    current_month = date.today().strftime("%Y-%m")
+    await history_repo.upsert(
+        user_id=current_user.id,
+        monthly_amount=budget.monthly_amount,
+        month=current_month,
+        was_smart_budget=budget.is_smart_budget,
+        category_allocations=budget.category_allocations,
+        was_deleted=False,
+        notifications_enabled=budget.notifications_enabled,
+        alert_thresholds=budget.alert_thresholds,
     )
 
     return BudgetResponse(
@@ -138,6 +284,7 @@ async def create_budget(
         else None,
         notifications_enabled=budget.notifications_enabled,
         alert_thresholds=budget.alert_thresholds,
+        is_smart_budget=budget.is_smart_budget,
         created_at=budget.created_at,
         updated_at=budget.updated_at,
     )
@@ -170,6 +317,7 @@ async def update_budget(
     - 404: No budget found (use POST to create first)
     """
     repo = BudgetRepository(db)
+    history_repo = BudgetHistoryRepository(db)
     budget = await repo.get_by_user_id(current_user.id)
 
     if not budget:
@@ -204,7 +352,21 @@ async def update_budget(
         category_allocations=category_allocations,
         notifications_enabled=budget_data.notifications_enabled,
         alert_thresholds=budget_data.alert_thresholds,
+        is_smart_budget=budget_data.is_smart_budget,
         clear_category_allocations=clear_category_allocations,
+    )
+
+    # Update budget history entry for current month
+    current_month = date.today().strftime("%Y-%m")
+    await history_repo.upsert(
+        user_id=current_user.id,
+        monthly_amount=budget.monthly_amount,
+        month=current_month,
+        was_smart_budget=budget.is_smart_budget,
+        category_allocations=budget.category_allocations,
+        was_deleted=False,
+        notifications_enabled=budget.notifications_enabled,
+        alert_thresholds=budget.alert_thresholds,
     )
 
     return BudgetResponse(
@@ -219,6 +381,7 @@ async def update_budget(
         else None,
         notifications_enabled=budget.notifications_enabled,
         alert_thresholds=budget.alert_thresholds,
+        is_smart_budget=budget.is_smart_budget,
         created_at=budget.created_at,
         updated_at=budget.updated_at,
     )
@@ -241,12 +404,22 @@ async def delete_budget(
     """
     Delete the user's budget.
 
+    This marks the budget as deleted in history (prevents auto-rollover)
+    and removes it from the active budgets table.
+
     Returns:
     - 204: Budget deleted successfully (no content)
     - 401: Invalid or missing authentication token
     - 404: No budget found
     """
     repo = BudgetRepository(db)
+    history_repo = BudgetHistoryRepository(db)
+
+    # Mark budget as deleted in history for current month
+    current_month = date.today().strftime("%Y-%m")
+    await history_repo.mark_as_deleted(current_user.id, current_month)
+
+    # Delete from active budgets table
     deleted = await repo.delete_by_user_id(current_user.id)
 
     if not deleted:

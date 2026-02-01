@@ -17,6 +17,7 @@ class BudgetBase(BaseModel):
     category_allocations: Optional[List[CategoryAllocation]] = None
     notifications_enabled: bool = True
     alert_thresholds: Optional[List[float]] = Field(default=[0.5, 0.75, 0.9])
+    is_smart_budget: bool = True  # When true, budget auto-rolls to next month
 
 
 class BudgetCreate(BudgetBase):
@@ -30,6 +31,7 @@ class BudgetUpdate(BaseModel):
     category_allocations: Optional[List[CategoryAllocation]] = None
     notifications_enabled: Optional[bool] = None
     alert_thresholds: Optional[List[float]] = None
+    is_smart_budget: Optional[bool] = None  # Allows toggling smart budget
 
 
 class BudgetResponse(BudgetBase):
@@ -91,3 +93,28 @@ class BudgetSuggestionResponse(BaseModel):
     average_monthly_spend: float
     category_breakdown: List[CategoryBreakdown]
     savings_options: List[SavingsOption]
+
+
+# =============================================================================
+# Budget History Schemas
+# =============================================================================
+
+
+class BudgetHistoryEntry(BaseModel):
+    """Schema for a single budget history entry."""
+    id: str
+    user_id: str
+    monthly_amount: float
+    category_allocations: Optional[List[CategoryAllocation]] = None
+    month: str  # Format: "YYYY-MM"
+    was_smart_budget: bool
+    was_deleted: bool
+    created_at: datetime
+
+    class Config:
+        from_attributes = True
+
+
+class BudgetHistoryResponse(BaseModel):
+    """Schema for budget history response."""
+    budget_history: List[BudgetHistoryEntry]

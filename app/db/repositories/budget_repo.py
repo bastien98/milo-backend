@@ -45,6 +45,7 @@ class BudgetRepository:
         category_allocations: Optional[List[Any]] = None,
         notifications_enabled: bool = True,
         alert_thresholds: Optional[List[float]] = None,
+        is_smart_budget: bool = True,
     ) -> Budget:
         """Create a new budget."""
         if alert_thresholds is None:
@@ -56,6 +57,7 @@ class BudgetRepository:
             category_allocations=category_allocations,
             notifications_enabled=notifications_enabled,
             alert_thresholds=alert_thresholds,
+            is_smart_budget=is_smart_budget,
         )
         self.db.add(budget)
         await self.db.flush()
@@ -69,6 +71,7 @@ class BudgetRepository:
         category_allocations: Optional[List[Any]] = None,
         notifications_enabled: Optional[bool] = None,
         alert_thresholds: Optional[List[float]] = None,
+        is_smart_budget: Optional[bool] = None,
         clear_category_allocations: bool = False,
         clear_alert_thresholds: bool = False,
     ) -> Budget:
@@ -89,6 +92,8 @@ class BudgetRepository:
             budget.alert_thresholds = alert_thresholds
         elif clear_alert_thresholds:
             budget.alert_thresholds = None
+        if is_smart_budget is not None:
+            budget.is_smart_budget = is_smart_budget
 
         # Update the updated_at timestamp
         budget.updated_at = datetime.utcnow()
@@ -122,6 +127,7 @@ class BudgetRepository:
         category_allocations: Optional[List[Any]] = None,
         notifications_enabled: bool = True,
         alert_thresholds: Optional[List[float]] = None,
+        is_smart_budget: bool = True,
     ) -> Budget:
         """Create or replace budget for a user."""
         # Delete existing budget if any
@@ -134,4 +140,5 @@ class BudgetRepository:
             category_allocations=category_allocations,
             notifications_enabled=notifications_enabled,
             alert_thresholds=alert_thresholds,
+            is_smart_budget=is_smart_budget,
         )

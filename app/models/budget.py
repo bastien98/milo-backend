@@ -39,6 +39,9 @@ class Budget(Base):
         JSONB, default=[0.5, 0.75, 0.9]
     )
 
+    # Smart budget - when true, budget auto-rolls to next month
+    is_smart_budget: Mapped[bool] = mapped_column(Boolean, default=True)
+
     # Timestamps
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()

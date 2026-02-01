@@ -245,6 +245,7 @@ class BudgetService:
             else None,
             notifications_enabled=budget.notifications_enabled,
             alert_thresholds=budget.alert_thresholds,
+            is_smart_budget=budget.is_smart_budget,
             created_at=budget.created_at,
             updated_at=budget.updated_at,
         )
