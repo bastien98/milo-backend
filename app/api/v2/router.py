@@ -1,7 +1,7 @@
 from fastapi import APIRouter
 
 # Import v2-specific endpoints (using Gemini)
-from app.api.v2 import chat, receipts, periods, budgets
+from app.api.v2 import chat, receipts, periods, budgets, banking
 
 # Reuse v1 endpoints that don't interact with LLMs
 from app.api.v1 import health, transactions, analytics, rate_limit, profile
@@ -36,3 +36,6 @@ api_router.include_router(profile.router, prefix="/profile", tags=["v2 - profile
 
 # Budgets - V2 specific endpoint for budget tracking
 api_router.include_router(budgets.router, prefix="/budgets", tags=["v2 - budgets"])
+
+# Banking - Open Banking integration (EnableBanking)
+api_router.include_router(banking.router, prefix="/banking", tags=["v2 - banking"])

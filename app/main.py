@@ -15,6 +15,7 @@ from app.core.exceptions import (
     ResourceNotFoundError,
     PermissionDeniedError,
     RateLimitExceededError,
+    EnableBankingAPIError,
 )
 from app.api.v1.router import api_router
 from app.api.v2.router import api_router as api_router_v2
@@ -191,6 +192,28 @@ async def gemini_api_exception_handler(request: Request, exc: GeminiAPIError):
     content = {
         "error": "llm_service_error",
         "message": "AI service temporarily unavailable",
+        "details": {"retry_after": 30},
+    }
+
+    # Include detailed error info in debug mode
+    if settings.DEBUG:
+        content["debug"] = {
+            "error_type": error_type,
+            "message": exc.message,
+            "details": exc.details,
+        }
+
+    return JSONResponse(status_code=503, content=content)
+
+
+@app.exception_handler(EnableBankingAPIError)
+async def enablebanking_api_exception_handler(request: Request, exc: EnableBankingAPIError):
+    error_type = exc.details.get("error_type", "unknown")
+    logger.error(f"EnableBankingAPIError: {exc.message} (type={error_type}, details={exc.details})")
+
+    content = {
+        "error": "banking_service_error",
+        "message": "Open Banking service temporarily unavailable",
         "details": {"retry_after": 30},
     }
 

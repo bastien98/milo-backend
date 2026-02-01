@@ -62,3 +62,9 @@ class AICheckInRateLimitError(ScandaliciousException):
     """Raised when user exceeds AI check-in rate limit (1 per day)."""
 
     pass
+
+
+class EnableBankingAPIError(ScandaliciousException):
+    """Raised when EnableBanking API call fails."""
+
+    pass

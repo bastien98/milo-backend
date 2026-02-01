@@ -41,8 +41,10 @@ htmlcov/
 
 # Firebase
 *-firebase-adminsdk-*.json
-
 firebase-service-account.json
+
+# Private keys
+*.pem
 
 .env.example
 

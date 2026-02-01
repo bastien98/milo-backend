@@ -21,12 +21,28 @@ async_session_maker = async_sessionmaker(
 
 
 async def init_db():
-    """Initialize database tables."""
-    # Import all models to ensure they're registered
-    from app.models import user, receipt, transaction, user_rate_limit, user_profile, budget, budget_ai_insight  # noqa
+    """Initialize database tables.
 
-    async with engine.begin() as conn:
-        await conn.run_sync(Base.metadata.create_all)
+    When USE_ALEMBIC=True (default, production):
+        - Skips create_all() since Alembic handles migrations
+        - The railway.json startCommand runs 'alembic upgrade head' before starting the app
+
+    When USE_ALEMBIC=False (development):
+        - Uses create_all() for convenience (creates tables if they don't exist)
+    """
+    import logging
+    logger = logging.getLogger(__name__)
+
+    # Import all models to ensure they're registered with SQLAlchemy
+    from app.models import user, receipt, transaction, user_rate_limit, user_profile, budget, budget_ai_insight, budget_history  # noqa
+    from app.models import bank_connection, bank_account, bank_transaction  # noqa
+
+    if settings.USE_ALEMBIC:
+        logger.info("Database models registered. Using Alembic for migrations (USE_ALEMBIC=True).")
+    else:
+        logger.info("Running create_all() for database initialization (USE_ALEMBIC=False).")
+        async with engine.begin() as conn:
+            await conn.run_sync(Base.metadata.create_all)
 
 
 async def get_async_session():
