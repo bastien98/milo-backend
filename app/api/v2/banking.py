@@ -448,17 +448,23 @@ async def sync_bank_account(
     conn_repo = BankConnectionRepository(db)
     connection = await conn_repo.get_by_id(account.connection_id)
 
-    if not connection or connection.status != BankConnectionStatus.ACTIVE:
+    # Use explicit string comparison for status
+    conn_status = connection.status.value if hasattr(connection.status, 'value') else connection.status
+    logger.info(f"Connection status check: connection_id={connection.id}, status={conn_status}, type={type(connection.status)}")
+
+    if not connection or conn_status != "active":
+        logger.warning(f"Connection not active: status={conn_status}")
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail={"error": "connection_inactive", "message": "Bank connection is not active"},
+            detail={"error": "connection_inactive", "message": f"Bank connection is not active (status: {conn_status})"},
         )
 
     try:
         service = EnableBankingService()
 
-        logger.info(f"Syncing account: id={account.id}, account_uid={account.account_uid}")
-        logger.info(f"Using session_id: {connection.session_id}")
+        logger.info(f"=== SYNC START for account {account.id} ===")
+        logger.info(f"Account: id={account.id}, account_uid={account.account_uid}, iban={account.iban}")
+        logger.info(f"Connection: id={connection.id}, session_id={connection.session_id}, status={conn_status}")
 
         # Fetch balance
         balances = await service.get_account_balances(
@@ -489,17 +495,27 @@ async def sync_bank_account(
             date_to=date.today(),
         )
 
+        logger.info(f"Transactions fetched from EnableBanking: {len(transactions)}")
+        if transactions:
+            logger.info(f"First transaction: {transactions[0].transaction_id}, amount={transactions[0].amount}, date={transactions[0].booking_date}")
+        else:
+            logger.warning(f"No transactions returned from EnableBanking for date range {date_from} to {date.today()}")
+
         # Store new transactions with AI category suggestions
         txn_repo = BankTransactionRepository(db)
         new_count = 0
         new_transactions = []
+        existing_count = 0
 
         for txn in transactions:
             # Skip if already exists
             if await txn_repo.exists(account.id, txn.transaction_id):
+                existing_count += 1
                 continue
 
             new_transactions.append(txn)
+
+        logger.info(f"Transaction processing: total={len(transactions)}, existing={existing_count}, new={len(new_transactions)}")
 
         # Get AI category suggestions for new transactions in bulk
         if new_transactions:
@@ -542,58 +558,72 @@ async def sync_bank_account(
         # Update sync time
         await account_repo.update_sync_time(account)
 
+        logger.info(f"=== SYNC SUCCESS ===")
+        logger.info(f"Account {account.id}: balance={balance}, fetched={len(transactions)}, new={new_count}")
+
         return BankAccountSyncResponse(
             account_id=account.id,
             balance=balance,
             transactions_fetched=len(transactions),
             new_transactions=new_count,
             message=f"Synced {new_count} new transactions",
+            requires_reauth=False,
+            connection_id=None,
         )
 
     except EnableBankingAPIError as e:
-        # Check if session expired (404 = not found means session/consent expired)
-        if e.details.get("error_type") == "not_found":
-            logger.error(
-                f"EnableBanking 404 error during sync: "
-                f"account_id={account.id}, account_uid={account.account_uid}, "
-                f"session_id={connection.session_id}, connection_id={connection.id}, "
-                f"endpoint={e.details.get('endpoint', 'unknown')}"
-            )
-            # Mark connection as expired
-            await conn_repo.update_status(
-                connection,
-                BankConnectionStatus.EXPIRED,
-                error_message="Bank session expired. Please reconnect your bank account.",
-            )
-            # Return 200 with requires_reauth=True instead of 401
-            # This prevents iOS from confusing EnableBanking auth with Firebase auth
-            return BankAccountSyncResponse(
-                account_id=account.id,
-                balance=None,
-                transactions_fetched=0,
-                new_transactions=0,
-                message="Bank connection expired. Please reconnect your bank account.",
-                requires_reauth=True,
-                connection_id=connection.id,
-            )
+        error_type = e.details.get("error_type", "unknown")
+        endpoint = e.details.get("endpoint", "unknown")
+
+        logger.error(f"=== SYNC FAILED ===")
+        logger.error(f"EnableBanking error: type={error_type}, message={e.message}")
+        logger.error(f"Details: endpoint={endpoint}, full_details={e.details}")
+        logger.error(f"Account: id={account.id}, account_uid={account.account_uid}")
+        logger.error(f"Connection: id={connection.id}, session_id={connection.session_id}")
+
+        # Handle session/consent expired (404 on session or account endpoints)
+        if error_type == "not_found":
+            # Check if this is a session-level error or account-level error
+            if "/sessions/" in endpoint and "/accounts/" not in endpoint:
+                # Session itself not found - definitely expired
+                logger.error("EnableBanking session not found - session expired")
+                await conn_repo.update_status(
+                    connection,
+                    BankConnectionStatus.EXPIRED,
+                    error_message="Bank session expired. Please reconnect your bank account.",
+                )
+                return BankAccountSyncResponse(
+                    account_id=account.id,
+                    balance=None,
+                    transactions_fetched=0,
+                    new_transactions=0,
+                    message="Bank connection expired. Please reconnect your bank account.",
+                    requires_reauth=True,
+                    connection_id=connection.id,
+                )
+            else:
+                # Account not found within session - might be wrong account_uid
+                # Don't mark as expired, just report the error
+                logger.error(f"EnableBanking account not found - account_uid may be incorrect: {account.account_uid}")
+                raise HTTPException(
+                    status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                    detail={
+                        "error": "account_not_found",
+                        "message": f"Bank account not found. The account identifier may be invalid.",
+                        "account_uid": account.account_uid,
+                    },
+                )
 
         # Handle authentication errors from EnableBanking
-        if e.details.get("error_type") == "authentication":
-            logger.error(f"EnableBanking authentication error: {e.message}")
-            # Mark connection as expired
-            await conn_repo.update_status(
-                connection,
-                BankConnectionStatus.EXPIRED,
-                error_message="Bank authentication failed. Please reconnect.",
-            )
-            return BankAccountSyncResponse(
-                account_id=account.id,
-                balance=None,
-                transactions_fetched=0,
-                new_transactions=0,
-                message="Bank authentication failed. Please reconnect your bank account.",
-                requires_reauth=True,
-                connection_id=connection.id,
+        if error_type == "authentication":
+            logger.error(f"EnableBanking JWT authentication error - check API credentials")
+            # Don't mark connection as expired for JWT errors - this is a backend config issue
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail={
+                    "error": "banking_auth_error",
+                    "message": "Bank API authentication failed. Please try again later.",
+                },
             )
 
         # Other EnableBanking errors - return 503 (service unavailable)
@@ -602,6 +632,7 @@ async def sync_bank_account(
             detail={
                 "error": "sync_failed",
                 "message": e.message,
+                "error_type": error_type,
             },
         )
 
