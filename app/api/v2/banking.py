@@ -207,6 +207,28 @@ async def bank_connection_callback(
             raw_response={"accounts": session_result.accounts},
         )
 
+        # Clean up old connections to the same bank (prevents stale accounts)
+        # This ensures after reconnection, only the new connection/accounts are returned
+        old_connections = await conn_repo.get_by_user_and_bank(
+            user_id=connection.user_id,
+            aspsp_name=connection.aspsp_name,
+            exclude_id=connection.id,
+        )
+        for old_conn in old_connections:
+            logger.info(
+                f"Cleaning up old connection {old_conn.id} to {old_conn.aspsp_name} "
+                f"(status={old_conn.status}) after reconnection"
+            )
+            # Try to revoke the old session with EnableBanking
+            if old_conn.session_id:
+                try:
+                    await service.delete_session(old_conn.session_id)
+                except EnableBankingAPIError:
+                    pass  # Ignore errors - session may already be expired
+            # Delete old connection (cascades to accounts and transactions)
+            await conn_repo.delete(old_conn.id)
+            logger.info(f"Deleted old connection {old_conn.id} and its accounts")
+
         # Create accounts from session response
         account_repo = BankAccountRepository(db)
         for account_data in session_result.accounts:
@@ -355,9 +377,30 @@ async def list_bank_accounts(
     current_user: User = Depends(get_current_db_user),
     db: AsyncSession = Depends(get_db),
 ):
-    """Get all linked bank accounts for the current user."""
-    repo = BankAccountRepository(db)
-    accounts = await repo.get_by_user(current_user.id)
+    """Get all linked bank accounts for the current user.
+
+    Only returns accounts from ACTIVE connections.
+    Accounts from expired/revoked connections are filtered out.
+    """
+    account_repo = BankAccountRepository(db)
+    conn_repo = BankConnectionRepository(db)
+
+    # Debug: Get all accounts (including inactive) to log the filtering
+    all_accounts = await account_repo.get_by_user(current_user.id, active_only=False)
+    active_accounts = await account_repo.get_by_user(current_user.id, active_only=True)
+
+    logger.info(f"GET /bank-accounts: user={current_user.id}, total={len(all_accounts)}, active={len(active_accounts)}")
+
+    # Log details about each account for debugging
+    for acc in all_accounts:
+        conn = await conn_repo.get_by_id(acc.connection_id)
+        conn_status = conn.status.value if conn and hasattr(conn.status, 'value') else (conn.status if conn else "no_connection")
+        is_returned = any(a.id == acc.id for a in active_accounts)
+        logger.info(
+            f"  Account {acc.id[:8]}...: iban={acc.iban}, "
+            f"conn_status={conn_status}, acc_is_active={acc.is_active}, "
+            f"returned={is_returned}"
+        )
 
     return BankAccountListResponse(
         accounts=[
@@ -375,7 +418,7 @@ async def list_bank_accounts(
                 last_synced_at=a.last_synced_at,
                 created_at=a.created_at,
             )
-            for a in accounts
+            for a in active_accounts
         ]
     )
 

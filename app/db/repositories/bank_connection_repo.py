@@ -73,6 +73,23 @@ class BankConnectionRepository:
         )
         return list(result.scalars().all())
 
+    async def get_by_user_and_bank(
+        self, user_id: str, aspsp_name: str, exclude_id: Optional[str] = None
+    ) -> List[BankConnection]:
+        """Get all connections for a user to a specific bank.
+
+        Used to find existing connections when reconnecting to the same bank.
+        """
+        query = select(BankConnection).where(
+            BankConnection.user_id == user_id,
+            BankConnection.aspsp_name == aspsp_name,
+        )
+        if exclude_id:
+            query = query.where(BankConnection.id != exclude_id)
+
+        result = await self.db.execute(query)
+        return list(result.scalars().all())
+
     async def create(
         self,
         user_id: str,
