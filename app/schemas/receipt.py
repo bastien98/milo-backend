@@ -8,12 +8,17 @@ from app.models.enums import ReceiptStatus, Category
 
 class ExtractedItem(BaseModel):
     item_id: str  # UUID from the transactions table
-    item_name: str
+    item_name: str  # Contains normalized_name for display
     item_price: float
     quantity: int = 1
     unit_price: Optional[float] = None
-    category: Category
+    category: Category  # Parent/broad category (15 options)
     health_score: Optional[int] = None  # 0-5, None for non-food items
+    # New fields for semantic search and granular categorization
+    original_description: Optional[str] = None  # Raw OCR text
+    normalized_name: Optional[str] = None  # Cleaned name for semantic search
+    is_deposit: bool = False  # True for Leeggoed/Vidange items
+    granular_category: Optional[str] = None  # Detailed category (~200 options)
 
 
 class ReceiptUploadResponse(BaseModel):
@@ -73,12 +78,17 @@ class GroupedReceiptTransaction(BaseModel):
     """A single transaction within a grouped receipt."""
 
     item_id: str  # UUID from the transactions table
-    item_name: str
+    item_name: str  # Contains normalized_name for display
     item_price: float
     quantity: int
     unit_price: Optional[float]
-    category: Category
+    category: Category  # Parent/broad category (15 options)
     health_score: Optional[int]
+    # New fields for semantic search and granular categorization
+    original_description: Optional[str] = None  # Raw OCR text
+    normalized_name: Optional[str] = None  # Cleaned name for semantic search
+    is_deposit: bool = False  # True for Leeggoed/Vidange items
+    granular_category: Optional[str] = None  # Detailed category (~200 options)
 
 
 class GroupedReceipt(BaseModel):

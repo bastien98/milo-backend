@@ -85,6 +85,11 @@ class TransactionRepository:
         quantity: int = 1,
         unit_price: Optional[float] = None,
         health_score: Optional[int] = None,
+        # New fields for semantic search
+        original_description: Optional[str] = None,
+        normalized_name: Optional[str] = None,
+        is_deposit: bool = False,
+        granular_category: Optional[str] = None,
     ) -> Transaction:
         """Create a new transaction."""
         transaction = Transaction(
@@ -98,6 +103,11 @@ class TransactionRepository:
             category=category,
             date=date,
             health_score=health_score,
+            # New fields
+            original_description=original_description,
+            normalized_name=normalized_name,
+            is_deposit=is_deposit,
+            granular_category=granular_category,
         )
         self.db.add(transaction)
         await self.db.flush()

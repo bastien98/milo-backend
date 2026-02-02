@@ -3,7 +3,7 @@ from datetime import datetime
 from datetime import date as date_type
 from typing import TYPE_CHECKING, Optional
 
-from sqlalchemy import String, DateTime, Integer, Float, ForeignKey, Enum, Date, Index
+from sqlalchemy import String, DateTime, Integer, Float, ForeignKey, Enum, Date, Index, Text, Boolean
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db.base import Base
@@ -33,6 +33,16 @@ class Transaction(Base):
     item_price: Mapped[float] = mapped_column(Float, nullable=False)
     quantity: Mapped[int] = mapped_column(Integer, default=1)
     unit_price: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+
+    # Semantic search fields
+    original_description: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    normalized_name: Mapped[Optional[str]] = mapped_column(
+        String(255), nullable=True, index=True
+    )
+    is_deposit: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    granular_category: Mapped[Optional[str]] = mapped_column(
+        String(100), nullable=True, index=True
+    )
 
     # Categorization
     category: Mapped[Category] = mapped_column(

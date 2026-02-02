@@ -39,14 +39,21 @@ async def upload_receipt(
     Upload and process a receipt.
 
     Accepts PDF, JPG, or PNG files. The receipt will be analyzed using
-    Veryfi for OCR and Google Gemini for categorization.
+    Google Gemini Vision for OCR, semantic normalization, and categorization.
+
+    Features:
+    - Line item extraction with original and normalized names
+    - Granular categorization (~200 categories) plus parent categories
+    - Belgian pricing conventions (comma→dot, Hoeveelheidsvoordeel)
+    - Deposit detection (Leeggoed/Vidange items)
+    - Health scoring (0-5 scale)
 
     Rate limited to 15 uploads per month.
 
     Returns the extracted data synchronously.
 
-    **Duplicate Detection**: If Veryfi detects this receipt was previously processed,
-    returns `is_duplicate: true` with empty `receipt_id` and no transactions saved.
+    **Duplicate Detection**: If a receipt with the same content hash was previously
+    uploaded, returns `is_duplicate: true` with empty `receipt_id` and no transactions saved.
     """
     # Check receipt upload rate limit
     rate_limit_service = RateLimitService(db)
@@ -162,6 +169,11 @@ async def list_receipts(
                         unit_price=t.unit_price,
                         category=t.category,
                         health_score=t.health_score,
+                        # New fields for semantic search
+                        original_description=t.original_description,
+                        normalized_name=t.normalized_name,
+                        is_deposit=t.is_deposit,
+                        granular_category=t.granular_category,
                     )
                     for t in txns
                 ],
