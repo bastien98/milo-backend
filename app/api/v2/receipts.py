@@ -106,8 +106,12 @@ async def list_receipts(
 
     The receipt_id returned is the actual database UUID, which can be used
     directly with DELETE /api/v2/receipts/{receipt_id}.
+
+    The source field indicates whether the receipt was from a scanned receipt
+    ("receipt_upload") or a bank import ("bank_import").
     """
     transaction_repo = TransactionRepository(db)
+    receipt_repo = ReceiptRepository(db)
 
     # Fetch all matching transactions (without pagination - we paginate groups)
     transactions, _ = await transaction_repo.get_by_user(
@@ -125,6 +129,13 @@ async def list_receipts(
     for txn in transactions:
         if txn.receipt_id:
             groups[txn.receipt_id].append(txn)
+
+    # Fetch receipt sources for all receipts in one batch
+    receipt_sources = {}
+    for receipt_id in groups.keys():
+        receipt = await receipt_repo.get_by_id(receipt_id)
+        if receipt:
+            receipt_sources[receipt_id] = receipt.source
 
     # Build grouped receipts
     grouped_receipts = []
@@ -145,6 +156,10 @@ async def list_receipts(
             else None
         )
 
+        # Get source from the receipt (default to receipt_upload for backwards compatibility)
+        from app.models.enums import ReceiptSource
+        source = receipt_sources.get(receipt_id, ReceiptSource.RECEIPT_UPLOAD)
+
         grouped_receipts.append(
             GroupedReceipt(
                 receipt_id=receipt_id,
@@ -153,6 +168,7 @@ async def list_receipts(
                 total_amount=round(total_amount, 2),
                 items_count=items_count,
                 average_health_score=average_health_score,
+                source=source,
                 transactions=[
                     GroupedReceiptTransaction(
                         item_id=t.id,

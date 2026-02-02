@@ -3,7 +3,7 @@ from typing import Optional, List
 
 from pydantic import BaseModel
 
-from app.models.enums import ReceiptStatus, Category
+from app.models.enums import ReceiptStatus, Category, ReceiptSource
 
 
 class ExtractedItem(BaseModel):
@@ -94,6 +94,7 @@ class GroupedReceipt(BaseModel):
     total_amount: float
     items_count: int
     average_health_score: Optional[float]
+    source: ReceiptSource  # receipt_upload or bank_import
     transactions: List[GroupedReceiptTransaction]
 
 
