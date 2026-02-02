@@ -485,6 +485,22 @@ async def sync_bank_account(
         )
 
     except EnableBankingAPIError as e:
+        # Check if session expired (404 = not found means session/consent expired)
+        if e.details.get("error_type") == "not_found":
+            # Mark connection as expired
+            await conn_repo.update_status(
+                connection,
+                BankConnectionStatus.EXPIRED,
+                error_message="Bank session expired. Please reconnect your bank account.",
+            )
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail={
+                    "error": "session_expired",
+                    "message": "Bank connection has expired. Please reconnect your bank account.",
+                    "requires_reauth": True,
+                },
+            )
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail={
