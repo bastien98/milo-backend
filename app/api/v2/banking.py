@@ -20,6 +20,7 @@ from app.db.repositories.bank_connection_repo import BankConnectionRepository
 from app.db.repositories.bank_account_repo import BankAccountRepository
 from app.db.repositories.bank_transaction_repo import BankTransactionRepository
 from app.db.repositories.transaction_repo import TransactionRepository
+from app.db.repositories.receipt_repo import ReceiptRepository
 from app.services.enablebanking_service import EnableBankingService
 from app.services.bank_categorization_service import BankCategorizationService
 from app.core.exceptions import EnableBankingAPIError
@@ -40,6 +41,7 @@ from app.schemas.banking import (
     TransactionImportResult,
     TransactionIgnoreRequest,
     TransactionIgnoreResponse,
+    PendingTransactionsCountResponse,
     BankConnectionStatusEnum,
     BankTransactionStatusEnum,
     CallbackTypeEnum,
@@ -560,9 +562,16 @@ async def import_bank_transactions(
     current_user: User = Depends(get_current_db_user),
     db: AsyncSession = Depends(get_db),
 ):
-    """Import selected bank transactions to main transaction table."""
+    """Import selected bank transactions to main transaction table.
+
+    Creates a Receipt record for each imported transaction so that:
+    - Imported transactions appear in the receipts list
+    - Store visits are counted correctly in analytics
+    - All existing analytics work without modification
+    """
     bank_txn_repo = BankTransactionRepository(db)
     txn_repo = TransactionRepository(db)
+    receipt_repo = ReceiptRepository(db)
 
     results = []
     imported_count = 0
@@ -620,16 +629,32 @@ async def import_bank_transactions(
 
         item_name = item.item_name
         if not item_name:
-            item_name = bank_txn.description or bank_txn.remittance_info or "Bank Transaction"
+            # Fall back to bank transaction description, then remittance info
+            item_name = bank_txn.description or bank_txn.remittance_info
+            if not item_name:
+                # Final fallback: use a descriptive default
+                item_name = f"Bank transaction from {store_name}"
 
-        # Create main transaction
         # Use absolute value for item_price (expenses are negative in bank data)
+        transaction_amount = abs(bank_txn.amount)
+
         try:
-            transaction = await txn_repo.create(
+            # Create a Receipt record for the bank import
+            # This ensures the transaction appears in analytics and receipts list
+            receipt = await receipt_repo.create_from_bank_import(
                 user_id=current_user.id,
                 store_name=store_name,
+                receipt_date=bank_txn.booking_date,
+                total_amount=transaction_amount,
+            )
+
+            # Create main transaction linked to the receipt
+            transaction = await txn_repo.create(
+                user_id=current_user.id,
+                receipt_id=receipt.id,
+                store_name=store_name,
                 item_name=item_name,
-                item_price=abs(bank_txn.amount),
+                item_price=transaction_amount,
                 category=category,
                 date=bank_txn.booking_date,
                 quantity=1,
@@ -696,3 +721,22 @@ async def ignore_bank_transactions(
         )
 
     return TransactionIgnoreResponse(ignored_count=ignored_count)
+
+
+@router.get(
+    "/bank-transactions/pending/count",
+    response_model=PendingTransactionsCountResponse,
+    summary="Get pending transactions count",
+)
+async def get_pending_transactions_count(
+    current_user: User = Depends(get_current_db_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Get the count of pending bank transactions awaiting import.
+
+    This endpoint is useful for displaying notification badges
+    in the app to indicate pending transactions.
+    """
+    repo = BankTransactionRepository(db)
+    count = await repo.get_pending_count_by_user(current_user.id)
+    return PendingTransactionsCountResponse(count=count)

@@ -28,6 +28,11 @@ class ReceiptStatus(str, Enum):
     FAILED = "failed"
 
 
+class ReceiptSource(str, Enum):
+    RECEIPT_UPLOAD = "receipt_upload"
+    BANK_IMPORT = "bank_import"
+
+
 class Gender(str, Enum):
     MALE = "male"
     FEMALE = "female"

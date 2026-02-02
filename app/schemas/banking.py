@@ -237,3 +237,9 @@ class TransactionIgnoreResponse(BaseModel):
     """Response for ignore transactions endpoint."""
 
     ignored_count: int
+
+
+class PendingTransactionsCountResponse(BaseModel):
+    """Response for pending transactions count endpoint."""
+
+    count: int = Field(..., description="Number of pending bank transactions awaiting import")

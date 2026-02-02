@@ -114,6 +114,20 @@ class BankTransactionRepository:
 
         return transactions, total
 
+    async def get_pending_count_by_user(self, user_id: str) -> int:
+        """Get count of pending transactions for a user across all accounts."""
+        count_result = await self.db.execute(
+            select(func.count(BankTransaction.id))
+            .select_from(BankTransaction)
+            .join(BankAccount)
+            .join(BankConnection)
+            .where(
+                BankConnection.user_id == user_id,
+                BankTransaction.status == BankTransactionStatus.PENDING,
+            )
+        )
+        return count_result.scalar() or 0
+
     async def exists(self, account_id: str, transaction_id: str) -> bool:
         """Check if a transaction already exists."""
         result = await self.db.execute(

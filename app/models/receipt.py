@@ -6,7 +6,7 @@ from sqlalchemy import String, DateTime, Integer, Float, ForeignKey, Text, Enum,
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db.base import Base
-from app.models.enums import ReceiptStatus
+from app.models.enums import ReceiptStatus, ReceiptSource
 
 if TYPE_CHECKING:
     from app.models.user import User
@@ -23,14 +23,17 @@ class Receipt(Base):
         String, ForeignKey("users.id"), nullable=False, index=True
     )
 
-    # File metadata
-    original_filename: Mapped[str] = mapped_column(String, nullable=False)
-    file_type: Mapped[str] = mapped_column(String, nullable=False)  # pdf, jpg, png
-    file_size_bytes: Mapped[int] = mapped_column(Integer, nullable=False)
+    # File metadata (nullable for bank imports which have no file)
+    original_filename: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+    file_type: Mapped[Optional[str]] = mapped_column(String, nullable=True)  # pdf, jpg, png
+    file_size_bytes: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
 
     # Processing status
     status: Mapped[ReceiptStatus] = mapped_column(
         Enum(ReceiptStatus), default=ReceiptStatus.PENDING
+    )
+    source: Mapped[ReceiptSource] = mapped_column(
+        Enum(ReceiptSource), default=ReceiptSource.RECEIPT_UPLOAD, nullable=False
     )
     error_message: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
 
