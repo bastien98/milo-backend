@@ -187,6 +187,23 @@ class ExpenseSplitRepository:
         await self.db.refresh(assignment)
         return assignment
 
+    async def create_assignment(
+        self,
+        split_id: str,
+        transaction_id: str,
+        participant_ids: List[str],
+    ) -> SplitAssignment:
+        """Create a new assignment for a transaction (always creates, never updates)."""
+        assignment = SplitAssignment(
+            split_id=split_id,
+            transaction_id=transaction_id,
+            participant_ids=participant_ids,
+        )
+        self.db.add(assignment)
+        await self.db.flush()
+        await self.db.refresh(assignment)
+        return assignment
+
     async def get_assignments_by_split(self, split_id: str) -> List[SplitAssignment]:
         """Get all assignments for a split."""
         result = await self.db.execute(

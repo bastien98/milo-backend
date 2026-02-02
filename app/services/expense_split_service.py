@@ -125,6 +125,11 @@ class ExpenseSplitService:
         await self.split_repo.clear_assignments(split_id)
         await self.split_repo.clear_participants(split_id)
 
+        # Expire all cached objects to ensure we don't use stale data
+        # This is critical because clear_assignments/clear_participants use bulk deletes
+        # which don't update the session's identity map
+        self.db.expire_all()
+
         # Add new participants
         for i, participant_data in enumerate(data.participants):
             await self.split_repo.add_participant(
@@ -144,7 +149,7 @@ class ExpenseSplitService:
         sorted_participants = sorted(split.participants, key=lambda x: x.display_order)
         index_to_backend_id = {str(i): p.id for i, p in enumerate(sorted_participants)}
 
-        # Add new assignments
+        # Add new assignments (always create new, never update existing after clear)
         for assignment_data in data.assignments:
             # Convert indices to backend participant UUIDs
             backend_participant_ids = []
@@ -154,7 +159,7 @@ class ExpenseSplitService:
                 else:
                     backend_participant_ids.append(participant_ref)
 
-            await self.split_repo.set_assignment(
+            await self.split_repo.create_assignment(
                 split_id=split_id,
                 transaction_id=assignment_data.transaction_id,
                 participant_ids=backend_participant_ids,
