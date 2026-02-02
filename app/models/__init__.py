@@ -8,6 +8,7 @@ from app.models.budget_ai_insight import BudgetAIInsight, AIInsightFeedback
 from app.models.bank_connection import BankConnection, BankConnectionStatus, CallbackType
 from app.models.bank_account import BankAccount
 from app.models.bank_transaction import BankTransaction, BankTransactionStatus
+from app.models.expense_split import ExpenseSplit, SplitParticipant, SplitAssignment, RecentFriend
 
 __all__ = [
     "User",
@@ -26,4 +27,8 @@ __all__ = [
     "BankAccount",
     "BankTransaction",
     "BankTransactionStatus",
+    "ExpenseSplit",
+    "SplitParticipant",
+    "SplitAssignment",
+    "RecentFriend",
 ]

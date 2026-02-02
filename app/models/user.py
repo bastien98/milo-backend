@@ -16,6 +16,7 @@ if TYPE_CHECKING:
     from app.models.budget_ai_insight import BudgetAIInsight
     from app.models.budget_history import BudgetHistory
     from app.models.bank_connection import BankConnection
+    from app.models.expense_split import ExpenseSplit
 
 
 class User(Base):
@@ -58,4 +59,7 @@ class User(Base):
     )
     bank_connections: Mapped[List["BankConnection"]] = relationship(
         "BankConnection", back_populates="user", cascade="all, delete-orphan"
+    )
+    expense_splits: Mapped[List["ExpenseSplit"]] = relationship(
+        "ExpenseSplit", back_populates="user", cascade="all, delete-orphan"
     )
