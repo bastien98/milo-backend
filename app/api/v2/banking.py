@@ -510,6 +510,12 @@ async def sync_bank_account(
     except EnableBankingAPIError as e:
         # Check if session expired (404 = not found means session/consent expired)
         if e.details.get("error_type") == "not_found":
+            logger.error(
+                f"EnableBanking 404 error during sync: "
+                f"account_id={account.id}, account_uid={account.account_uid}, "
+                f"session_id={connection.session_id}, connection_id={connection.id}, "
+                f"endpoint={e.details.get('endpoint', 'unknown')}"
+            )
             # Mark connection as expired
             await conn_repo.update_status(
                 connection,
