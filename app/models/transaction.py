@@ -3,11 +3,10 @@ from datetime import datetime
 from datetime import date as date_type
 from typing import TYPE_CHECKING, Optional
 
-from sqlalchemy import String, DateTime, Integer, Float, ForeignKey, Enum, Date, Index
+from sqlalchemy import String, DateTime, Integer, Float, ForeignKey, Date, Index
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db.base import Base
-from app.models.enums import Category
 
 if TYPE_CHECKING:
     from app.models.user import User
@@ -35,8 +34,8 @@ class Transaction(Base):
     unit_price: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
 
     # Categorization
-    category: Mapped[Category] = mapped_column(
-        Enum(Category), nullable=False, index=True
+    category: Mapped[str] = mapped_column(
+        String, nullable=False, index=True
     )
 
     # Health score (0-5, where 0 is unhealthy and 5 is very healthy)

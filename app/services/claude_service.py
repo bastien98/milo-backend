@@ -8,7 +8,6 @@ from typing import List, Optional
 import anthropic
 
 from app.core.exceptions import ClaudeAPIError
-from app.models.enums import Category
 from app.config import get_settings
 
 settings = get_settings()
@@ -21,7 +20,7 @@ class ExtractedItem:
     item_price: float
     quantity: int
     unit_price: Optional[float]
-    category: Category
+    category: str
     health_score: Optional[int]  # 0-5, where 0 is unhealthy and 5 is very healthy (None for non-food items)
 
 
@@ -229,12 +228,8 @@ Return ONLY valid JSON in this exact format:
         """Validate and convert raw JSON to typed result."""
         items = []
         for item_data in data.get("items", []):
-            # Validate category
-            category_str = item_data.get("category", "Other")
-            try:
-                category = Category(category_str)
-            except ValueError:
-                category = Category.OTHER
+            # Get category - use string directly
+            category = item_data.get("category", "Other")
 
             # Handle missing or null prices
             item_price = item_data.get("item_price")

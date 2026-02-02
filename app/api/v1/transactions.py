@@ -7,7 +7,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_db, get_current_db_user
 from app.models.user import User
-from app.models.enums import Category
 from app.schemas.transaction import (
     TransactionResponse,
     TransactionListResponse,
@@ -26,7 +25,7 @@ async def list_transactions(
     start_date: Optional[date] = Query(None, description="Filter by start date"),
     end_date: Optional[date] = Query(None, description="Filter by end date"),
     store_name: Optional[str] = Query(None, description="Filter by store name"),
-    category: Optional[Category] = Query(None, description="Filter by category"),
+    category: Optional[str] = Query(None, description="Filter by category"),
     page: int = Query(1, ge=1),
     page_size: int = Query(50, ge=1, le=100),
     db: AsyncSession = Depends(get_db),

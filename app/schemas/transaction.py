@@ -3,8 +3,6 @@ from typing import Optional, List, Literal
 
 from pydantic import BaseModel, Field
 
-from app.models.enums import Category
-
 
 class TransactionBase(BaseModel):
     store_name: str
@@ -12,7 +10,7 @@ class TransactionBase(BaseModel):
     item_price: float
     quantity: int = 1
     unit_price: Optional[float] = None
-    category: Category
+    category: str
     date: date
     health_score: Optional[int] = None  # 0-5, None for non-food items
 
@@ -27,7 +25,7 @@ class TransactionUpdate(BaseModel):
     item_price: Optional[float] = None
     quantity: Optional[int] = None
     unit_price: Optional[float] = None
-    category: Optional[Category] = None
+    category: Optional[str] = None
     date: Optional[date] = None
     health_score: Optional[int] = None
 
@@ -54,7 +52,7 @@ class TransactionFilters(BaseModel):
     start_date: Optional[date] = None
     end_date: Optional[date] = None
     store_name: Optional[str] = None
-    category: Optional[Category] = None
+    category: Optional[str] = None
     page: int = Field(default=1, ge=1)
     page_size: int = Field(default=50, ge=1, le=100)
 

@@ -37,8 +37,6 @@ from app.schemas.analytics import (
     PieChartSummaryResponse,
     CATEGORY_COLORS,
 )
-from app.models.enums import Category
-
 logger = logging.getLogger(__name__)
 
 

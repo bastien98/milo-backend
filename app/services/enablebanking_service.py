@@ -118,8 +118,8 @@ class EnableBankingService:
         if settings.ENABLEBANKING_PRIVATE_KEY:
             key = settings.ENABLEBANKING_PRIVATE_KEY
             logger.debug(f"Raw private key length: {len(key)}, starts_with_begin: {key.startswith('-----BEGIN')}")
-            has_literal_backslash_n = "\\n" in repr(key)
-            logger.debug(f"Contains literal backslash-n: {has_literal_backslash_n}")
+            has_backslash_n = "\\n" in repr(key)
+            logger.debug(f"Contains literal backslash-n: {has_backslash_n}")
 
             # Convert escaped newlines to actual newlines
             # This handles PEM keys stored as env vars with \n as literal characters

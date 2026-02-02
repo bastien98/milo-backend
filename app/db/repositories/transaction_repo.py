@@ -5,7 +5,6 @@ from sqlalchemy import select, func, and_, delete
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.transaction import Transaction
-from app.models.enums import Category
 
 
 class TransactionRepository:
@@ -37,7 +36,7 @@ class TransactionRepository:
         start_date: Optional[date] = None,
         end_date: Optional[date] = None,
         store_name: Optional[str] = None,
-        category: Optional[Category] = None,
+        category: Optional[str] = None,
         page: int = 1,
         page_size: int = 50,
     ) -> tuple[List[Transaction], int]:
@@ -79,7 +78,7 @@ class TransactionRepository:
         store_name: str,
         item_name: str,
         item_price: float,
-        category: Category,
+        category: str,
         date: date,
         receipt_id: Optional[str] = None,
         quantity: int = 1,
@@ -112,7 +111,7 @@ class TransactionRepository:
         item_price: Optional[float] = None,
         quantity: Optional[int] = None,
         unit_price: Optional[float] = None,
-        category: Optional[Category] = None,
+        category: Optional[str] = None,
         date: Optional[date] = None,
         health_score: Optional[int] = None,
     ) -> Optional[Transaction]:

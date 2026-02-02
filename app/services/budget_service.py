@@ -8,7 +8,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.transaction import Transaction
 from app.models.budget import Budget
-from app.models.enums import Category
 from app.schemas.budget import (
     BudgetResponse,
     BudgetProgressResponse,
@@ -19,8 +18,10 @@ from app.schemas.budget import (
     CategoryAllocation,
 )
 
-# Reverse mapping from display name to enum
-CATEGORY_NAME_TO_ENUM = {cat.value: cat for cat in Category}
+
+def category_name_to_id(category_name: str) -> str:
+    """Convert category display name to ID format."""
+    return category_name.upper().replace(" ", "_").replace("&", "").replace("(", "").replace(")", "").replace("/", "_").replace("-", "_")
 
 
 class BudgetService:
@@ -174,9 +175,8 @@ class BudgetService:
                 is_over_budget = category_spend > limit_amount
                 over_budget_amount = round(category_spend - limit_amount, 2) if is_over_budget else None
 
-                # Get category_id from enum
-                category_enum = CATEGORY_NAME_TO_ENUM.get(category_name)
-                category_id = category_enum.name if category_enum else category_name.upper().replace(" ", "_").replace("&", "").replace("(", "").replace(")", "").replace("/", "_")
+                # Get category_id from display name
+                category_id = category_name_to_id(category_name)
 
                 category_progress.append(
                     CategoryProgress(
@@ -213,9 +213,8 @@ class BudgetService:
                 is_over_budget = category_spend > limit_amount
                 over_budget_amount = round(category_spend - limit_amount, 2) if is_over_budget else None
 
-                # Get category_id from enum
-                category_enum = CATEGORY_NAME_TO_ENUM.get(category_name)
-                category_id = category_enum.name if category_enum else category_name.upper().replace(" ", "_").replace("&", "").replace("(", "").replace(")", "").replace("/", "_")
+                # Get category_id from display name
+                category_id = category_name_to_id(category_name)
 
                 category_progress.append(
                     CategoryProgress(

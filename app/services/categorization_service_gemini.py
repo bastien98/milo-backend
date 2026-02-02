@@ -7,7 +7,7 @@ from google import genai
 from google.genai import types
 
 from app.core.exceptions import GeminiAPIError
-from app.models.enums import Category
+from app.core.categories import CATEGORY_PROMPT_SECTION
 from app.config import get_settings
 from app.services.veryfi_service import VeryfiLineItem
 
@@ -22,7 +22,7 @@ class CategorizedItem:
     item_price: float
     quantity: int
     unit_price: Optional[float]
-    category: Category
+    category: str
     health_score: Optional[int]  # 0-5, None for non-food items
 
 
@@ -67,23 +67,7 @@ For each UNIQUE item (after deduplication), provide:
    - Use title case for proper formatting
 
 2. category: Classify into exactly one of these categories:
-   - "Meat & Fish" (meat, poultry, fish, seafood)
-   - "Alcohol" (beer, wine, spirits, including deposit/leeggoed)
-   - "Drinks (Soft/Soda)" (sodas, juices, energy drinks)
-   - "Drinks (Water)" (water, sparkling water)
-   - "Household" (cleaning, paper products, bags)
-   - "Snacks & Sweets" (chips, chocolate, candy, cookies)
-   - "Fresh Produce" (fruits, vegetables)
-   - "Dairy & Eggs" (milk, cheese, yogurt, eggs, butter)
-   - "Ready Meals" (prepared foods, salads, soups, pizza, lasagna)
-   - "Bakery" (bread, pastries, croissants)
-   - "Pantry" (pasta, rice, oil, canned goods, spices, sugar, flour)
-   - "Personal Care" (shampoo, soap, dental, deodorant)
-   - "Frozen" (frozen foods not in other categories)
-   - "Baby & Kids" (diapers, baby food, kids products)
-   - "Pet Supplies" (pet food, pet accessories)
-   - "Tobacco" (cigarettes, rolling tobacco, lighters, rolling papers, filters, e-cigarettes, vapes)
-   - "Other" (anything that doesn't fit above)
+""" + CATEGORY_PROMPT_SECTION + """
 
 3. health_score: Rate the healthiness of each item from 0 to 5:
    - 5: Very healthy (fresh vegetables, fruits, water, plain nuts)
@@ -245,12 +229,8 @@ Return ONLY valid JSON with this exact format:
             if primary_item.total is None and primary_item.price is None:
                 continue
 
-            # Parse category
-            category_str = cat_data.get("category", "Other")
-            try:
-                category = Category(category_str)
-            except ValueError:
-                category = Category.OTHER
+            # Parse category - use string directly
+            category = cat_data.get("category", "Other")
 
             # Parse health score
             health_score_raw = cat_data.get("health_score")

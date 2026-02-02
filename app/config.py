@@ -49,8 +49,8 @@ class Settings(BaseSettings):
     FRONTEND_URL: str = "https://app.milo.com"  # Web app URL for redirects
     MOBILE_DEEP_LINK_SCHEME: str = "milo"  # Deep link scheme for mobile app
 
-    # Database migrations
-    USE_ALEMBIC: bool = True  # If True, skip create_all() in init_db() (Alembic handles migrations)
+    # Database initialization
+    SKIP_DB_INIT: bool = True  # Skip create_all() - set to False only for fresh databases
 
     @field_validator("DATABASE_URL", mode="before")
     @classmethod
