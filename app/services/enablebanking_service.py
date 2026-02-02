@@ -338,6 +338,11 @@ class EnableBankingService:
             },
         }
 
+        logger.info(f"=== EnableBanking /auth request ===")
+        logger.info(f"ASPSP name: '{aspsp_name}'")
+        logger.info(f"ASPSP country: '{aspsp_country.upper()}'")
+        logger.info(f"Full payload: {payload}")
+
         data = await self._request("POST", "/auth", json=payload)
 
         return AuthorizationResult(
@@ -357,6 +362,14 @@ class EnableBankingService:
         """
         payload = {"code": code}
         data = await self._request("POST", "/sessions", json=payload)
+
+        # Log the full raw response for debugging
+        logger.info(f"=== EnableBanking /sessions response ===")
+        logger.info(f"Full response keys: {list(data.keys())}")
+        logger.info(f"Session ID: {data.get('session_id')}")
+        logger.info(f"Accounts count: {len(data.get('accounts', []))}")
+        for i, acc in enumerate(data.get("accounts", [])):
+            logger.info(f"Account {i}: {acc}")
 
         valid_until = None
         if data.get("access", {}).get("valid_until"):
@@ -410,8 +423,10 @@ class EnableBankingService:
         Returns:
             List of account balances
         """
+        # Note: EnableBanking API uses /accounts/{account_id}/balances (not /sessions/.../accounts/...)
+        # The session context is provided via the JWT authentication
         data = await self._request(
-            "GET", f"/sessions/{session_id}/accounts/{account_id}/balances"
+            "GET", f"/accounts/{account_id}/balances"
         )
 
         balances = []
@@ -460,9 +475,11 @@ class EnableBankingService:
         if date_to:
             params["date_to"] = date_to.isoformat()
 
+        # Note: EnableBanking API uses /accounts/{account_id}/transactions (not /sessions/.../accounts/...)
+        # The session context is provided via the JWT authentication
         data = await self._request(
             "GET",
-            f"/sessions/{session_id}/accounts/{account_id}/transactions",
+            f"/accounts/{account_id}/transactions",
             params=params if params else None,
         )
 
@@ -490,17 +507,17 @@ class EnableBankingService:
                 except ValueError:
                     pass
 
-            # Parse creditor/debtor
-            creditor = txn.get("creditor", {})
-            debtor = txn.get("debtor", {})
+            # Parse creditor/debtor (handle null values from API)
+            creditor = txn.get("creditor") or {}
+            debtor = txn.get("debtor") or {}
 
             # Get IBAN from nested account structure
             creditor_iban = None
-            if creditor.get("account"):
+            if creditor and creditor.get("account"):
                 creditor_iban = creditor["account"].get("iban")
 
             debtor_iban = None
-            if debtor.get("account"):
+            if debtor and debtor.get("account"):
                 debtor_iban = debtor["account"].get("iban")
 
             # Build transaction ID - prefer transaction_id, fall back to entry_reference

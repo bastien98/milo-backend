@@ -33,7 +33,9 @@ class Receipt(Base):
         Enum(ReceiptStatus), default=ReceiptStatus.PENDING
     )
     source: Mapped[ReceiptSource] = mapped_column(
-        Enum(ReceiptSource), default=ReceiptSource.RECEIPT_UPLOAD, nullable=False
+        Enum(ReceiptSource, values_callable=lambda e: [m.value for m in e]),
+        default=ReceiptSource.RECEIPT_UPLOAD,
+        nullable=False
     )
     error_message: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
 

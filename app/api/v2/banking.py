@@ -122,6 +122,10 @@ async def create_bank_connection(
 ):
     """Start bank authorization flow."""
     try:
+        logger.info(f"=== CREATE BANK CONNECTION ===")
+        logger.info(f"Bank name: '{data.bank_name}'")
+        logger.info(f"Country: '{data.country}'")
+
         service = EnableBankingService()
 
         # Start authorization with EnableBanking
@@ -466,34 +470,52 @@ async def sync_bank_account(
         logger.info(f"Account: id={account.id}, account_uid={account.account_uid}, iban={account.iban}")
         logger.info(f"Connection: id={connection.id}, session_id={connection.session_id}, status={conn_status}")
 
-        # Fetch balance
-        balances = await service.get_account_balances(
-            connection.session_id, account.account_uid
-        )
-
         balance = None
         balance_type = None
-        for b in balances:
-            if b.balance_type in ["closingBooked", "interimBooked"]:
-                balance = b.balance_amount
-                balance_type = b.balance_type
-                break
-        if balance is None and balances:
-            balance = balances[0].balance_amount
-            balance_type = balances[0].balance_type
+        balance_error = None
 
-        # Update account balance
-        if balance is not None:
-            await account_repo.update_balance(account, balance, balance_type)
+        # Fetch balance (continue even if this fails - some sandbox accounts don't support balance queries)
+        try:
+            balances = await service.get_account_balances(
+                connection.session_id, account.account_uid
+            )
 
-        # Fetch transactions
+            for b in balances:
+                if b.balance_type in ["closingBooked", "interimBooked"]:
+                    balance = b.balance_amount
+                    balance_type = b.balance_type
+                    break
+            if balance is None and balances:
+                balance = balances[0].balance_amount
+                balance_type = balances[0].balance_type
+
+            # Update account balance
+            if balance is not None:
+                await account_repo.update_balance(account, balance, balance_type)
+        except EnableBankingAPIError as e:
+            # Balance fetch failed - this might be a sandbox limitation, continue to try transactions
+            balance_error = e
+            logger.warning(f"Balance fetch failed (continuing to transactions): {e.message}")
+
+        # Fetch transactions (this is the main sync goal)
         date_from = date.today() - timedelta(days=days_back)
-        transactions = await service.get_transactions(
-            connection.session_id,
-            account.account_uid,
-            date_from=date_from,
-            date_to=date.today(),
-        )
+        try:
+            transactions = await service.get_transactions(
+                connection.session_id,
+                account.account_uid,
+                date_from=date_from,
+                date_to=date.today(),
+            )
+        except EnableBankingAPIError as e:
+            # If both balance AND transactions fail, the session is likely invalid
+            if balance_error:
+                # Both failed - likely session expired or invalid account
+                logger.error(f"Both balance and transactions failed - session may be invalid")
+                raise e
+            else:
+                # Only transactions failed but balance worked - weird state
+                logger.warning(f"Transactions fetch failed but balance worked: {e.message}")
+                transactions = []
 
         logger.info(f"Transactions fetched from EnableBanking: {len(transactions)}")
         if transactions:
@@ -508,11 +530,17 @@ async def sync_bank_account(
         existing_count = 0
 
         for txn in transactions:
+            # Log each transaction for debugging
+            logger.info(f"  Transaction: id={txn.transaction_id}, amount={txn.amount}, date={txn.booking_date}, creditor={txn.creditor_name}, debtor={txn.debtor_name}")
+
             # Skip if already exists
-            if await txn_repo.exists(account.id, txn.transaction_id):
+            exists = await txn_repo.exists(account.id, txn.transaction_id)
+            if exists:
                 existing_count += 1
+                logger.info(f"    → Already exists, skipping")
                 continue
 
+            logger.info(f"    → NEW transaction, will be added")
             new_transactions.append(txn)
 
         logger.info(f"Transaction processing: total={len(transactions)}, existing={existing_count}, new={len(new_transactions)}")
@@ -558,8 +586,15 @@ async def sync_bank_account(
         # Update sync time
         await account_repo.update_sync_time(account)
 
+        # Get and log total pending count for debugging
+        pending_count = await txn_repo.get_pending_count_by_user(
+            # Need to get user_id from connection
+            connection.user_id
+        )
+
         logger.info(f"=== SYNC SUCCESS ===")
         logger.info(f"Account {account.id}: balance={balance}, fetched={len(transactions)}, new={new_count}")
+        logger.info(f"Total pending transactions for user: {pending_count}")
 
         return BankAccountSyncResponse(
             account_id=account.id,
@@ -659,11 +694,16 @@ async def list_bank_transactions(
     db: AsyncSession = Depends(get_db),
 ):
     """Get bank transactions for the current user."""
+    logger.info(f"=== GET PENDING TRANSACTIONS ===")
+    logger.info(f"User: {current_user.id}")
+
     repo = BankTransactionRepository(db)
 
     transactions, total = await repo.get_pending_by_user(
         current_user.id, page=page, page_size=page_size
     )
+
+    logger.info(f"Found {total} pending transactions, returning {len(transactions)} on page {page}")
 
     total_pages = math.ceil(total / page_size) if total > 0 else 1
 
