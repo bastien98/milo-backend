@@ -210,15 +210,16 @@ async def bank_connection_callback(
         # Create accounts from session response
         account_repo = BankAccountRepository(db)
         for account_data in session_result.accounts:
-            # Extract account_uid - EnableBanking may use different field names
-            # Priority: uid > account_uid > account_id > id
-            account_uid = (
-                account_data.get("uid")
-                or account_data.get("account_uid")
-                or account_data.get("account_id")
-                or account_data.get("id")
-                or ""
-            )
+            # Extract account_uid - EnableBanking uses "uid" field (UUID string)
+            # Note: "account_id" is an OBJECT containing iban, NOT a string ID
+            account_uid = account_data.get("uid", "")
+
+            if not account_uid:
+                logger.error(f"No 'uid' field in account data! Keys: {list(account_data.keys())}")
+                logger.error(f"Full account data: {account_data}")
+                # Skip accounts without uid - they can't be used for API calls
+                continue
+
             logger.info(f"Extracted account_uid: {account_uid} from account data")
 
             account, created = await account_repo.get_or_create(
