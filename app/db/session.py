@@ -30,7 +30,7 @@ async def init_db():
     logger = logging.getLogger(__name__)
 
     # Import all models to ensure they're registered with SQLAlchemy
-    from app.models import user, receipt, transaction, user_rate_limit, user_profile, budget, budget_ai_insight  # noqa
+    from app.models import user, receipt, transaction, user_rate_limit, user_profile, budget, budget_ai_insight, budget_history  # noqa
     from app.models import bank_connection, bank_account, bank_transaction  # noqa
 
     if settings.SKIP_DB_INIT:
