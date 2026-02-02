@@ -20,10 +20,16 @@ class BankAccountRepository:
         return result.scalar_one_or_none()
 
     async def get_by_id_and_user(
-        self, account_id: str, user_id: str
+        self, account_id: str, user_id: str, active_only: bool = True
     ) -> Optional[BankAccount]:
-        """Get account by ID, verifying user ownership via connection."""
-        result = await self.db.execute(
+        """Get account by ID, verifying user ownership via connection.
+
+        Args:
+            account_id: The account's ID
+            user_id: The user's ID
+            active_only: If True, only returns account if connection is ACTIVE
+        """
+        query = (
             select(BankAccount)
             .join(BankConnection)
             .where(
@@ -31,6 +37,12 @@ class BankAccountRepository:
                 BankConnection.user_id == user_id,
             )
         )
+
+        if active_only:
+            # Only allow access to accounts from active connections
+            query = query.where(BankConnection.status == "active")
+
+        result = await self.db.execute(query)
         return result.scalar_one_or_none()
 
     async def get_by_connection(self, connection_id: str) -> List[BankAccount]:
@@ -45,7 +57,13 @@ class BankAccountRepository:
     async def get_by_user(
         self, user_id: str, active_only: bool = True
     ) -> List[BankAccount]:
-        """Get all accounts for a user across all connections."""
+        """Get all accounts for a user across all connections.
+
+        Args:
+            user_id: The user's ID
+            active_only: If True, only returns accounts from ACTIVE connections
+                        where the account itself is also active
+        """
         query = (
             select(BankAccount)
             .join(BankConnection)
@@ -53,8 +71,9 @@ class BankAccountRepository:
         )
 
         if active_only:
+            # Use explicit string comparison since status is stored as String
             query = query.where(
-                BankConnection.status == BankConnectionStatus.ACTIVE,
+                BankConnection.status == "active",  # BankConnectionStatus.ACTIVE.value
                 BankAccount.is_active == True,
             )
 
