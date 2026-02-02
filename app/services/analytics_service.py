@@ -220,12 +220,13 @@ class AnalyticsService:
                 else None
             )
             # Get color from mapping, default to gray if not found
-            color_hex = CATEGORY_COLORS.get(category_enum.value, "#BDC3C7")
+            # category is now a string, not an enum
+            color_hex = CATEGORY_COLORS.get(category_enum, "#BDC3C7")
 
             categories.append(
                 PieChartCategory(
-                    category_id=category_enum.name,  # e.g., "MEAT_FISH"
-                    name=category_enum.value,  # e.g., "Meat & Fish"
+                    category_id=category_enum,  # e.g., "Beer (Pils)"
+                    name=category_enum,  # e.g., "Beer (Pils)"
                     total_spent=round(data["amount"], 2),
                     color_hex=color_hex,
                     percentage=round(percentage, 1),
@@ -331,10 +332,10 @@ class AnalyticsService:
         # Group by category
         category_data = defaultdict(lambda: {"amount": 0.0, "count": 0, "health_scores": []})
         for t in transactions:
-            category_data[t.category.value]["amount"] += t.item_price
-            category_data[t.category.value]["count"] += 1
+            category_data[t.category]["amount"] += t.item_price
+            category_data[t.category]["count"] += 1
             if t.health_score is not None:
-                category_data[t.category.value]["health_scores"].append(t.health_score)
+                category_data[t.category]["health_scores"].append(t.health_score)
 
         # Build category spending list
         categories = []
@@ -430,10 +431,10 @@ class AnalyticsService:
         # Group by category
         category_data = defaultdict(lambda: {"amount": 0.0, "count": 0, "health_scores": []})
         for t in transactions:
-            category_data[t.category.value]["amount"] += t.item_price
-            category_data[t.category.value]["count"] += 1
+            category_data[t.category]["amount"] += t.item_price
+            category_data[t.category]["count"] += 1
             if t.health_score is not None:
-                category_data[t.category.value]["health_scores"].append(t.health_score)
+                category_data[t.category]["health_scores"].append(t.health_score)
 
         # Build category spending list
         categories = []
@@ -1132,10 +1133,10 @@ class AnalyticsService:
         category_data = defaultdict(lambda: {"amount": 0.0, "count": 0, "health_scores": []})
 
         for t in transactions:
-            category_data[t.category.value]["amount"] += t.item_price
-            category_data[t.category.value]["count"] += 1
+            category_data[t.category]["amount"] += t.item_price
+            category_data[t.category]["count"] += 1
             if t.health_score is not None:
-                category_data[t.category.value]["health_scores"].append(t.health_score)
+                category_data[t.category]["health_scores"].append(t.health_score)
 
         categories = []
         for category_name, data in category_data.items():
@@ -1320,10 +1321,10 @@ class AnalyticsService:
         # Calculate top categories
         category_data = defaultdict(lambda: {"amount": 0.0, "count": 0, "health_scores": []})
         for t in transactions:
-            category_data[t.category.value]["amount"] += t.item_price
-            category_data[t.category.value]["count"] += 1
+            category_data[t.category]["amount"] += t.item_price
+            category_data[t.category]["count"] += 1
             if t.health_score is not None:
-                category_data[t.category.value]["health_scores"].append(t.health_score)
+                category_data[t.category]["health_scores"].append(t.health_score)
 
         categories_list = []
         for category_name, data in category_data.items():
@@ -1502,10 +1503,10 @@ class AnalyticsService:
         # Calculate top categories
         category_data = defaultdict(lambda: {"amount": 0.0, "count": 0, "health_scores": []})
         for t in transactions:
-            category_data[t.category.value]["amount"] += t.item_price
-            category_data[t.category.value]["count"] += 1
+            category_data[t.category]["amount"] += t.item_price
+            category_data[t.category]["count"] += 1
             if t.health_score is not None:
-                category_data[t.category.value]["health_scores"].append(t.health_score)
+                category_data[t.category]["health_scores"].append(t.health_score)
 
         categories = []
         for category_name, data in category_data.items():

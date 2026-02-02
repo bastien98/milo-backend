@@ -66,8 +66,8 @@ class BudgetService:
             .group_by(Transaction.category)
         )
 
-        # Convert enum values to their display names
-        return {row.category.value: float(row.spent) for row in result.all()}
+        # Category is now a string, not enum
+        return {row.category: float(row.spent) for row in result.all()}
 
     async def get_historical_category_percentages(
         self, user_id: str, months: int = 3
@@ -120,7 +120,7 @@ class BudgetService:
         )
 
         return {
-            row.category.value: float(row.spent) / total_spend
+            row.category: float(row.spent) / total_spend
             for row in category_result.all()
         }
 
@@ -320,7 +320,7 @@ class BudgetService:
         # Calculate category breakdown
         category_breakdown: List[CategoryBreakdown] = []
         for row in category_totals:
-            category_name = row.category.value  # Get display name from enum
+            category_name = row.category  # Category is now a string
             average_spend = float(row.total_spent) / num_months
             percentage = (average_spend / average_monthly_spend * 100) if average_monthly_spend > 0 else 0
 

@@ -597,7 +597,7 @@ Return ONLY valid JSON with this exact structure:
         # By category
         by_category = defaultdict(lambda: {"total": 0, "count": 0, "items": []})
         for t in transactions:
-            cat = t.category.value
+            cat = t.category
             by_category[cat]["total"] += t.item_price
             by_category[cat]["count"] += 1
             if len(by_category[cat]["items"]) < 5:
@@ -699,7 +699,7 @@ Return ONLY valid JSON with this exact structure:
             )
             .group_by(Transaction.category)
         )
-        spend_by_category = {row.category.value: float(row.spent) for row in cat_result.all()}
+        spend_by_category = {row.category: float(row.spent) for row in cat_result.all()}
 
         # Get last 7 days spending
         week_ago = today - timedelta(days=7)
@@ -861,8 +861,8 @@ Return ONLY valid JSON with this exact structure:
         # By category
         by_category = defaultdict(lambda: {"total": 0, "count": 0})
         for t in transactions:
-            by_category[t.category.value]["total"] += t.item_price
-            by_category[t.category.value]["count"] += 1
+            by_category[t.category]["total"] += t.item_price
+            by_category[t.category]["count"] += 1
 
         # By store
         by_store = defaultdict(float)
@@ -1216,7 +1216,7 @@ Return ONLY valid JSON with this exact structure:
         ]
 
         for item in receipt_context["items"]:
-            lines.append(f"- {item.item_name}: €{item.item_price:.2f} ({item.category.value})")
+            lines.append(f"- {item.item_name}: €{item.item_price:.2f} ({item.category})")
 
         lines.append("")
         lines.append("## Budget Context")

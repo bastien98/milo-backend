@@ -138,8 +138,8 @@ You will receive the user's profile information (name, etc.) and transaction dat
         category_totals = defaultdict(float)
         category_counts = defaultdict(int)
         for t in transactions:
-            category_totals[t.category.value] += t.item_price
-            category_counts[t.category.value] += 1
+            category_totals[t.category] += t.item_price
+            category_counts[t.category] += 1
 
         # Calculate store breakdown
         store_totals = defaultdict(float)
@@ -185,7 +185,7 @@ You will receive the user's profile information (name, etc.) and transaction dat
         context_parts.append(f"\n--- RECENT TRANSACTIONS (Last 100) ---")
         for t in transactions[:100]:
             context_parts.append(
-                f"  [{t.date}] {t.store_name} | {t.item_name} | €{t.item_price:.2f} | {t.category.value}"
+                f"  [{t.date}] {t.store_name} | {t.item_name} | €{t.item_price:.2f} | {t.category}"
             )
 
         return "\n".join(context_parts)
