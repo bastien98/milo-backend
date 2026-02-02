@@ -565,14 +565,38 @@ async def sync_bank_account(
                 BankConnectionStatus.EXPIRED,
                 error_message="Bank session expired. Please reconnect your bank account.",
             )
-            raise HTTPException(
-                status_code=status.HTTP_401_UNAUTHORIZED,
-                detail={
-                    "error": "session_expired",
-                    "message": "Bank connection has expired. Please reconnect your bank account.",
-                    "requires_reauth": True,
-                },
+            # Return 200 with requires_reauth=True instead of 401
+            # This prevents iOS from confusing EnableBanking auth with Firebase auth
+            return BankAccountSyncResponse(
+                account_id=account.id,
+                balance=None,
+                transactions_fetched=0,
+                new_transactions=0,
+                message="Bank connection expired. Please reconnect your bank account.",
+                requires_reauth=True,
+                connection_id=connection.id,
             )
+
+        # Handle authentication errors from EnableBanking
+        if e.details.get("error_type") == "authentication":
+            logger.error(f"EnableBanking authentication error: {e.message}")
+            # Mark connection as expired
+            await conn_repo.update_status(
+                connection,
+                BankConnectionStatus.EXPIRED,
+                error_message="Bank authentication failed. Please reconnect.",
+            )
+            return BankAccountSyncResponse(
+                account_id=account.id,
+                balance=None,
+                transactions_fetched=0,
+                new_transactions=0,
+                message="Bank authentication failed. Please reconnect your bank account.",
+                requires_reauth=True,
+                connection_id=connection.id,
+            )
+
+        # Other EnableBanking errors - return 503 (service unavailable)
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail={

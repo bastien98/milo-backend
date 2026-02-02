@@ -138,13 +138,20 @@ class BankAccountListResponse(BaseModel):
 
 
 class BankAccountSyncResponse(BaseModel):
-    """Response for account sync endpoint."""
+    """Response for account sync endpoint.
+
+    When requires_reauth is True, the bank connection has expired and
+    the user needs to reconnect. The connection_id is provided so the
+    iOS app can initiate the reconnection flow.
+    """
 
     account_id: str
     balance: Optional[float] = None
-    transactions_fetched: int
-    new_transactions: int
+    transactions_fetched: int = 0
+    new_transactions: int = 0
     message: str
+    requires_reauth: bool = False
+    connection_id: Optional[str] = None
 
 
 # =============================================================================
