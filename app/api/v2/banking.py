@@ -192,6 +192,13 @@ async def bank_connection_callback(
         # Exchange code for session
         session_result = await service.create_session(code)
 
+        # Log the raw accounts data to debug account_uid extraction
+        logger.info(f"EnableBanking session created: session_id={session_result.session_id}")
+        logger.info(f"EnableBanking accounts count: {len(session_result.accounts)}")
+        for i, acc in enumerate(session_result.accounts):
+            logger.info(f"Account {i} raw data keys: {list(acc.keys())}")
+            logger.info(f"Account {i} raw data: {acc}")
+
         # Activate connection
         connection = await conn_repo.activate(
             connection=connection,
@@ -203,15 +210,27 @@ async def bank_connection_callback(
         # Create accounts from session response
         account_repo = BankAccountRepository(db)
         for account_data in session_result.accounts:
-            await account_repo.get_or_create(
+            # Extract account_uid - EnableBanking may use different field names
+            # Priority: uid > account_uid > account_id > id
+            account_uid = (
+                account_data.get("uid")
+                or account_data.get("account_uid")
+                or account_data.get("account_id")
+                or account_data.get("id")
+                or ""
+            )
+            logger.info(f"Extracted account_uid: {account_uid} from account data")
+
+            account, created = await account_repo.get_or_create(
                 connection_id=connection.id,
-                account_uid=account_data.get("uid", account_data.get("account_id", "")),
+                account_uid=account_uid,
                 iban=account_data.get("iban"),
                 account_name=account_data.get("name"),
                 holder_name=account_data.get("owner_name"),
                 currency=account_data.get("currency", "EUR"),
                 resource_id=account_data.get("resource_id"),
             )
+            logger.info(f"Account {'created' if created else 'found'}: id={account.id}, account_uid={account.account_uid}")
 
         # Build redirect URL based on callback type
         success_params = urlencode({
@@ -393,6 +412,9 @@ async def sync_bank_account(
 
     try:
         service = EnableBankingService()
+
+        logger.info(f"Syncing account: id={account.id}, account_uid={account.account_uid}")
+        logger.info(f"Using session_id: {connection.session_id}")
 
         # Fetch balance
         balances = await service.get_account_balances(
