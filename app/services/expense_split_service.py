@@ -351,6 +351,7 @@ class ExpenseSplitService:
                     color=p.color,
                     display_order=p.display_order,
                     custom_amount=p.custom_amount,
+                    is_me=p.is_me,
                     created_at=p.created_at,
                 )
                 for p in sorted(split.participants, key=lambda x: x.display_order)
