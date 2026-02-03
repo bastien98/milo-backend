@@ -14,6 +14,7 @@ from app.services.rate_limit_service import RateLimitService
 from app.db.repositories.receipt_repo import ReceiptRepository
 from app.db.repositories.transaction_repo import TransactionRepository
 from app.core.exceptions import ResourceNotFoundError, RateLimitExceededError
+from app.services.enriched_profile_service import EnrichedProfileService
 
 logger = logging.getLogger(__name__)
 
@@ -92,6 +93,9 @@ async def delete_receipt(
         raise ResourceNotFoundError(f"Receipt {receipt_id} not found")
 
     await receipt_repo.delete(receipt_id)
+
+    # Rebuild enriched profile after deletion
+    await EnrichedProfileService.rebuild_profile(current_user.id, db)
 
     return {"message": "Receipt deleted successfully"}
 

@@ -36,6 +36,7 @@ async def init_db():
     # Import all models to ensure they're registered with SQLAlchemy
     from app.models import user, receipt, transaction, user_rate_limit, user_profile, budget, budget_ai_insight, budget_history  # noqa
     from app.models import bank_connection, bank_account, bank_transaction  # noqa
+    from app.models import user_enriched_profile  # noqa
 
     if settings.USE_ALEMBIC:
         logger.info("Database models registered. Using Alembic for migrations (USE_ALEMBIC=True).")

@@ -23,6 +23,7 @@ from app.db.repositories.receipt_repo import ReceiptRepository
 from app.db.repositories.transaction_repo import TransactionRepository
 from app.db.repositories.budget_ai_insight_repo import BudgetAIInsightRepository
 from app.core.exceptions import ResourceNotFoundError, RateLimitExceededError
+from app.services.enriched_profile_service import EnrichedProfileService
 
 router = APIRouter()
 
@@ -91,6 +92,8 @@ async def upload_receipt(
     if not result.is_duplicate:
         insight_repo = BudgetAIInsightRepository(db)
         await insight_repo.invalidate_suggestions(current_user.id)
+        # Rebuild enriched profile with updated transaction data
+        await EnrichedProfileService.rebuild_profile(current_user.id, db)
 
     return result
 
@@ -238,6 +241,9 @@ async def delete_receipt(
 
     await receipt_repo.delete(receipt_id)
 
+    # Rebuild enriched profile after deletion
+    await EnrichedProfileService.rebuild_profile(current_user.id, db)
+
     return {"message": "Receipt deleted successfully"}
 
 
@@ -290,6 +296,9 @@ async def delete_line_item(
         # Delete the entire receipt (cascade will delete the transaction)
         await receipt_repo.delete(receipt_id)
 
+        # Rebuild enriched profile after deletion
+        await EnrichedProfileService.rebuild_profile(current_user.id, db)
+
         return LineItemDeleteResponse(
             success=True,
             message="Last item deleted - receipt removed",
@@ -321,6 +330,9 @@ async def delete_line_item(
         receipt_id=receipt_id,
         total_amount=round(new_total_amount, 2),
     )
+
+    # Rebuild enriched profile after line item deletion
+    await EnrichedProfileService.rebuild_profile(current_user.id, db)
 
     return LineItemDeleteResponse(
         success=True,

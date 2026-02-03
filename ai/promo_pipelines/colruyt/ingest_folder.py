@@ -410,7 +410,19 @@ def upsert_to_pinecone(items: list[PromoItem], batch_size: int = 50) -> int:
     The 'text' field is auto-embedded by Pinecone's integrated llama-text-embed-v2.
     It contains normalized_name + granular_category for richer semantic matching.
     All other fields are stored as metadata.
+
+    Items without a promo_mechanism are filtered out (not actual promotions).
     """
+    # Only upsert items that have an actual promo mechanism
+    before = len(items)
+    items = [i for i in items if i.promo_mechanism]
+    if before > len(items):
+        logger.info(f"Filtered out {before - len(items)} items with no promo_mechanism before upsert")
+
+    if not items:
+        logger.warning("No items with promo_mechanism to upsert")
+        return 0
+
     pc = Pinecone(api_key=PINECONE_API_KEY)
     index = pc.Index(host=PINECONE_INDEX_HOST)
 
