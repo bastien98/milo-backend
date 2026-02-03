@@ -2,7 +2,7 @@ import uuid
 from datetime import datetime
 from typing import TYPE_CHECKING, Optional, List
 
-from sqlalchemy import String, DateTime, Integer, ForeignKey, JSON, Index
+from sqlalchemy import String, DateTime, Integer, ForeignKey, JSON, Index, Float
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from sqlalchemy.sql import func
 
@@ -63,6 +63,7 @@ class SplitParticipant(Base):
     name: Mapped[str] = mapped_column(String(100), nullable=False)
     color: Mapped[str] = mapped_column(String(7), nullable=False)  # Hex color like #FF6B6B
     display_order: Mapped[int] = mapped_column(Integer, default=0)
+    custom_amount: Mapped[Optional[float]] = mapped_column(Float, nullable=True)  # Custom split amount (null = equal split)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
     )

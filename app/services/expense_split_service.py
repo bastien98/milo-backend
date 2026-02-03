@@ -61,6 +61,7 @@ class ExpenseSplitService:
                 name=participant_data.name,
                 color=participant_data.color,
                 display_order=i,
+                custom_amount=participant_data.custom_amount,
             )
 
         # Flush to ensure participants are written to DB before querying
@@ -137,6 +138,7 @@ class ExpenseSplitService:
                 name=participant_data.name,
                 color=participant_data.color,
                 display_order=i,
+                custom_amount=participant_data.custom_amount,
             )
 
         # Flush to ensure participants are written to DB before querying
@@ -346,6 +348,7 @@ class ExpenseSplitService:
                     name=p.name,
                     color=p.color,
                     display_order=p.display_order,
+                    custom_amount=p.custom_amount,
                     created_at=p.created_at,
                 )
                 for p in sorted(split.participants, key=lambda x: x.display_order)
