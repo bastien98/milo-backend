@@ -17,6 +17,8 @@ class ExtractedItem(BaseModel):
     # New fields for semantic search and granular categorization
     original_description: Optional[str] = None  # Raw OCR text
     normalized_name: Optional[str] = None  # Cleaned name for semantic search
+    normalized_brand: Optional[str] = None  # Brand name only for semantic search
+    is_premium: bool = False  # True if premium brand, False if store/house brand
     is_deposit: bool = False  # True for Leeggoed/Vidange items
     granular_category: Optional[str] = None  # Detailed category (~200 options)
 
@@ -87,6 +89,8 @@ class GroupedReceiptTransaction(BaseModel):
     # New fields for semantic search and granular categorization
     original_description: Optional[str] = None  # Raw OCR text
     normalized_name: Optional[str] = None  # Cleaned name for semantic search
+    normalized_brand: Optional[str] = None  # Brand name only for semantic search
+    is_premium: bool = False  # True if premium brand, False if store/house brand
     is_deposit: bool = False  # True for Leeggoed/Vidange items
     granular_category: Optional[str] = None  # Detailed category (~200 options)
 

@@ -88,6 +88,8 @@ class TransactionRepository:
         # New fields for semantic search
         original_description: Optional[str] = None,
         normalized_name: Optional[str] = None,
+        normalized_brand: Optional[str] = None,
+        is_premium: bool = False,
         is_deposit: bool = False,
         granular_category: Optional[str] = None,
     ) -> Transaction:
@@ -106,6 +108,8 @@ class TransactionRepository:
             # New fields
             original_description=original_description,
             normalized_name=normalized_name,
+            normalized_brand=normalized_brand,
+            is_premium=is_premium,
             is_deposit=is_deposit,
             granular_category=granular_category,
         )

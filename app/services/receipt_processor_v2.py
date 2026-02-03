@@ -131,6 +131,8 @@ class ReceiptProcessorV2:
                     # New fields
                     original_description=item.original_description,
                     normalized_name=item.normalized_name,
+                    normalized_brand=item.normalized_brand,
+                    is_premium=item.is_premium,
                     is_deposit=item.is_deposit,
                     granular_category=item.granular_category,
                 )
@@ -146,6 +148,8 @@ class ReceiptProcessorV2:
                         # New fields in response
                         original_description=item.original_description,
                         normalized_name=item.normalized_name,
+                        normalized_brand=item.normalized_brand,
+                        is_premium=item.is_premium,
                         is_deposit=item.is_deposit,
                         granular_category=item.granular_category,
                     )

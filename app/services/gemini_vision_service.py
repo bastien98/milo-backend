@@ -32,7 +32,9 @@ class ExtractedLineItem:
     """Represents a line item extracted and normalized by Gemini Vision."""
 
     original_description: str  # Raw OCR text
-    normalized_name: str  # Cleaned, semantic name
+    normalized_name: str  # Cleaned, semantic name (always lowercase)
+    normalized_brand: Optional[str]  # Brand name only (lowercase, for semantic search)
+    is_premium: bool  # True if premium/expensive brand, False if store/house brand
     quantity: int
     unit_price: Optional[float]
     total_price: float
@@ -65,8 +67,7 @@ class GeminiVisionService:
 
 ### Vendor Name
 - Clean OCR artifacts, use proper store name
-- Common Belgian stores: Colruyt, Delhaize, Carrefour, Aldi, Lidl, Albert Heijn, Spar, Match, Intermarché, Okay, Cora, Makro
-- Use title case
+- Common Belgian stores: Colruyt, Delhaize, Carrefour, Aldi, Lidl, Albert Heijn
 
 ### Receipt Date
 - Extract the date from the receipt in YYYY-MM-DD format
@@ -78,29 +79,48 @@ class GeminiVisionService:
 1. **original_description**: Raw text exactly as appears on receipt (including codes, quantities, etc.)
 
 2. **normalized_name**: Clean, semantic product name following these rules:
+   - ALWAYS output in **lowercase**
    - REMOVE quantities from name (450ml, 1L, 500g, 10st, 6x33cl, etc.)
    - REMOVE packaging types (PET, Blik, Fles, Doos, Brik, etc.)
    - REMOVE private label markers (Boni, 365, Everyday, Cara, etc.) when they don't define the product
    - KEEP brand names (Coca-Cola, Jupiler, Danone, etc.)
    - Maintain original language (Dutch/French)
-   - Use sentence case ("Whole milk" not "WHOLE MILK")
    - Examples:
-     - "JUPILER BIER 6X33CL PET" → "Jupiler"
-     - "BONI VOLLE MELK 1L" → "Volle melk"
-     - "COCA COLA ZERO 1,5L PET" → "Coca-Cola Zero"
-     - "VANDEMOORTELE VINAIGRETTE CAESAR 450ML" → "Caesar vinaigrette"
-     - "LEFFE BRUIN 6X33CL" → "Leffe Bruin"
+     - "JUPILER BIER 6X33CL PET" → "jupiler"
+     - "BONI VOLLE MELK 1L" → "volle melk"
+     - "COCA COLA ZERO 1,5L PET" → "coca-cola zero"
+     - "VANDEMOORTELE VINAIGRETTE CAESAR 450ML" → "caesar vinaigrette"
+     - "LEFFE BRUIN 6X33CL" → "leffe bruin"
 
-3. **quantity**: Number of items (parse from "2x", "x3", "2 ST", etc.). Default to 1.
+3. **normalized_brand**: The brand name ONLY, in **lowercase**. Used for semantic search, so extract accurately.
+   - Extract the product's brand/manufacturer, NOT the store name
+   - For store/house brands (Boni, 365, Everyday, Cara, Delhaize brand), use the house brand name
+   - If no brand is identifiable, use null
+   - Examples:
+     - "JUPILER BIER 6X33CL PET" → "jupiler"
+     - "BONI VOLLE MELK 1L" → "boni"
+     - "COCA COLA ZERO 1,5L PET" → "coca-cola"
+     - "VANDEMOORTELE VINAIGRETTE CAESAR 450ML" → "vandemoortele"
+     - "LEFFE BRUIN 6X33CL" → "leffe"
+     - "BANANEN 1KG" → null
 
-4. **unit_price**: Price per single item (if shown separately on receipt)
+4. **is_premium**: Boolean flag for brand tier classification:
+   - `true` = Premium/name brand (well-known, nationally/internationally advertised brands)
+     - Examples: Coca-Cola, Jupiler, Leffe, Danone, Lay's, Nutella, Vandemoortele, Devos Lemmens
+   - `false` = Store/house brand or budget brand (private label, supermarket own brand)
+     - Examples: Boni (Colruyt), 365 (Delhaize), Everyday (Colruyt), Cara (Lidl house brand for beer), Nixe (Lidl)
+   - `false` also for unbranded/generic items (loose fruit, vegetables, bakery items without brand)
 
-5. **total_price**: Total line price
+5. **quantity**: Number of items (parse from "2x", "x3", "2 ST", etc.). Default to 1.
+
+6. **unit_price**: Price per single item (if shown separately on receipt)
+
+7. **total_price**: Total line price
    - Convert Belgian comma decimals to dots: "2,99" → 2.99
    - Handle "Hoeveelheidsvoordeel" (quantity discount): use the final price shown
    - Handle "Actieprijs" (promotional price): use that price
 
-6. **is_deposit**: True ONLY for deposit items:
+8. **is_deposit**: True ONLY for deposit items:
    - "Leeggoed" (Dutch)
    - "Vidange" (French)
    - "Statiegeld"
@@ -135,7 +155,9 @@ Return ONLY valid JSON:
   "line_items": [
     {{
       "original_description": "JUPILER BIER 6X33CL PET",
-      "normalized_name": "Jupiler",
+      "normalized_name": "jupiler",
+      "normalized_brand": "jupiler",
+      "is_premium": true,
       "quantity": 6,
       "unit_price": 0.89,
       "total_price": 5.34,
@@ -145,7 +167,9 @@ Return ONLY valid JSON:
     }},
     {{
       "original_description": "LEEGGOED 6X",
-      "normalized_name": "Leeggoed bier",
+      "normalized_name": "leeggoed bier",
+      "normalized_brand": null,
+      "is_premium": false,
       "quantity": 6,
       "unit_price": 0.10,
       "total_price": 0.60,
@@ -289,10 +313,22 @@ Return ONLY valid JSON:
                 except (ValueError, TypeError):
                     unit_price = None
 
+            # Ensure normalized_name is always lowercase
+            normalized_name = item.get("normalized_name", "")
+            if normalized_name:
+                normalized_name = normalized_name.lower()
+
+            # Extract and lowercase normalized_brand
+            normalized_brand = item.get("normalized_brand")
+            if normalized_brand:
+                normalized_brand = normalized_brand.lower()
+
             line_items.append(
                 ExtractedLineItem(
                     original_description=item.get("original_description", ""),
-                    normalized_name=item.get("normalized_name", ""),
+                    normalized_name=normalized_name,
+                    normalized_brand=normalized_brand,
+                    is_premium=bool(item.get("is_premium", False)),
                     quantity=int(item.get("quantity", 1)),
                     unit_price=unit_price,
                     total_price=total_price,

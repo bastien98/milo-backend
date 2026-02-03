@@ -39,6 +39,10 @@ class Transaction(Base):
     normalized_name: Mapped[Optional[str]] = mapped_column(
         String(255), nullable=True, index=True
     )
+    normalized_brand: Mapped[Optional[str]] = mapped_column(
+        String(255), nullable=True, index=True
+    )
+    is_premium: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     is_deposit: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     granular_category: Mapped[Optional[str]] = mapped_column(
         String(100), nullable=True, index=True
