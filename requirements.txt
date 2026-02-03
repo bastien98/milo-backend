@@ -30,6 +30,9 @@ python-dotenv==1.0.1
 # HTTP client
 httpx==0.26.0
 
+# Pinecone vector database
+pinecone>=8.0.0
+
 # JWT for EnableBanking authentication
 PyJWT>=2.8.0
 cryptography>=41.0.0
