@@ -452,8 +452,9 @@ class AnalyticsService:
         store_health_scores = [t.health_score for t in transactions if t.health_score is not None]
         store_avg_health = round(sum(store_health_scores) / len(store_health_scores), 2) if store_health_scores else None
 
-        # Calculate average item price (split-adjusted)
-        average_item_price = round(total_spend / total_items, 2) if total_items > 0 else None
+        # Calculate average item price (NOT split-adjusted - this is the actual item price)
+        total_raw_spend = sum(t.item_price for t in transactions)
+        average_item_price = round(total_raw_spend / total_items, 2) if total_items > 0 else None
 
         # Group by category (split-adjusted)
         category_data = defaultdict(lambda: {"amount": 0.0, "count": 0, "health_scores": []})
@@ -1013,6 +1014,9 @@ class AnalyticsService:
         health_scores = [t.health_score for t in transactions if t.health_score is not None]
         avg_health_score = round(sum(health_scores) / len(health_scores), 2) if health_scores else None
 
+        # Calculate raw total (not split-adjusted) for average item price
+        total_raw_spend = sum(t.item_price for t in transactions)
+
         # Calculate number of actual periods with data for accurate averages
         periods_with_data = await self._count_periods_with_data(
             user_id, period_type, query_start, query_end
@@ -1029,7 +1033,7 @@ class AnalyticsService:
         averages = AggregateAverages(
             average_spend_per_period=round(total_spend / actual_num_periods, 2),
             average_transaction_value=round(total_spend / total_transactions, 2) if total_transactions > 0 else 0,
-            average_item_price=round(total_spend / total_items, 2) if total_items > 0 else 0,
+            average_item_price=round(total_raw_spend / total_items, 2) if total_items > 0 else 0,
             average_health_score=avg_health_score,
             average_receipts_per_period=round(total_receipts / actual_num_periods, 2),
             average_transactions_per_period=round(total_transactions / actual_num_periods, 2),
@@ -1563,8 +1567,10 @@ class AnalyticsService:
         receipt_ids = set(t.receipt_id for t in transactions if t.receipt_id)
         total_receipts = len(receipt_ids)
 
-        # Calculate averages (split-adjusted)
-        average_item_price = round(total_spend / total_items, 2) if total_items > 0 else None
+        # Calculate averages
+        # Note: average_item_price uses raw prices (NOT split-adjusted) - it's the actual item cost
+        total_raw_spend = sum(t.item_price for t in transactions)
+        average_item_price = round(total_raw_spend / total_items, 2) if total_items > 0 else None
         health_scores = [t.health_score for t in transactions if t.health_score is not None]
         average_health_score = round(sum(health_scores) / len(health_scores), 2) if health_scores else None
 
