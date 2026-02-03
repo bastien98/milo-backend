@@ -508,7 +508,10 @@ class AnalyticsService:
         num_periods: int = 12,
     ) -> TrendsResponse:
         """
-        Get spending trends over time.
+        Get spending trends over time (split-adjusted).
+
+        For transactions that are part of expense splits, only the user's
+        portion is counted. For non-split transactions, the full amount is used.
 
         Only returns periods that have actual transactions (no empty periods).
         """
@@ -517,7 +520,6 @@ class AnalyticsService:
         # Calculate the earliest date we should look back to
         if period_type == "week":
             earliest_start = today - timedelta(weeks=num_periods)
-            trunc_interval = 'week'
         elif period_type == "month":
             month = today.month - num_periods
             year = today.year
@@ -525,44 +527,54 @@ class AnalyticsService:
                 month += 12
                 year -= 1
             earliest_start = date(year, month, 1)
-            trunc_interval = 'month'
         else:  # year
             earliest_start = date(today.year - num_periods, 1, 1)
-            trunc_interval = 'year'
 
-        # Use GROUP BY to only get periods with data (single efficient query)
-        period_start_col = func.date_trunc(trunc_interval, Transaction.date).label('period_start')
-
-        query = (
-            select(
-                period_start_col,
-                func.sum(Transaction.item_price).label('total_spend'),
-                func.count().label('transaction_count'),
-                func.avg(
-                    case(
-                        (Transaction.health_score.isnot(None), Transaction.health_score),
-                        else_=None
-                    )
-                ).label('avg_health_score'),
+        # Fetch all transactions in the range
+        query = select(Transaction).where(
+            and_(
+                Transaction.user_id == user_id,
+                Transaction.date >= earliest_start,
             )
-            .where(
-                and_(
-                    Transaction.user_id == user_id,
-                    Transaction.date >= earliest_start,
-                )
-            )
-            .group_by(period_start_col)
-            .having(func.count() > 0)
-            .order_by(period_start_col.asc())  # Oldest first for chart display
-            .limit(num_periods)
         )
-
         result = await self.db.execute(query)
-        rows = result.all()
+        transactions = list(result.scalars().all())
 
+        if not transactions:
+            return TrendsResponse(trends=[], period_type=period_type)
+
+        # Get split-adjusted amounts for all transactions
+        tx_amounts = await self.split_calc.get_transaction_user_amounts(user_id, transactions)
+
+        # Group transactions by period
+        period_data = defaultdict(lambda: {
+            "total_spend": 0.0,
+            "transaction_count": 0,
+            "health_scores": [],
+        })
+
+        for t, amount in tx_amounts:
+            # Determine period start based on period_type
+            if period_type == "week":
+                # Get Monday of the week
+                days_since_monday = t.date.weekday()
+                period_start = t.date - timedelta(days=days_since_monday)
+            elif period_type == "month":
+                period_start = t.date.replace(day=1)
+            else:  # year
+                period_start = date(t.date.year, 1, 1)
+
+            pd = period_data[period_start]
+            pd["total_spend"] += amount
+            pd["transaction_count"] += 1
+            if t.health_score is not None:
+                pd["health_scores"].append(t.health_score)
+
+        # Build trends list
         trends = []
-        for row in rows:
-            period_start_date = row.period_start.date() if hasattr(row.period_start, 'date') else row.period_start
+        for period_start_date, data in period_data.items():
+            if data["total_spend"] <= 0:
+                continue
 
             # Calculate period end date
             if period_type == "week":
@@ -575,18 +587,26 @@ class AnalyticsService:
             else:  # year
                 period_end_date = date(period_start_date.year, 12, 31)
 
-            avg_health = round(float(row.avg_health_score), 2) if row.avg_health_score is not None else None
+            avg_health = (
+                round(sum(data["health_scores"]) / len(data["health_scores"]), 2)
+                if data["health_scores"]
+                else None
+            )
 
             trends.append(
                 SpendingTrend(
                     period=self._format_period(period_start_date, period_end_date),
                     start_date=period_start_date,
                     end_date=period_end_date,
-                    total_spend=round(float(row.total_spend), 2),
-                    transaction_count=row.transaction_count,
+                    total_spend=round(data["total_spend"], 2),
+                    transaction_count=data["transaction_count"],
                     average_health_score=avg_health,
                 )
             )
+
+        # Sort by period_start ascending (oldest first for chart display) and limit
+        trends.sort(key=lambda x: x.start_date)
+        trends = trends[:num_periods]
 
         return TrendsResponse(
             trends=trends,
@@ -601,7 +621,10 @@ class AnalyticsService:
         num_periods: int = 6,
     ) -> TrendsResponse:
         """
-        Get spending trends over time for a specific store.
+        Get spending trends over time for a specific store (split-adjusted).
+
+        For transactions that are part of expense splits, only the user's
+        portion is counted. For non-split transactions, the full amount is used.
 
         Only returns periods that have actual transactions (no empty periods).
         """
@@ -610,7 +633,6 @@ class AnalyticsService:
         # Calculate the earliest date we should look back to
         if period_type == "week":
             earliest_start = today - timedelta(weeks=num_periods)
-            trunc_interval = 'week'
         elif period_type == "month":
             month = today.month - num_periods
             year = today.year
@@ -618,45 +640,55 @@ class AnalyticsService:
                 month += 12
                 year -= 1
             earliest_start = date(year, month, 1)
-            trunc_interval = 'month'
         else:  # year
             earliest_start = date(today.year - num_periods, 1, 1)
-            trunc_interval = 'year'
 
-        # Use GROUP BY to only get periods with data (single efficient query)
-        period_start_col = func.date_trunc(trunc_interval, Transaction.date).label('period_start')
-
-        query = (
-            select(
-                period_start_col,
-                func.sum(Transaction.item_price).label('total_spend'),
-                func.count().label('transaction_count'),
-                func.avg(
-                    case(
-                        (Transaction.health_score.isnot(None), Transaction.health_score),
-                        else_=None
-                    )
-                ).label('avg_health_score'),
+        # Fetch all transactions in the range for this store
+        query = select(Transaction).where(
+            and_(
+                Transaction.user_id == user_id,
+                Transaction.store_name == store_name,
+                Transaction.date >= earliest_start,
             )
-            .where(
-                and_(
-                    Transaction.user_id == user_id,
-                    Transaction.store_name == store_name,
-                    Transaction.date >= earliest_start,
-                )
-            )
-            .group_by(period_start_col)
-            .having(func.count() > 0)
-            .order_by(period_start_col.asc())  # Oldest first for chart display
-            .limit(num_periods)
         )
-
         result = await self.db.execute(query)
-        rows = result.all()
+        transactions = list(result.scalars().all())
 
+        if not transactions:
+            return TrendsResponse(trends=[], period_type=period_type)
+
+        # Get split-adjusted amounts for all transactions
+        tx_amounts = await self.split_calc.get_transaction_user_amounts(user_id, transactions)
+
+        # Group transactions by period
+        period_data = defaultdict(lambda: {
+            "total_spend": 0.0,
+            "transaction_count": 0,
+            "health_scores": [],
+        })
+
+        for t, amount in tx_amounts:
+            # Determine period start based on period_type
+            if period_type == "week":
+                # Get Monday of the week
+                days_since_monday = t.date.weekday()
+                period_start = t.date - timedelta(days=days_since_monday)
+            elif period_type == "month":
+                period_start = t.date.replace(day=1)
+            else:  # year
+                period_start = date(t.date.year, 1, 1)
+
+            pd = period_data[period_start]
+            pd["total_spend"] += amount
+            pd["transaction_count"] += 1
+            if t.health_score is not None:
+                pd["health_scores"].append(t.health_score)
+
+        # Build trends list
         trends = []
-        for row in rows:
-            period_start_date = row.period_start.date() if hasattr(row.period_start, 'date') else row.period_start
+        for period_start_date, data in period_data.items():
+            if data["total_spend"] <= 0:
+                continue
 
             # Calculate period end date
             if period_type == "week":
@@ -669,18 +701,26 @@ class AnalyticsService:
             else:  # year
                 period_end_date = date(period_start_date.year, 12, 31)
 
-            avg_health = round(float(row.avg_health_score), 2) if row.avg_health_score is not None else None
+            avg_health = (
+                round(sum(data["health_scores"]) / len(data["health_scores"]), 2)
+                if data["health_scores"]
+                else None
+            )
 
             trends.append(
                 SpendingTrend(
                     period=self._format_period(period_start_date, period_end_date),
                     start_date=period_start_date,
                     end_date=period_end_date,
-                    total_spend=round(float(row.total_spend), 2),
-                    transaction_count=row.transaction_count,
+                    total_spend=round(data["total_spend"], 2),
+                    transaction_count=data["transaction_count"],
                     average_health_score=avg_health,
                 )
             )
+
+        # Sort by period_start ascending (oldest first for chart display) and limit
+        trends.sort(key=lambda x: x.start_date)
+        trends = trends[:num_periods]
 
         return TrendsResponse(
             trends=trends,
@@ -694,9 +734,11 @@ class AnalyticsService:
         num_periods: int = 52,
     ) -> PeriodsResponse:
         """
-        Get lightweight metadata for all periods with data.
+        Get lightweight metadata for all periods with data (split-adjusted).
 
-        Uses a single optimized SQL query with GROUP BY for performance.
+        For transactions that are part of expense splits, only the user's
+        portion is counted. For non-split transactions, the full amount is used.
+
         Returns periods sorted by most recent first.
         """
         today = date.today()
@@ -704,7 +746,6 @@ class AnalyticsService:
         # Calculate the earliest date we should look back to
         if period_type == "week":
             earliest_start = today - timedelta(weeks=num_periods)
-            trunc_interval = 'week'
         elif period_type == "month":
             # Go back num_periods months
             month = today.month - num_periods
@@ -713,47 +754,61 @@ class AnalyticsService:
                 month += 12
                 year -= 1
             earliest_start = date(year, month, 1)
-            trunc_interval = 'month'
         else:  # year
             earliest_start = date(today.year - num_periods, 1, 1)
-            trunc_interval = 'year'
 
-        # Build the aggregation query using date_trunc for period grouping
-        period_start_col = func.date_trunc(trunc_interval, Transaction.date).label('period_start')
-
-        query = (
-            select(
-                period_start_col,
-                func.sum(Transaction.item_price).label('total_spend'),
-                func.count(func.distinct(Transaction.receipt_id)).label('receipt_count'),
-                func.count(func.distinct(Transaction.store_name)).label('store_count'),
-                func.count().label('transaction_count'),
-                func.sum(Transaction.quantity).label('total_items'),
-                func.avg(
-                    case(
-                        (Transaction.health_score.isnot(None), Transaction.health_score),
-                        else_=None
-                    )
-                ).label('avg_health_score'),
+        # Fetch all transactions in the range
+        query = select(Transaction).where(
+            and_(
+                Transaction.user_id == user_id,
+                Transaction.date >= earliest_start,
             )
-            .where(
-                and_(
-                    Transaction.user_id == user_id,
-                    Transaction.date >= earliest_start,
-                )
-            )
-            .group_by(period_start_col)
-            .having(func.sum(Transaction.item_price) > 0)
-            .order_by(period_start_col.desc())
-            .limit(num_periods)
         )
-
         result = await self.db.execute(query)
-        rows = result.all()
+        transactions = list(result.scalars().all())
 
+        if not transactions:
+            return PeriodsResponse(periods=[], total_periods=0)
+
+        # Get split-adjusted amounts for all transactions
+        tx_amounts = await self.split_calc.get_transaction_user_amounts(user_id, transactions)
+
+        # Group transactions by period
+        period_data = defaultdict(lambda: {
+            "total_spend": 0.0,
+            "receipt_ids": set(),
+            "store_names": set(),
+            "transaction_count": 0,
+            "total_items": 0,
+            "health_scores": [],
+        })
+
+        for t, amount in tx_amounts:
+            # Determine period start based on period_type
+            if period_type == "week":
+                # Get Monday of the week
+                days_since_monday = t.date.weekday()
+                period_start = t.date - timedelta(days=days_since_monday)
+            elif period_type == "month":
+                period_start = t.date.replace(day=1)
+            else:  # year
+                period_start = date(t.date.year, 1, 1)
+
+            pd = period_data[period_start]
+            pd["total_spend"] += amount
+            if t.receipt_id:
+                pd["receipt_ids"].add(t.receipt_id)
+            pd["store_names"].add(t.store_name)
+            pd["transaction_count"] += 1
+            pd["total_items"] += t.quantity
+            if t.health_score is not None:
+                pd["health_scores"].append(t.health_score)
+
+        # Build period metadata list
         periods = []
-        for row in rows:
-            period_start_date = row.period_start.date() if hasattr(row.period_start, 'date') else row.period_start
+        for period_start_date, data in period_data.items():
+            if data["total_spend"] <= 0:
+                continue
 
             # Calculate period end date
             if period_type == "week":
@@ -766,21 +821,29 @@ class AnalyticsService:
             else:  # year
                 period_end_date = date(period_start_date.year, 12, 31)
 
-            avg_health = round(float(row.avg_health_score), 2) if row.avg_health_score is not None else None
+            avg_health = (
+                round(sum(data["health_scores"]) / len(data["health_scores"]), 2)
+                if data["health_scores"]
+                else None
+            )
 
             periods.append(
                 PeriodMetadata(
                     period=self._format_period(period_start_date, period_end_date),
                     period_start=period_start_date,
                     period_end=period_end_date,
-                    total_spend=round(float(row.total_spend), 2),
-                    receipt_count=row.receipt_count,
-                    store_count=row.store_count,
-                    transaction_count=row.transaction_count,
-                    total_items=row.total_items,
+                    total_spend=round(data["total_spend"], 2),
+                    receipt_count=len(data["receipt_ids"]),
+                    store_count=len(data["store_names"]),
+                    transaction_count=data["transaction_count"],
+                    total_items=data["total_items"],
                     average_health_score=avg_health,
                 )
             )
+
+        # Sort by period_start descending (most recent first) and limit
+        periods.sort(key=lambda x: x.period_start, reverse=True)
+        periods = periods[:num_periods]
 
         return PeriodsResponse(
             periods=periods,
@@ -973,8 +1036,8 @@ class AnalyticsService:
             average_items_per_receipt=round(total_items / total_receipts, 2) if total_receipts > 0 else 0,
         )
 
-        # Calculate extremes (max/min spending periods)
-        extremes = await self._get_period_extremes(user_id, period_type, query_start, query_end)
+        # Calculate extremes (max/min spending periods) - using split-adjusted amounts
+        extremes = self._get_period_extremes_split_adjusted(tx_amounts, period_type)
 
         # Calculate top categories (split-adjusted)
         top_categories = await self._calculate_top_categories_split_adjusted(
@@ -1143,6 +1206,122 @@ class AnalyticsService:
                 period_start=ps,
                 period_end=pe,
                 average_health_score=round(float(min_health_row.avg_health_score), 2),
+            )
+
+        return AggregateExtremes(
+            max_spending_period=max_spending_period,
+            min_spending_period=min_spending_period,
+            highest_health_score_period=highest_health_period,
+            lowest_health_score_period=lowest_health_period,
+        )
+
+    def _get_period_extremes_split_adjusted(
+        self,
+        tx_amounts: List[tuple],
+        period_type: str,
+    ) -> AggregateExtremes:
+        """Calculate extreme values (max/min spend, highest/lowest health) per period using split-adjusted amounts."""
+        if not tx_amounts:
+            return AggregateExtremes()
+
+        # Group transactions by period
+        period_data = defaultdict(lambda: {"total_spend": 0.0, "health_scores": []})
+
+        for t, amount in tx_amounts:
+            # Determine period start based on period_type
+            if period_type == "week":
+                days_since_monday = t.date.weekday()
+                period_start = t.date - timedelta(days=days_since_monday)
+            elif period_type == "month":
+                period_start = t.date.replace(day=1)
+            else:  # year
+                period_start = date(t.date.year, 1, 1)
+
+            pd = period_data[period_start]
+            pd["total_spend"] += amount
+            if t.health_score is not None:
+                pd["health_scores"].append(t.health_score)
+
+        if not period_data:
+            return AggregateExtremes()
+
+        # Calculate extremes
+        max_spend_period = None
+        min_spend_period = None
+        max_health_period = None
+        min_health_period = None
+        max_spend = float('-inf')
+        min_spend = float('inf')
+        max_health = float('-inf')
+        min_health = float('inf')
+
+        for period_start_date, data in period_data.items():
+            if data["total_spend"] > max_spend:
+                max_spend = data["total_spend"]
+                max_spend_period = period_start_date
+            if data["total_spend"] < min_spend:
+                min_spend = data["total_spend"]
+                min_spend_period = period_start_date
+
+            if data["health_scores"]:
+                avg_health = sum(data["health_scores"]) / len(data["health_scores"])
+                if avg_health > max_health:
+                    max_health = avg_health
+                    max_health_period = period_start_date
+                if avg_health < min_health:
+                    min_health = avg_health
+                    min_health_period = period_start_date
+
+        def get_period_end(period_start_date: date, p_type: str) -> date:
+            if p_type == "week":
+                return period_start_date + timedelta(days=6)
+            elif p_type == "month":
+                if period_start_date.month == 12:
+                    return date(period_start_date.year + 1, 1, 1) - timedelta(days=1)
+                else:
+                    return date(period_start_date.year, period_start_date.month + 1, 1) - timedelta(days=1)
+            else:  # year
+                return date(period_start_date.year, 12, 31)
+
+        max_spending_period = None
+        min_spending_period = None
+        highest_health_period = None
+        lowest_health_period = None
+
+        if max_spend_period:
+            pe = get_period_end(max_spend_period, period_type)
+            max_spending_period = PeriodExtreme(
+                period=self._format_period(max_spend_period, pe),
+                period_start=max_spend_period,
+                period_end=pe,
+                total_spend=round(max_spend, 2),
+            )
+
+        if min_spend_period:
+            pe = get_period_end(min_spend_period, period_type)
+            min_spending_period = PeriodExtreme(
+                period=self._format_period(min_spend_period, pe),
+                period_start=min_spend_period,
+                period_end=pe,
+                total_spend=round(min_spend, 2),
+            )
+
+        if max_health_period:
+            pe = get_period_end(max_health_period, period_type)
+            highest_health_period = HealthScoreExtreme(
+                period=self._format_period(max_health_period, pe),
+                period_start=max_health_period,
+                period_end=pe,
+                average_health_score=round(max_health, 2),
+            )
+
+        if min_health_period:
+            pe = get_period_end(min_health_period, period_type)
+            lowest_health_period = HealthScoreExtreme(
+                period=self._format_period(min_health_period, pe),
+                period_start=min_health_period,
+                period_end=pe,
+                average_health_score=round(min_health, 2),
             )
 
         return AggregateExtremes(

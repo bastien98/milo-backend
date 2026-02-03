@@ -33,6 +33,7 @@ from app.schemas.budget_ai import (
     TrendItem,
     NextMonthFocus,
 )
+from app.services.split_aware_calculation import SplitAwareCalculation
 
 settings = get_settings()
 logger = logging.getLogger(__name__)
@@ -557,9 +558,11 @@ Return ONLY valid JSON with this exact structure:
         user_id: str,
         months: int,
     ) -> dict:
-        """Gather comprehensive spending data for AI analysis.
+        """Gather comprehensive spending data for AI analysis (split-adjusted).
 
         Includes data from the current month plus previous complete months.
+        For transactions that are part of expense splits, only the user's
+        portion is counted.
         """
         today = date.today()
 
@@ -591,31 +594,35 @@ Return ONLY valid JSON with this exact structure:
         if not transactions:
             return {"transactions": [], "total_spend": 0}
 
-        # Calculate aggregations
-        total_spend = sum(t.item_price for t in transactions)
+        # Get split-adjusted amounts for all transactions
+        split_calc = SplitAwareCalculation(db)
+        tx_amounts = await split_calc.get_transaction_user_amounts(user_id, transactions)
 
-        # By category
+        # Calculate aggregations using split-adjusted amounts
+        total_spend = sum(amount for _, amount in tx_amounts)
+
+        # By category (split-adjusted)
         by_category = defaultdict(lambda: {"total": 0, "count": 0, "items": []})
-        for t in transactions:
+        for t, amount in tx_amounts:
             cat = t.category.value
-            by_category[cat]["total"] += t.item_price
+            by_category[cat]["total"] += amount
             by_category[cat]["count"] += 1
             if len(by_category[cat]["items"]) < 5:
                 by_category[cat]["items"].append(t.item_name)
 
-        # By week
+        # By week (split-adjusted)
         by_week = defaultdict(float)
-        for t in transactions:
+        for t, amount in tx_amounts:
             week_key = t.date.strftime("%Y-W%W")
-            by_week[week_key] += t.item_price
+            by_week[week_key] += amount
 
-        # By store
+        # By store (split-adjusted)
         by_store = defaultdict(lambda: {"total": 0, "visits": set()})
-        for t in transactions:
-            by_store[t.store_name]["total"] += t.item_price
+        for t, amount in tx_amounts:
+            by_store[t.store_name]["total"] += amount
             by_store[t.store_name]["visits"].add(t.date)
 
-        # By day of week
+        # By day of week (split-adjusted)
         by_day = defaultdict(float)
         day_names = [
             "Monday",
@@ -626,14 +633,14 @@ Return ONLY valid JSON with this exact structure:
             "Saturday",
             "Sunday",
         ]
-        for t in transactions:
-            by_day[day_names[t.date.weekday()]] += t.item_price
+        for t, amount in tx_amounts:
+            by_day[day_names[t.date.weekday()]] += amount
 
-        # Monthly averages
+        # Monthly averages (split-adjusted)
         monthly_totals = defaultdict(float)
-        for t in transactions:
+        for t, amount in tx_amounts:
             month_key = t.date.strftime("%Y-%m")
-            monthly_totals[month_key] += t.item_price
+            monthly_totals[month_key] += amount
 
         # Count actual distinct months with data
         actual_months_with_data = len(monthly_totals)
@@ -656,7 +663,11 @@ Return ONLY valid JSON with this exact structure:
         db: AsyncSession,
         user_id: str,
     ) -> dict:
-        """Gather current budget progress data."""
+        """Gather current budget progress data (split-adjusted).
+
+        For transactions that are part of expense splits, only the user's
+        portion is counted.
+        """
         today = date.today()
         first_day = today.replace(day=1)
         days_in_month = calendar.monthrange(today.year, today.month)[1]
@@ -672,9 +683,12 @@ Return ONLY valid JSON with this exact structure:
         if not budget:
             return {"budget": None}
 
-        # Get current month spending
-        spend_result = await db.execute(
-            select(func.coalesce(func.sum(Transaction.item_price), 0)).where(
+        # Initialize split calculator
+        split_calc = SplitAwareCalculation(db)
+
+        # Get current month transactions
+        current_result = await db.execute(
+            select(Transaction).where(
                 and_(
                     Transaction.user_id == user_id,
                     Transaction.date >= first_day,
@@ -682,26 +696,19 @@ Return ONLY valid JSON with this exact structure:
                 )
             )
         )
-        current_spend = float(spend_result.scalar() or 0)
+        current_transactions = list(current_result.scalars().all())
 
-        # Get spending by category
-        cat_result = await db.execute(
-            select(
-                Transaction.category,
-                func.sum(Transaction.item_price).label("spent"),
-            )
-            .where(
-                and_(
-                    Transaction.user_id == user_id,
-                    Transaction.date >= first_day,
-                    Transaction.date <= today,
-                )
-            )
-            .group_by(Transaction.category)
-        )
-        spend_by_category = {row.category.value: float(row.spent) for row in cat_result.all()}
+        # Get split-adjusted amounts
+        tx_amounts = await split_calc.get_transaction_user_amounts(user_id, current_transactions)
+        current_spend = sum(amount for _, amount in tx_amounts)
 
-        # Get last 7 days spending
+        # Get spending by category (split-adjusted)
+        spend_by_category = defaultdict(float)
+        for t, amount in tx_amounts:
+            spend_by_category[t.category.value] += amount
+        spend_by_category = dict(spend_by_category)
+
+        # Get last 7 days spending (split-adjusted)
         week_ago = today - timedelta(days=7)
         recent_result = await db.execute(
             select(Transaction)
@@ -715,16 +722,17 @@ Return ONLY valid JSON with this exact structure:
             .order_by(Transaction.date.desc())
         )
         recent_transactions = list(recent_result.scalars().all())
-        recent_spend = sum(t.item_price for t in recent_transactions)
+        recent_tx_amounts = await split_calc.get_transaction_user_amounts(user_id, recent_transactions)
+        recent_spend = sum(amount for _, amount in recent_tx_amounts)
 
-        # Get same period last month
+        # Get same period last month (split-adjusted)
         last_month = today.replace(day=1) - timedelta(days=1)
         last_month_start = last_month.replace(day=1)
         last_month_same_day = min(days_elapsed, calendar.monthrange(last_month.year, last_month.month)[1])
         last_month_end = last_month_start.replace(day=last_month_same_day)
 
         last_month_result = await db.execute(
-            select(func.coalesce(func.sum(Transaction.item_price), 0)).where(
+            select(Transaction).where(
                 and_(
                     Transaction.user_id == user_id,
                     Transaction.date >= last_month_start,
@@ -732,7 +740,9 @@ Return ONLY valid JSON with this exact structure:
                 )
             )
         )
-        last_month_same_period = float(last_month_result.scalar() or 0)
+        last_month_transactions = list(last_month_result.scalars().all())
+        last_month_tx_amounts = await split_calc.get_transaction_user_amounts(user_id, last_month_transactions)
+        last_month_same_period = sum(amount for _, amount in last_month_tx_amounts)
 
         return {
             "budget": {
@@ -755,7 +765,11 @@ Return ONLY valid JSON with this exact structure:
         user_id: str,
         receipt_id: str,
     ) -> dict:
-        """Gather context for receipt analysis."""
+        """Gather context for receipt analysis (split-adjusted).
+
+        For transactions that are part of expense splits, only the user's
+        portion is counted.
+        """
         today = date.today()
         first_day = today.replace(day=1)
 
@@ -782,9 +796,12 @@ Return ONLY valid JSON with this exact structure:
         )
         budget = budget_result.scalar_one_or_none()
 
-        # Get current month spending (before this receipt)
-        spend_result = await db.execute(
-            select(func.coalesce(func.sum(Transaction.item_price), 0)).where(
+        # Initialize split calculator
+        split_calc = SplitAwareCalculation(db)
+
+        # Get current month spending (before this receipt) - split-adjusted
+        other_result = await db.execute(
+            select(Transaction).where(
                 and_(
                     Transaction.user_id == user_id,
                     Transaction.date >= first_day,
@@ -793,9 +810,14 @@ Return ONLY valid JSON with this exact structure:
                 )
             )
         )
-        spend_before = float(spend_result.scalar() or 0)
+        other_transactions = list(other_result.scalars().all())
+        other_tx_amounts = await split_calc.get_transaction_user_amounts(user_id, other_transactions)
+        spend_before = sum(amount for _, amount in other_tx_amounts)
 
-        receipt_total = receipt.total_amount or sum(i.item_price for i in items)
+        # Get split-adjusted total for this receipt
+        receipt_tx_amounts = await split_calc.get_transaction_user_amounts(user_id, items)
+        receipt_total = sum(amount for _, amount in receipt_tx_amounts)
+
         budget_amount = budget.monthly_amount if budget else 0
         spend_after = spend_before + receipt_total
 
@@ -818,7 +840,11 @@ Return ONLY valid JSON with this exact structure:
         user_id: str,
         month: str,
     ) -> dict:
-        """Gather data for monthly report."""
+        """Gather data for monthly report (split-adjusted).
+
+        For transactions that are part of expense splits, only the user's
+        portion is counted.
+        """
         # Parse month
         year, month_num = map(int, month.split("-"))
         start_date = date(year, month_num, 1)
@@ -855,21 +881,27 @@ Return ONLY valid JSON with this exact structure:
         )
         budget = budget_result.scalar_one_or_none()
 
-        # Calculate totals
-        total_spent = sum(t.item_price for t in transactions)
+        # Initialize split calculator
+        split_calc = SplitAwareCalculation(db)
 
-        # By category
+        # Get split-adjusted amounts for all transactions
+        tx_amounts = await split_calc.get_transaction_user_amounts(user_id, transactions)
+
+        # Calculate totals (split-adjusted)
+        total_spent = sum(amount for _, amount in tx_amounts)
+
+        # By category (split-adjusted)
         by_category = defaultdict(lambda: {"total": 0, "count": 0})
-        for t in transactions:
-            by_category[t.category.value]["total"] += t.item_price
+        for t, amount in tx_amounts:
+            by_category[t.category.value]["total"] += amount
             by_category[t.category.value]["count"] += 1
 
-        # By store
+        # By store (split-adjusted)
         by_store = defaultdict(float)
-        for t in transactions:
-            by_store[t.store_name] += t.item_price
+        for t, amount in tx_amounts:
+            by_store[t.store_name] += amount
 
-        # Get previous months for comparison
+        # Get previous months for comparison (split-adjusted)
         prev_months = []
         for i in range(1, 4):
             prev_month = month_num - i
@@ -882,7 +914,7 @@ Return ONLY valid JSON with this exact structure:
             prev_end = date(prev_year, prev_month, prev_days)
 
             prev_result = await db.execute(
-                select(func.coalesce(func.sum(Transaction.item_price), 0)).where(
+                select(Transaction).where(
                     and_(
                         Transaction.user_id == user_id,
                         Transaction.date >= prev_start,
@@ -890,9 +922,13 @@ Return ONLY valid JSON with this exact structure:
                     )
                 )
             )
+            prev_transactions = list(prev_result.scalars().all())
+            prev_tx_amounts = await split_calc.get_transaction_user_amounts(user_id, prev_transactions)
+            prev_total = sum(amount for _, amount in prev_tx_amounts)
+
             prev_months.append({
                 "month": f"{prev_year}-{prev_month:02d}",
-                "total": float(prev_result.scalar() or 0),
+                "total": prev_total,
             })
 
         # Top items
