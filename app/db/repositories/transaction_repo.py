@@ -1,7 +1,7 @@
 from datetime import date
 from typing import Optional, List
 
-from sqlalchemy import select, func, and_, delete
+from sqlalchemy import select, func, and_, delete, cast, String
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.transaction import Transaction
@@ -52,7 +52,9 @@ class TransactionRepository:
         if store_name:
             conditions.append(Transaction.store_name == store_name)
         if category:
-            conditions.append(Transaction.category == category)
+            # Cast the PostgreSQL ENUM column to String for comparison
+            # PostgreSQL stores enum NAMEs (e.g., "DAIRY_EGGS"), not values (e.g., "Dairy & Eggs")
+            conditions.append(cast(Transaction.category, String) == category.name)
 
         # Get total count
         count_result = await self.db.execute(
