@@ -18,6 +18,7 @@ from app.schemas.budget import (
     SavingsOption,
     CategoryAllocation,
 )
+from app.services.split_aware_calculation import SplitAwareCalculation
 
 # Reverse mapping from display name to enum
 CATEGORY_NAME_TO_ENUM = {cat.value: cat for cat in Category}
@@ -26,14 +27,20 @@ CATEGORY_NAME_TO_ENUM = {cat.value: cat for cat in Category}
 class BudgetService:
     def __init__(self, db: AsyncSession):
         self.db = db
+        self.split_calc = SplitAwareCalculation(db)
 
     async def get_current_month_spend(self, user_id: str) -> float:
-        """Get total spending for the current month."""
+        """Get total spending for the current month (split-adjusted).
+
+        For transactions that are part of expense splits, only the user's
+        portion is counted. For non-split transactions, the full amount is used.
+        """
         today = date.today()
         first_day = today.replace(day=1)
 
+        # Get all transactions for the current month
         result = await self.db.execute(
-            select(func.coalesce(func.sum(Transaction.item_price), 0)).where(
+            select(Transaction).where(
                 and_(
                     Transaction.user_id == user_id,
                     Transaction.date >= first_day,
@@ -41,39 +48,50 @@ class BudgetService:
                 )
             )
         )
-        return float(result.scalar() or 0)
+        transactions = list(result.scalars().all())
+
+        if not transactions:
+            return 0.0
+
+        # Calculate split-adjusted total
+        return await self.split_calc.calculate_split_adjusted_spend(user_id, transactions)
 
     async def get_current_month_spend_by_category(
         self, user_id: str
     ) -> dict[str, float]:
-        """Get spending by category for the current month."""
+        """Get spending by category for the current month (split-adjusted).
+
+        For transactions that are part of expense splits, only the user's
+        portion is counted. For non-split transactions, the full amount is used.
+        """
         today = date.today()
         first_day = today.replace(day=1)
 
+        # Get all transactions for the current month
         result = await self.db.execute(
-            select(
-                Transaction.category,
-                func.coalesce(func.sum(Transaction.item_price), 0).label("spent"),
-            )
-            .where(
+            select(Transaction).where(
                 and_(
                     Transaction.user_id == user_id,
                     Transaction.date >= first_day,
                     Transaction.date <= today,
                 )
             )
-            .group_by(Transaction.category)
         )
+        transactions = list(result.scalars().all())
 
-        # Convert enum values to their display names
-        return {row.category.value: float(row.spent) for row in result.all()}
+        if not transactions:
+            return {}
+
+        # Calculate split-adjusted totals by category
+        return await self.split_calc.calculate_split_adjusted_spend_by_category(user_id, transactions)
 
     async def get_historical_category_percentages(
         self, user_id: str, months: int = 3
     ) -> dict[str, float]:
-        """Get historical spending percentages by category.
+        """Get historical spending percentages by category (split-adjusted).
 
         Returns a dict mapping category display names to their percentage of total spend.
+        For transactions that are part of expense splits, only the user's portion is counted.
         """
         today = date.today()
 
@@ -87,9 +105,9 @@ class BudgetService:
             year -= 1
         start_date = date(year, month, 1)
 
-        # Get total spend in the period
-        total_result = await self.db.execute(
-            select(func.coalesce(func.sum(Transaction.item_price), 0)).where(
+        # Get all transactions in the period
+        result = await self.db.execute(
+            select(Transaction).where(
                 and_(
                     Transaction.user_id == user_id,
                     Transaction.date >= start_date,
@@ -97,30 +115,25 @@ class BudgetService:
                 )
             )
         )
-        total_spend = float(total_result.scalar() or 0)
+        transactions = list(result.scalars().all())
+
+        if not transactions:
+            return {}
+
+        # Calculate split-adjusted total spend
+        total_spend = await self.split_calc.calculate_split_adjusted_spend(user_id, transactions)
 
         if total_spend == 0:
             return {}
 
-        # Get spend by category
-        category_result = await self.db.execute(
-            select(
-                Transaction.category,
-                func.sum(Transaction.item_price).label("spent"),
-            )
-            .where(
-                and_(
-                    Transaction.user_id == user_id,
-                    Transaction.date >= start_date,
-                    Transaction.date < end_date,
-                )
-            )
-            .group_by(Transaction.category)
+        # Calculate split-adjusted spend by category
+        category_spend = await self.split_calc.calculate_split_adjusted_spend_by_category(
+            user_id, transactions
         )
 
         return {
-            row.category.value: float(row.spent) / total_spend
-            for row in category_result.all()
+            category: spent / total_spend
+            for category, spent in category_spend.items()
         }
 
     async def get_budget_progress(
@@ -261,7 +274,10 @@ class BudgetService:
     async def get_budget_suggestion(
         self, user_id: str, months: int = 3
     ) -> Optional[BudgetSuggestionResponse]:
-        """Generate a smart budget suggestion based on historical spending."""
+        """Generate a smart budget suggestion based on historical spending (split-adjusted).
+
+        For transactions that are part of expense splits, only the user's portion is counted.
+        """
         today = date.today()
 
         # Calculate the date range for the last N complete months
@@ -276,53 +292,47 @@ class BudgetService:
             year -= 1
         start_date = date(year, month, 1)
 
-        # Get monthly totals for the period
-        monthly_totals_query = await self.db.execute(
-            select(
-                func.date_trunc("month", Transaction.date).label("month"),
-                func.sum(Transaction.item_price).label("monthly_spend"),
-            )
-            .where(
+        # Get all transactions for the period
+        result = await self.db.execute(
+            select(Transaction).where(
                 and_(
                     Transaction.user_id == user_id,
                     Transaction.date >= start_date,
                     Transaction.date < end_date,
                 )
             )
-            .group_by(func.date_trunc("month", Transaction.date))
         )
-        monthly_totals = monthly_totals_query.all()
+        transactions = list(result.scalars().all())
 
-        if not monthly_totals:
+        if not transactions:
+            return None
+
+        # Get transaction amounts adjusted for splits
+        tx_amounts = await self.split_calc.get_transaction_user_amounts(user_id, transactions)
+
+        # Calculate monthly totals (split-adjusted)
+        monthly_spend: dict = defaultdict(float)
+        for tx, amount in tx_amounts:
+            month_key = tx.date.replace(day=1)
+            monthly_spend[month_key] += amount
+
+        if not monthly_spend:
             return None
 
         # Calculate average monthly spend
-        total_spend = sum(row.monthly_spend for row in monthly_totals)
-        num_months = len(monthly_totals)
+        total_spend = sum(monthly_spend.values())
+        num_months = len(monthly_spend)
         average_monthly_spend = total_spend / num_months
 
-        # Get category breakdown
-        category_totals_query = await self.db.execute(
-            select(
-                Transaction.category,
-                func.sum(Transaction.item_price).label("total_spent"),
-            )
-            .where(
-                and_(
-                    Transaction.user_id == user_id,
-                    Transaction.date >= start_date,
-                    Transaction.date < end_date,
-                )
-            )
-            .group_by(Transaction.category)
-        )
-        category_totals = category_totals_query.all()
+        # Calculate category totals (split-adjusted)
+        category_totals: dict = defaultdict(float)
+        for tx, amount in tx_amounts:
+            category_totals[tx.category.value] += amount
 
         # Calculate category breakdown
         category_breakdown: List[CategoryBreakdown] = []
-        for row in category_totals:
-            category_name = row.category.value  # Get display name from enum
-            average_spend = float(row.total_spent) / num_months
+        for category_name, total_spent in category_totals.items():
+            average_spend = total_spent / num_months
             percentage = (average_spend / average_monthly_spend * 100) if average_monthly_spend > 0 else 0
 
             category_breakdown.append(

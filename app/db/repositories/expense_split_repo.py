@@ -120,6 +120,7 @@ class ExpenseSplitRepository:
         color: str,
         display_order: int = 0,
         custom_amount: Optional[float] = None,
+        is_me: bool = False,
     ) -> SplitParticipant:
         """Add a participant to a split."""
         participant = SplitParticipant(
@@ -128,6 +129,7 @@ class ExpenseSplitRepository:
             color=color,
             display_order=display_order,
             custom_amount=custom_amount,
+            is_me=is_me,
         )
         self.db.add(participant)
         await self.db.flush()

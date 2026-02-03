@@ -26,6 +26,7 @@ class SplitParticipantCreate(BaseModel):
     name: str = Field(..., min_length=1, max_length=100)
     color: str = Field(..., pattern=r"^#[0-9A-Fa-f]{6}$")
     custom_amount: Optional[float] = None  # Custom split amount (None = equal split)
+    is_me: bool = False  # True if this participant represents the current user
 
 
 class SplitParticipantResponse(BaseModel):
@@ -36,6 +37,7 @@ class SplitParticipantResponse(BaseModel):
     color: str
     display_order: int
     custom_amount: Optional[float] = None  # Custom split amount (None = equal split)
+    is_me: bool = False  # True if this participant represents the current user
     created_at: datetime
 
     class Config:

@@ -62,6 +62,7 @@ class ExpenseSplitService:
                 color=participant_data.color,
                 display_order=i,
                 custom_amount=participant_data.custom_amount,
+                is_me=participant_data.is_me,
             )
 
         # Flush to ensure participants are written to DB before querying
@@ -139,6 +140,7 @@ class ExpenseSplitService:
                 color=participant_data.color,
                 display_order=i,
                 custom_amount=participant_data.custom_amount,
+                is_me=participant_data.is_me,
             )
 
         # Flush to ensure participants are written to DB before querying
