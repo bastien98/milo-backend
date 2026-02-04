@@ -187,7 +187,11 @@ def search_promos_for_item(pc: Pinecone, index, item: dict) -> list[dict]:
         return []
 
     # --- Rerank ---
-    return _rerank_hits(pc, normalized_name, all_hits)
+    if interest_category == "brand_loyal" and brands:
+        rerank_query = f"{brands[0]} {normalized_name}"
+    else:
+        rerank_query = normalized_name
+    return _rerank_hits(pc, rerank_query, all_hits)
 
 
 def _pinecone_search(index, query_text: str, filter_dict: dict | None) -> list[dict]:
@@ -229,9 +233,9 @@ def _rerank_hits(pc: Pinecone, query: str, hits: list[dict]) -> list[dict]:
     documents = []
     for hit in hits:
         fields = hit.get("fields", {})
-        text = fields.get("text", fields.get("normalized_name", ""))
+        name = fields.get("normalized_name", "")
         desc = fields.get("original_description", "")
-        documents.append({"id": hit.get("_id", ""), "text": f"{text}. {desc}"})
+        documents.append({"id": hit.get("_id", ""), "text": f"{name}. {desc}"})
 
     logger.info(f"    [rerank] query='{query}' | {len(documents)} docs")
     for i, doc in enumerate(documents):
@@ -380,7 +384,7 @@ def _call_gemini(user_message: str) -> str:
 
     client = genai.Client(api_key=GEMINI_API_KEY)
     response = client.models.generate_content(
-        model="gemini-2.0-flash",
+        model="gemini-3-pro-preview",
         contents=[user_message],
         config=types.GenerateContentConfig(
             system_instruction=SYSTEM_PROMPT,
