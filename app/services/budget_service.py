@@ -8,7 +8,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.transaction import Transaction
 from app.models.budget import Budget
-from app.models.enums import Category
 from app.schemas.budget import (
     BudgetResponse,
     BudgetProgressResponse,
@@ -19,9 +18,7 @@ from app.schemas.budget import (
     CategoryAllocation,
 )
 from app.services.split_aware_calculation import SplitAwareCalculation
-
-# Reverse mapping from display name to enum
-CATEGORY_NAME_TO_ENUM = {cat.value: cat for cat in Category}
+from app.services.category_registry import get_category_registry
 
 
 class BudgetService:
@@ -187,9 +184,9 @@ class BudgetService:
                 is_over_budget = category_spend > limit_amount
                 over_budget_amount = round(category_spend - limit_amount, 2) if is_over_budget else None
 
-                # Get category_id from enum
-                category_enum = CATEGORY_NAME_TO_ENUM.get(category_name)
-                category_id = category_enum.name if category_enum else category_name.upper().replace(" ", "_").replace("&", "").replace("(", "").replace(")", "").replace("/", "_")
+                # Get category_id from registry
+                registry = get_category_registry()
+                category_id = registry.get_category_id(category_name)
 
                 category_progress.append(
                     CategoryProgress(
@@ -226,9 +223,9 @@ class BudgetService:
                 is_over_budget = category_spend > limit_amount
                 over_budget_amount = round(category_spend - limit_amount, 2) if is_over_budget else None
 
-                # Get category_id from enum
-                category_enum = CATEGORY_NAME_TO_ENUM.get(category_name)
-                category_id = category_enum.name if category_enum else category_name.upper().replace(" ", "_").replace("&", "").replace("(", "").replace(")", "").replace("/", "_")
+                # Get category_id from registry
+                registry = get_category_registry()
+                category_id = registry.get_category_id(category_name)
 
                 category_progress.append(
                     CategoryProgress(
@@ -327,7 +324,7 @@ class BudgetService:
         # Calculate category totals (split-adjusted)
         category_totals: dict = defaultdict(float)
         for tx, amount in tx_amounts:
-            category_totals[tx.category.value] += amount
+            category_totals[tx.category] += amount
 
         # Calculate category breakdown
         category_breakdown: List[CategoryBreakdown] = []

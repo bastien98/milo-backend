@@ -3,7 +3,7 @@ from typing import Optional, List
 
 from pydantic import BaseModel
 
-from app.models.enums import ReceiptStatus, Category, ReceiptSource
+from app.models.enums import ReceiptStatus, ReceiptSource
 
 
 class ExtractedItem(BaseModel):
@@ -12,7 +12,7 @@ class ExtractedItem(BaseModel):
     item_price: float
     quantity: int = 1
     unit_price: Optional[float] = None
-    category: Category
+    category: str
     health_score: Optional[int] = None  # 0-5, None for non-food items
 
 
@@ -77,7 +77,7 @@ class GroupedReceiptTransaction(BaseModel):
     item_price: float
     quantity: int
     unit_price: Optional[float]
-    category: Category
+    category: str
     health_score: Optional[int]
 
 

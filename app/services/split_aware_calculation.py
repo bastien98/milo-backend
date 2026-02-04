@@ -154,7 +154,7 @@ class SplitAwareCalculation:
         category_spend: Dict[str, float] = defaultdict(float)
         for t in transactions:
             amount = shares.get(t.id, t.item_price)
-            category_spend[t.category.value] += amount
+            category_spend[t.category] += amount
 
         # Round all values
         return {cat: round(spend, 2) for cat, spend in category_spend.items()}

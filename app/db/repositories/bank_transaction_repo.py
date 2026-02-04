@@ -138,6 +138,18 @@ class BankTransactionRepository:
         )
         return (result.scalar() or 0) > 0
 
+    async def get_by_account_and_transaction_id(
+        self, account_id: str, transaction_id: str
+    ) -> Optional[BankTransaction]:
+        """Get a transaction by account and transaction ID."""
+        result = await self.db.execute(
+            select(BankTransaction).where(
+                BankTransaction.account_id == account_id,
+                BankTransaction.transaction_id == transaction_id,
+            )
+        )
+        return result.scalar_one_or_none()
+
     async def create(
         self,
         account_id: str,

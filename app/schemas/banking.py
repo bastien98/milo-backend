@@ -27,6 +27,7 @@ class BankTransactionStatusEnum(str, Enum):
     IMPORTED = "imported"
     IGNORED = "ignored"
     DUPLICATE = "duplicate"
+    RECEIPT_MATCHED = "receipt_matched"
 
 
 class CallbackTypeEnum(str, Enum):

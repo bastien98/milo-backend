@@ -6,6 +6,7 @@ __pycache__/
 .pytest_cache/
 .DS_Store
 *.csv
+!categories.csv
 test-receipts/
 PROFILE_API_README.md
 README.md

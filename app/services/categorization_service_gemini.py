@@ -6,7 +6,7 @@ from google import genai
 from google.genai import types
 
 from app.core.exceptions import GeminiAPIError
-from app.models.enums import Category
+from app.services.category_registry import get_category_registry
 from app.config import get_settings
 from app.services.veryfi_service import VeryfiLineItem
 
@@ -20,7 +20,7 @@ class CategorizedItem:
     item_price: float
     quantity: int
     unit_price: Optional[float]
-    category: Category
+    category: str
     health_score: Optional[int]  # 0-5, None for non-food items
 
 
@@ -37,7 +37,7 @@ class CategorizationServiceGemini:
     MODEL = "gemini-2.0-flash"
     MAX_TOKENS = 4096
 
-    SYSTEM_PROMPT = """You are a grocery item categorization assistant. Given a store name and list of items from a receipt, clean up the data, categorize each item, assign a health score, and DEDUPLICATE items.
+    SYSTEM_PROMPT = """You are a receipt and transaction categorization assistant. Given a store name and list of items from a receipt (grocery, restaurant, utility bill, service receipt, etc.), clean up the data, categorize each item into one of the sub-categories below, assign a health score where applicable, and DEDUPLICATE items.
 
 IMPORTANT - MULTI-SECTION RECEIPT HANDLING:
 Receipt images may consist of multiple overlapping sections captured from a long receipt. This means the SAME LINE ITEM may appear multiple times in the input list due to overlap between sections. You MUST identify and merge these duplicates:
@@ -50,57 +50,194 @@ Receipt images may consist of multiple overlapping sections captured from a long
 First, clean the store name:
 - Remove garbage characters, random symbols, and OCR artifacts
 - Fix obvious OCR errors and misspellings
-- Use the proper/official store name (e.g., "COLRUYT" → "Colruyt", "C0LRUYT LAAGSTE" → "Colruyt")
+- Use the proper/official store name (e.g., "COLRUYT" -> "Colruyt", "C0LRUYT LAAGSTE" -> "Colruyt")
 - Use title case for proper formatting
-- Common Belgian stores: Colruyt, Delhaize, Carrefour, Aldi, Lidl, Albert Heijn, Spar, Match, Intermarché
+- Common Belgian stores: Colruyt, Delhaize, Carrefour, Aldi, Lidl, Albert Heijn, Spar, Match, Intermarche
 
 For each UNIQUE item (after deduplication), provide:
+
 1. item_name: Clean up the raw OCR text to produce a clear, readable product name:
    - Remove garbage characters, random symbols, and OCR artifacts
    - Remove product codes, SKUs, and internal reference numbers
    - Remove weight/quantity info that's already captured separately (e.g., "1.5KG", "x2")
    - Fix obvious OCR errors and misspellings
-   - Keep the actual product name clear and concise (e.g., "Organic Whole Milk" not "0RG4N1C WH0LE M1LK 1L 2.99")
+   - Keep the actual product name clear and concise
    - Keep brand names if recognizable (e.g., "Coca-Cola", "Danone")
    - Use title case for proper formatting
 
-2. category: Classify into exactly one of these categories:
-   - "Meat & Fish" (meat, poultry, fish, seafood)
-   - "Alcohol" (beer, wine, spirits, including deposit/leeggoed)
-   - "Drinks (Soft/Soda)" (sodas, juices, energy drinks)
-   - "Drinks (Water)" (water, sparkling water)
-   - "Household" (cleaning, paper products, bags)
-   - "Snacks & Sweets" (chips, chocolate, candy, cookies)
-   - "Fresh Produce" (fruits, vegetables)
-   - "Dairy & Eggs" (milk, cheese, yogurt, eggs, butter)
-   - "Ready Meals" (prepared foods, salads, soups, pizza, lasagna)
-   - "Bakery" (bread, pastries, croissants)
-   - "Pantry" (pasta, rice, oil, canned goods, spices, sugar, flour)
-   - "Personal Care" (shampoo, soap, dental, deodorant)
-   - "Frozen" (frozen foods not in other categories)
-   - "Baby & Kids" (diapers, baby food, kids products)
-   - "Pet Supplies" (pet food, pet accessories)
-   - "Tobacco" (cigarettes, rolling tobacco, lighters, rolling papers, filters, e-cigarettes, vapes)
-   - "Other" (anything that doesn't fit above)
+2. category: Classify into EXACTLY one of these sub-categories (use the exact string):
 
-3. health_score: Rate the healthiness of each item from 0 to 5:
+   HOUSING & UTILITIES:
+   - "Rent Payment"
+   - "Mortgage Principal & Interest"
+   - "Property Tax"
+   - "HOA / Syndic Fees"
+   - "Electricity"
+   - "Water & Sewer"
+   - "Natural Gas / Heating Oil"
+   - "Trash & Recycling"
+   - "Internet / Wi-Fi"
+   - "Cable / Satellite TV"
+   - "Mobile Phone Plan"
+   - "Home Phone / Landline"
+   - "Home Security Service"
+   - "Repairs (Plumbing/HVAC)"
+   - "Lawn Care / Gardening"
+   - "Cleaning Services"
+   - "Furniture & Decor"
+   - "Home Improvement Supplies"
+
+   FOOD & DINING:
+   - "Fresh Produce (Fruit & Veg)" (fruits, vegetables)
+   - "Meat Poultry & Seafood" (meat, poultry, fish, seafood)
+   - "Dairy Cheese & Eggs" (milk, cheese, yogurt, eggs, butter)
+   - "Bakery & Bread" (bread, pastries, croissants)
+   - "Pantry Staples (Pasta/Rice/Oil)" (pasta, rice, oil, canned goods, spices, sugar, flour)
+   - "Frozen Foods" (frozen foods)
+   - "Snacks & Candy" (chips, chocolate, candy, cookies)
+   - "Beverages (Non-Alcoholic)" (sodas, juices, energy drinks, water)
+   - "Baby Food & Formula"
+   - "Pet Food & Supplies" (pet food, pet accessories)
+   - "Household Consumables (Paper/Cleaning)" (cleaning products, paper towels, bags)
+   - "Personal Hygiene (Soap/Shampoo)" (shampoo, soap, dental, deodorant)
+   - "Ready Meals & Prepared Food" (prepared foods, salads, soups, pizza, lasagna)
+   - "Tobacco Products" (cigarettes, rolling tobacco, lighters, rolling papers, filters, e-cigarettes, vapes)
+   - "Fast Food / Quick Service"
+   - "Sit-down Restaurants"
+   - "Coffee Shops & Cafes"
+   - "Bars & Nightlife"
+   - "Food Delivery (Apps)" (Deliveroo, UberEats, etc.)
+   - "Liquor Store / Wine Shop" (spirits, wine from a liquor store)
+   - "Beer & Wine (Retail)" (beer and wine bought at a retail/grocery store, including deposit/leeggoed)
+
+   TRANSPORTATION:
+   - "Car Payment (Loan/Lease)"
+   - "Auto Insurance"
+   - "Registration & Inspection Fees"
+   - "Fuel (Gas/Diesel/Electric)"
+   - "Maintenance & Oil Changes"
+   - "Repairs & Parts"
+   - "Car Wash & Detailing"
+   - "Ride Share (Uber/Lyft)"
+   - "Public Transit (Bus/Train)"
+   - "Taxi Services"
+   - "Parking Fees & Tolls"
+   - "Bike/Scooter Rentals"
+
+   HEALTH & WELLNESS:
+   - "Primary Care / Doctor Visits"
+   - "Specialist Visits"
+   - "Dental Care"
+   - "Vision / Optometry"
+   - "Pharmacy & Prescriptions"
+   - "Health Insurance Premiums"
+   - "Life Insurance"
+   - "Disability Insurance"
+   - "Gym Memberships"
+   - "Sports Equipment"
+   - "Vitamins & Supplements"
+   - "Therapy / Counseling"
+
+   SHOPPING & PERSONAL CARE:
+   - "Apparel (Adults)"
+   - "Apparel (Kids)"
+   - "Shoes & Footwear"
+   - "Jewelry & Watches"
+   - "Dry Cleaning & Tailoring"
+   - "Computers & Tablets"
+   - "Phones & Accessories"
+   - "Software Subscriptions"
+   - "Gaming & Consoles"
+   - "Hair Salon / Barbershop"
+   - "Spa & Massage"
+   - "Cosmetics & Makeup"
+   - "Nail Salon"
+
+   ENTERTAINMENT & LEISURE:
+   - "Streaming Video (Netflix/Hulu)"
+   - "Streaming Audio (Spotify/Music)"
+   - "News & Magazines"
+   - "Movies & Theaters"
+   - "Concerts & Festivals"
+   - "Sporting Events"
+   - "Museums & Exhibitions"
+   - "Arts & Crafts"
+   - "Books & Audiobooks"
+   - "Musical Instruments"
+   - "Photography"
+
+   FINANCIAL & LEGAL:
+   - "Emergency Fund Transfer"
+   - "Retirement (Pension/401k)"
+   - "Investments / Brokerage"
+   - "Crypto Purchases"
+   - "Credit Card Payments"
+   - "Student Loan Payments"
+   - "Personal Loan Payments"
+   - "Bank Fees (Overdraft/ATM)"
+   - "Credit Card Interest"
+   - "Income Tax Payments"
+   - "Tax Prep Services"
+   - "Legal Fees"
+
+   FAMILY & EDUCATION:
+   - "Tuition & Fees"
+   - "Student Loan Interest"
+   - "Textbooks & Supplies"
+   - "Online Courses"
+   - "Daycare / Babysitting"
+   - "Toys & Games"
+   - "Baby Supplies (Diapers)"
+   - "Extracurriculars"
+   - "Veterinary Bills"
+   - "Pet Grooming"
+   - "Pet Sitting / Boarding"
+
+   TRAVEL & VACATION:
+   - "Airfare"
+   - "Train/Bus (Long Distance)"
+   - "Car Rental"
+   - "Cruise Tickets"
+   - "Hotels & Resorts"
+   - "Airbnb / Vacation Rentals"
+   - "Vacation Dining"
+   - "Sightseeing & Tours"
+   - "Souvenirs"
+   - "Travel Insurance"
+
+   GIFTS & DONATIONS:
+   - "Birthday Gifts"
+   - "Holiday Gifts"
+   - "Wedding/Party Gifts"
+   - "Charitable Donations"
+   - "Religious Tithing"
+   - "Political Contributions"
+
+   MISCELLANEOUS:
+   - "Cash Withdrawals"
+   - "Reimbursements (Pending)"
+   - "Adjustment / Correction"
+   - "Unknown Transaction"
+
+3. health_score: ONLY for items in the FOOD & DINING group, rate healthiness from 0 to 5:
    - 5: Very healthy (fresh vegetables, fruits, water, plain nuts)
    - 4: Healthy (whole grains, lean proteins, eggs, plain dairy)
    - 3: Moderately healthy (bread, pasta, cheese, some ready meals)
    - 2: Less healthy (processed meats, sweetened drinks, some snacks)
    - 1: Unhealthy (chips, candy, cookies, sodas, sugary cereals)
    - 0: Very unhealthy (alcohol, energy drinks, heavily processed foods)
-   Note: Non-food items (household, personal care, pet supplies) should have health_score: null
+   For ALL items NOT in Food & Dining group, set health_score: null
 
 4. original_indices: List of indices from the input that correspond to this item.
    - For unique items: single index, e.g., [0]
    - For duplicates found in overlapping sections: all indices, e.g., [2, 7, 12]
 
 IMPORTANT:
-- Belgian receipts may have Dutch/French product names - translate to the original language but clean up the text
-- Deposit items (leeggoed/vidange) should be categorized with the related product (usually Alcohol or Drinks)
+- Belgian receipts may have Dutch/French product names - keep in the original language but clean up the text
+- Deposit items (leeggoed/vidange) should be categorized with the related product (usually "Beer & Wine (Retail)" or "Beverages (Non-Alcoholic)")
 - Use the item type hint if provided (e.g., "food", "alcohol", "product")
 - The number of items in output should be LESS than or EQUAL to input if duplicates were found
+- You MUST use the EXACT sub-category string from the list above (e.g., "Fresh Produce (Fruit & Veg)" not "Fresh Produce")
 
 Return ONLY valid JSON with this exact format:
 {
@@ -109,14 +246,14 @@ Return ONLY valid JSON with this exact format:
     {
       "original_indices": [0],
       "item_name": "Clean Product Name",
-      "category": "Category Name",
-      "health_score": 3
+      "category": "Fresh Produce (Fruit & Veg)",
+      "health_score": 5
     },
     {
       "original_indices": [1, 5, 9],
       "item_name": "Merged Duplicate Product",
-      "category": "Category Name",
-      "health_score": 2
+      "category": "Dairy Cheese & Eggs",
+      "health_score": 4
     }
   ]
 }"""
@@ -240,12 +377,13 @@ Return ONLY valid JSON with this exact format:
             if primary_item.total is None and primary_item.price is None:
                 continue
 
-            # Parse category
-            category_str = cat_data.get("category", "Other")
-            try:
-                category = Category(category_str)
-            except ValueError:
-                category = Category.OTHER
+            # Parse category with registry validation
+            category_str = cat_data.get("category", "Unknown Transaction")
+            registry = get_category_registry()
+            if not registry.is_valid(category_str):
+                # Try fuzzy matching
+                matched = registry.find_closest_match(category_str)
+                category_str = matched if matched else "Unknown Transaction"
 
             # Parse health score
             health_score_raw = cat_data.get("health_score")
@@ -268,7 +406,7 @@ Return ONLY valid JSON with this exact format:
                     item_price=float(total_price),
                     quantity=quantity,
                     unit_price=float(unit_price) if unit_price else None,
-                    category=category,
+                    category=category_str,
                     health_score=health_score,
                 )
             )

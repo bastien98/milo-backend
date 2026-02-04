@@ -12,7 +12,6 @@ from app.config import get_settings
 from app.models.user import User
 from app.models.bank_connection import BankConnectionStatus, CallbackType
 from app.models.bank_transaction import BankTransactionStatus
-from app.models.enums import Category
 from app.db.repositories.bank_connection_repo import BankConnectionRepository
 from app.db.repositories.bank_account_repo import BankAccountRepository
 from app.db.repositories.bank_transaction_repo import BankTransactionRepository
@@ -476,9 +475,19 @@ async def sync_bank_account(
         existing_count = 0
 
         for txn in transactions:
-            # Skip if already exists
-            exists = await txn_repo.exists(account.id, txn.transaction_id)
-            if exists:
+            existing = await txn_repo.get_by_account_and_transaction_id(
+                account.id, txn.transaction_id
+            )
+            if existing:
+                # Update PENDING transactions with latest data from bank
+                if existing.status == BankTransactionStatus.PENDING:
+                    existing.amount = txn.amount
+                    existing.creditor_name = txn.creditor_name
+                    existing.creditor_iban = txn.creditor_iban
+                    existing.debtor_name = txn.debtor_name
+                    existing.debtor_iban = txn.debtor_iban
+                    existing.description = txn.description
+                    existing.raw_response = txn.raw
                 existing_count += 1
                 continue
 
@@ -517,7 +526,7 @@ async def sync_bank_account(
                     remittance_info=txn.remittance_info,
                     entry_reference=txn.entry_reference,
                     raw_response=txn.raw,
-                    suggested_category=suggestion.category.value if suggestion else None,
+                    suggested_category=suggestion.category if suggestion else None,
                     category_confidence=suggestion.confidence if suggestion else None,
                 )
                 new_count += 1
@@ -675,9 +684,6 @@ async def import_bank_transactions(
     imported_count = 0
     failed_count = 0
 
-    # Validate category mapping
-    category_map = {cat.value: cat for cat in Category}
-
     for item in data.transactions:
         # Get bank transaction
         bank_txn = await bank_txn_repo.get_by_id_and_user(
@@ -706,14 +712,13 @@ async def import_bank_transactions(
             failed_count += 1
             continue
 
-        # Validate category
-        category = category_map.get(item.category)
-        if not category:
+        # Validate category (must be a non-empty string)
+        if not item.category:
             results.append(
                 TransactionImportResult(
                     bank_transaction_id=item.bank_transaction_id,
                     success=False,
-                    error=f"Invalid category: {item.category}",
+                    error="Category is required",
                 )
             )
             failed_count += 1
@@ -753,7 +758,7 @@ async def import_bank_transactions(
                 store_name=store_name,
                 item_name=item_name,
                 item_price=transaction_amount,
-                category=category,
+                category=item.category,
                 date=bank_txn.booking_date,
                 quantity=1,
             )

@@ -47,7 +47,7 @@ class BudgetAIService:
     # System Prompts
     # =========================================================================
 
-    SUGGESTION_SYSTEM_PROMPT = """You are a friendly, encouraging personal finance coach analyzing grocery spending for budget optimization.
+    SUGGESTION_SYSTEM_PROMPT = """You are a friendly, encouraging personal finance coach analyzing spending patterns for budget optimization.
 
 YOUR PERSONALITY:
 - Warm, supportive, and genuinely helpful
@@ -63,7 +63,7 @@ IMPORTANT GUIDELINES:
 - All amounts in EUR (€)
 - Reference actual numbers from their data
 - Be specific - generic advice is not helpful
-- Consider Belgian grocery stores and habits
+- Consider Belgian stores and merchants
 - Round budget suggestions to nearest €5
 
 CRITICAL - CATEGORY ALLOCATIONS:
@@ -110,7 +110,7 @@ Return ONLY valid JSON with this exact structure:
     "summary": "<2-3 sentence personalized summary>"
 }"""
 
-    SUGGESTION_WITH_TARGET_SYSTEM_PROMPT = """You are a friendly, encouraging personal finance coach analyzing grocery spending for budget optimization.
+    SUGGESTION_WITH_TARGET_SYSTEM_PROMPT = """You are a friendly, encouraging personal finance coach analyzing spending patterns for budget optimization.
 
 YOUR PERSONALITY:
 - Warm, supportive, and genuinely helpful
@@ -146,7 +146,7 @@ IMPORTANT GUIDELINES:
 - All amounts in EUR (€)
 - Reference actual numbers from their data
 - Be specific - generic advice is not helpful
-- Consider Belgian grocery stores and habits
+- Consider Belgian stores and merchants
 - Round category allocations to nearest €5
 
 Return ONLY valid JSON with this exact structure:
@@ -598,7 +598,7 @@ Return ONLY valid JSON with this exact structure:
         # By category (split-adjusted)
         by_category = defaultdict(lambda: {"total": 0, "count": 0, "items": []})
         for t, amount in tx_amounts:
-            cat = t.category.value
+            cat = t.category
             by_category[cat]["total"] += amount
             by_category[cat]["count"] += 1
             if len(by_category[cat]["items"]) < 5:
@@ -699,7 +699,7 @@ Return ONLY valid JSON with this exact structure:
         # Get spending by category (split-adjusted)
         spend_by_category = defaultdict(float)
         for t, amount in tx_amounts:
-            spend_by_category[t.category.value] += amount
+            spend_by_category[t.category] += amount
         spend_by_category = dict(spend_by_category)
 
         # Get last 7 days spending (split-adjusted)
@@ -887,8 +887,8 @@ Return ONLY valid JSON with this exact structure:
         # By category (split-adjusted)
         by_category = defaultdict(lambda: {"total": 0, "count": 0})
         for t, amount in tx_amounts:
-            by_category[t.category.value]["total"] += amount
-            by_category[t.category.value]["count"] += 1
+            by_category[t.category]["total"] += amount
+            by_category[t.category]["count"] += 1
 
         # By store (split-adjusted)
         by_store = defaultdict(float)
@@ -953,10 +953,10 @@ Return ONLY valid JSON with this exact structure:
     ) -> AIBudgetSuggestionResponse:
         """Build a helpful response for users with no spending data.
 
-        Provides guidance based on typical Belgian household grocery spending
+        Provides guidance based on typical Belgian household spending
         patterns to help users get started while they collect data.
         """
-        # Belgian average monthly grocery spending (2024 data)
+        # Belgian average monthly spending (2024 data)
         # Single person: ~€250-350, Couple: ~€400-500, Family: ~€600-800
         # We use a moderate estimate for a general recommendation
         suggested_budget = target_amount if target_amount else 400.0
@@ -1031,7 +1031,7 @@ Return ONLY valid JSON with this exact structure:
         # Build reasoning based on whether target was provided
         if target_amount:
             reasoning = (
-                f"You've set a target of €{target_amount:.0f}/month. Based on Belgian grocery statistics, "
+                f"You've set a target of €{target_amount:.0f}/month. Based on Belgian spending statistics, "
                 f"this is {'very achievable for a single person' if target_amount >= 300 else 'ambitious but possible with careful planning' if target_amount >= 200 else 'quite tight - consider if this is realistic'}. "
                 f"The average single person spends €250-350, couples €400-500, and families €600-800. "
                 f"Once you scan some receipts, we'll see how your actual spending compares and help you hit this target!"
@@ -1043,7 +1043,7 @@ Return ONLY valid JSON with this exact structure:
             )
         else:
             reasoning = (
-                "We recommend starting with €400/month based on Belgian grocery statistics. "
+                "We recommend starting with €400/month based on Belgian spending statistics. "
                 "This sits comfortably between the single-person average (€250-350) and couple average (€400-500). "
                 "It provides a realistic baseline that most households can work with. "
                 "Once you scan a few receipts, we'll adjust this to match your actual spending patterns!"
@@ -1060,7 +1060,7 @@ Return ONLY valid JSON with this exact structure:
             savings_opportunities=[
                 SavingsOpportunity(
                     title="Track your actual spending",
-                    description="Most people are surprised by their real grocery spend. Scan receipts for 2-3 weeks to establish your true baseline - this alone often reveals €30-50 in easy savings",
+                    description="Most people are surprised by their real spending. Scan receipts for 2-3 weeks to establish your true baseline - this alone often reveals €30-50 in easy savings",
                     potential_savings=50.0,
                     difficulty="easy",
                 ),
@@ -1082,12 +1082,12 @@ Return ONLY valid JSON with this exact structure:
                     type="positive",
                     title="Smart move setting up a budget!",
                     description="Research shows that people who track spending save 10-15% more than those who don't. You're already ahead of most people",
-                    recommendation="Scan your next grocery receipt to start building your spending profile",
+                    recommendation="Scan your next receipt to start building your spending profile",
                 ),
                 SpendingInsight(
                     type="pattern",
-                    title="Belgian grocery context",
-                    description="Belgian households spend €400-600/month on groceries on average. Inflation pushed prices up 15% in 2022-2023, making budgeting more important than ever",
+                    title="Belgian spending context",
+                    description="Belgian households spend €400-600/month on everyday expenses on average. Inflation pushed prices up 15% in 2022-2023, making budgeting more important than ever",
                     recommendation="Start with our suggested budget and adjust based on your household size and dietary needs",
                 ),
             ],
@@ -1246,7 +1246,7 @@ Return ONLY valid JSON with this exact structure:
         ]
 
         for item in receipt_context["items"]:
-            lines.append(f"- {item.item_name}: €{item.item_price:.2f} ({item.category.value})")
+            lines.append(f"- {item.item_name}: €{item.item_price:.2f} ({item.category})")
 
         lines.append("")
         lines.append("## Budget Context")

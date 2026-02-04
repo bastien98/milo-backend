@@ -3,8 +3,11 @@ from datetime import date
 
 from pydantic import BaseModel
 
+from app.services.category_registry import get_category_registry, GROUP_COLORS
 
-# Category color mapping for Pie Chart visualization
+
+# Legacy category color mapping for Pie Chart visualization
+# Kept for backward compatibility with old category names
 CATEGORY_COLORS: Dict[str, str] = {
     "Meat & Fish": "#FF6B6B",
     "Alcohol": "#9B59B6",
@@ -24,6 +27,20 @@ CATEGORY_COLORS: Dict[str, str] = {
     "Tobacco": "#607D8B",
     "Other": "#BDC3C7",
 }
+
+
+def get_category_color(sub_category_name: str) -> str:
+    """Get hex color for a sub-category based on its group.
+
+    Falls back to legacy CATEGORY_COLORS if not found in registry,
+    then to default gray.
+    """
+    # Try legacy mapping first for backward compatibility
+    if sub_category_name in CATEGORY_COLORS:
+        return CATEGORY_COLORS[sub_category_name]
+    # Use registry group color
+    registry = get_category_registry()
+    return registry.get_group_color(sub_category_name)
 
 
 class PieChartCategory(BaseModel):

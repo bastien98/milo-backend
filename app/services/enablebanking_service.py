@@ -450,6 +450,15 @@ class EnableBankingService:
             amount = float(amount_data.get("amount", 0))
             currency = amount_data.get("currency", "EUR")
 
+            # Skip income/credit transactions - only process expenses
+            credit_debit = txn.get("credit_debit_indicator", "").upper()
+            if credit_debit != "DBIT":
+                continue
+
+            # Expenses are stored as negative amounts
+            if amount > 0:
+                amount = -amount
+
             # Parse dates
             booking_date = None
             value_date = None
@@ -486,6 +495,13 @@ class EnableBankingService:
                 # Generate a fallback ID if none provided
                 transaction_id = f"{booking_date.isoformat()}_{amount}_{currency}"
 
+            # Parse description: try unstructured first, then join array format
+            description = txn.get("remittance_information_unstructured")
+            if not description:
+                remittance_info_list = txn.get("remittance_information")
+                if isinstance(remittance_info_list, list) and remittance_info_list:
+                    description = " ".join(remittance_info_list)
+
             transactions.append(
                 TransactionData(
                     transaction_id=transaction_id,
@@ -497,7 +513,7 @@ class EnableBankingService:
                     creditor_iban=creditor_iban,
                     debtor_name=debtor.get("name"),
                     debtor_iban=debtor_iban,
-                    description=txn.get("remittance_information_unstructured"),
+                    description=description,
                     remittance_info=txn.get("remittance_information_structured"),
                     entry_reference=txn.get("entry_reference"),
                     raw=txn,

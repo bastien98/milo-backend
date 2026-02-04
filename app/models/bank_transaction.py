@@ -23,6 +23,7 @@ class BankTransactionStatus(str, Enum):
     IMPORTED = "imported"  # Imported to main transactions
     IGNORED = "ignored"  # User marked as ignore
     DUPLICATE = "duplicate"  # Detected as duplicate
+    RECEIPT_MATCHED = "receipt_matched"  # Matched to a scanned receipt (dedup)
 
 
 class BankTransaction(Base):
@@ -66,6 +67,11 @@ class BankTransaction(Base):
     # Link to imported transaction (if imported)
     imported_transaction_id: Mapped[Optional[str]] = mapped_column(
         String, ForeignKey("transactions.id", ondelete="SET NULL"), nullable=True
+    )
+
+    # Link to matched receipt (if receipt_matched via dedup)
+    matched_receipt_id: Mapped[Optional[str]] = mapped_column(
+        String, ForeignKey("receipts.id", ondelete="SET NULL"), nullable=True
     )
 
     # AI-suggested category (stored after first retrieval for consistency)
