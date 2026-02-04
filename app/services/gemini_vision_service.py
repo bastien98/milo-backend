@@ -21,7 +21,7 @@ from google.genai import types
 from app.core.exceptions import GeminiAPIError
 from app.config import get_settings
 from app.models.enums import Category
-from app.services.categories import GRANULAR_CATEGORIES, get_parent_category
+from app.services.categories import CATEGORIES_PROMPT_LIST, GRANULAR_CATEGORIES, get_parent_category
 
 settings = get_settings()
 logger = logging.getLogger(__name__)
@@ -162,7 +162,7 @@ Return ONLY valid JSON:
       "unit_price": 0.89,
       "total_price": 5.34,
       "is_deposit": false,
-      "granular_category": "Beer (Pils)",
+      "granular_category": "Beer Pils",
       "health_score": 0
     }},
     {{
@@ -197,11 +197,8 @@ Return ONLY valid JSON:
         Supports PDF, JPEG, and PNG files directly.
         """
 
-        # Build prompt with category list
-        categories_list = "\n".join(
-            f"- {cat}" for cat in GRANULAR_CATEGORIES.keys()
-        )
-        system_prompt = self.SYSTEM_PROMPT.format(categories=categories_list)
+        # Build prompt with shared category list
+        system_prompt = self.SYSTEM_PROMPT.format(categories=CATEGORIES_PROMPT_LIST)
 
         # Log input details for debugging
         logger.info(f"Gemini extraction: mime_type={mime_type}, content_size={len(file_content)} bytes")

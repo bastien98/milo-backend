@@ -132,36 +132,62 @@ async def fetch_enriched_profile(user_id: str) -> dict:
 def search_promos_for_item(pc: Pinecone, index, item: dict) -> list[dict]:
     """Search Pinecone for promotions matching a single promo interest item.
 
-    1. Semantic search using normalized_name (+ granular_category for richer query)
-    2. Metadata filter on granular_category for precision
-    3. Rerank with pinecone-rerank-v0, threshold on relevance score
+    For brand_loyal items: runs one search per brand using {Brand} {Name} ({Category}),
+    then deduplicates hits across all brand queries before reranking.
+
+    For all other items: searches using {Name} ({Category}).
+
+    Always applies granular_category metadata filter with fallback.
     """
     normalized_name = item["normalized_name"]
     granular_category = item.get("granular_category")
-
-    # Build query text matching the embedding format used during ingestion
-    query_text = normalized_name
-    if granular_category and granular_category != "Other":
-        query_text = f"{normalized_name} - {granular_category}"
+    interest_category = item.get("interest_category")
+    brands = item.get("brands", [])
 
     # Metadata filter
     filter_dict = None
     if granular_category:
         filter_dict = {"granular_category": {"$eq": granular_category}}
 
-    # --- Vector search ---
-    hits = _pinecone_search(index, query_text, filter_dict)
+    # Build category suffix for query text
+    cat_suffix = ""
+    if granular_category and granular_category != "Other":
+        cat_suffix = f" ({granular_category})"
 
-    # If filtered search returned nothing, retry without the category filter
-    if not hits and filter_dict:
-        logger.info(f"    No results with category filter, retrying without filter...")
-        hits = _pinecone_search(index, query_text, filter_dict=None)
+    # --- Build query texts ---
+    if interest_category == "brand_loyal" and brands:
+        # One search per brand: {Brand} {Name} ({Category})
+        query_texts = [f"{brand} {normalized_name}{cat_suffix}" for brand in brands]
+    else:
+        # Generic: {Name} ({Category})
+        query_texts = [f"{normalized_name}{cat_suffix}"]
 
-    if not hits:
+    # --- Vector search across all queries ---
+    seen_ids: set[str] = set()
+    all_hits: list[dict] = []
+
+    for query_text in query_texts:
+        hits = _pinecone_search(index, query_text, filter_dict)
+
+        # Fallback without category filter
+        if not hits and filter_dict:
+            logger.info(f"    No results with category filter for '{query_text}', retrying without filter...")
+            hits = _pinecone_search(index, query_text, filter_dict=None)
+
+        # Deduplicate across brand queries
+        for hit in hits:
+            hit_id = hit.get("_id", "")
+            if hit_id and hit_id in seen_ids:
+                continue
+            if hit_id:
+                seen_ids.add(hit_id)
+            all_hits.append(hit)
+
+    if not all_hits:
         return []
 
     # --- Rerank ---
-    return _rerank_hits(pc, normalized_name, hits)
+    return _rerank_hits(pc, normalized_name, all_hits)
 
 
 def _pinecone_search(index, query_text: str, filter_dict: dict | None) -> list[dict]:

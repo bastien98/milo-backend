@@ -37,7 +37,7 @@ from google import genai
 from google.genai import types
 from pinecone import Pinecone
 
-from app.services.categories import GRANULAR_CATEGORIES, get_parent_category
+from app.services.categories import CATEGORIES_PROMPT_LIST, GRANULAR_CATEGORIES, get_parent_category
 
 # ---------------------------------------------------------------------------
 # Config
@@ -102,22 +102,25 @@ Extract ALL promotional product offers from the provided PDF folder pages.
    - Include the full text: brand, product name, variant, size/weight
    - Example: "Jupiler Pils 24x25cl"
 
-2. **normalized_name**: Clean semantic product name following these rules:
+2. **normalized_name**: Clean generic product name following these rules:
    - ALWAYS output in **lowercase**
+   - NEVER include the brand name — this field must be brand-free
    - REMOVE quantities (450ml, 1L, 500g, 10st, 6x33cl, 24x25cl, etc.)
    - REMOVE packaging types (PET, Blik, Fles, Doos, Brik, etc.)
-   - REMOVE private label markers (Boni, 365, Everyday, Cara) when they don't define the product
-   - KEEP brand names (Coca-Cola, Jupiler, Danone, Leffe, etc.)
+   - REMOVE ALL brand names (Coca-Cola, Jupiler, Danone, Leffe, Lay's, Boni, 365, Everyday, Cara, etc.)
+   - KEEP only the generic product description (what the product IS, not who makes it)
    - Maintain original language (Dutch/French)
-   - The goal: this name must match what appears on a Colruyt receipt after normalization
+   - The goal: a generic product name that describes the item without any brand
    - Examples:
-     - "Jupiler Pils Blikken 24x25cl" → "jupiler"
+     - "Jupiler Pils Blikken 24x25cl" → "pils"
      - "Boni Volle Melk 1L" → "volle melk"
-     - "Coca-Cola Zero 1,5L PET" → "coca-cola zero"
-     - "Leffe Bruin Flessen 6x33cl" → "leffe bruin"
+     - "Coca-Cola Zero 1,5L PET" → "cola zero"
+     - "Leffe Bruin Flessen 6x33cl" → "bruin bier"
      - "Boni Spaghetti 500g" → "spaghetti"
-     - "Lay's Chips Paprika 250g" → "lay's chips paprika"
+     - "Lay's Chips Paprika 250g" → "chips paprika"
      - "Everyday Keukenrol 8st" → "keukenrol"
+     - "Danone Activia Aardbei 4x125g" → "yoghurt aardbei"
+     - "Dove Douchegel Original 250ml" → "douchegel"
 
 3. **brand**: The brand/manufacturer name in **lowercase**
    - For store brands: "boni", "everyday", "cru"
@@ -163,9 +166,9 @@ Return ONLY valid JSON:
   "items": [
     {{
       "original_description": "Jupiler Pils Blikken 24x25cl",
-      "normalized_name": "jupiler",
+      "normalized_name": "pils",
       "brand": "jupiler",
-      "granular_category": "Beer (Pils)",
+      "granular_category": "Beer Pils",
       "original_price": 12.99,
       "promo_price": 9.99,
       "promo_mechanism": null,
@@ -206,8 +209,7 @@ def split_pdf_into_batches(pdf_path: Path, pages_per_batch: int) -> list[bytes]:
 # ---------------------------------------------------------------------------
 def _build_system_prompt() -> str:
     """Build the Gemini system prompt with injected categories."""
-    categories_list = "\n".join(f"- {cat}" for cat in GRANULAR_CATEGORIES.keys())
-    return SYSTEM_PROMPT.format(categories=categories_list)
+    return SYSTEM_PROMPT.format(categories=CATEGORIES_PROMPT_LIST)
 
 
 def extract_batch(client: genai.Client, batch_pdf: bytes, batch_num: int, system_prompt: str) -> dict:
@@ -343,6 +345,16 @@ def parse_promo_items(data: dict) -> list[PromoItem]:
         if brand:
             brand = brand.lower().strip()
 
+        # Safety net: strip brand from normalized_name if the LLM still included it
+        if brand and normalized_name.startswith(brand):
+            stripped = normalized_name[len(brand):].strip(" -")
+            if stripped:
+                logger.debug(
+                    f"Stripped brand '{brand}' from normalized_name: "
+                    f"'{normalized_name}' → '{stripped}'"
+                )
+                normalized_name = stripped
+
         items.append(
             PromoItem(
                 original_description=raw.get("original_description", ""),
@@ -392,16 +404,19 @@ def generate_record_id(item: PromoItem) -> str:
 
 
 def build_embedding_text(item: PromoItem) -> str:
-    """Build a rich text for embedding that captures both the product and its category.
+    """Build the text for embedding: brand + normalized_name + unit_info + (granular_category).
 
-    Instead of embedding just "jupiler", we embed "jupiler - Beer (Pils)"
-    so that semantically similar products (other beers) are close in vector space.
-    This enables both exact matching AND finding alternatives.
+    Example: "jupiler pils 24x25cl (Beer Pils)"
     """
-    parts = [item.normalized_name]
+    parts = []
+    if item.brand:
+        parts.append(item.brand)
+    parts.append(item.normalized_name)
+    if item.unit_info:
+        parts.append(item.unit_info)
     if item.granular_category and item.granular_category != "Other":
-        parts.append(item.granular_category)
-    return " - ".join(parts)
+        parts.append(f"({item.granular_category})")
+    return " ".join(parts)
 
 
 def upsert_to_pinecone(items: list[PromoItem], batch_size: int = 50) -> int:

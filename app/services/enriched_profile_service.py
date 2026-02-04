@@ -210,6 +210,8 @@ def _build_promo_interest_items(
         lambda: {
             "count": 0,
             "total_spend": 0.0,
+            "total_quantity": 0,
+            "receipt_ids": set(),
             "brands": set(),
             "is_premium_count": 0,
             "health_scores": [],
@@ -230,6 +232,9 @@ def _build_promo_interest_items(
 
         item_data[name_lower]["count"] += 1
         item_data[name_lower]["total_spend"] += t.item_price
+        item_data[name_lower]["total_quantity"] += t.quantity or 1
+        if t.receipt_id:
+            item_data[name_lower]["receipt_ids"].add(t.receipt_id)
         if t.normalized_brand:
             item_data[name_lower]["brands"].add(t.normalized_brand)
         if t.is_premium:
@@ -248,10 +253,13 @@ def _build_promo_interest_items(
     brand_loyal = []   # consistently same premium brand
     health_picks = []  # healthy items bought regularly
     treats = []        # indulgence items bought periodically
+    bulk_buys = []     # items bought in bulk (multiple units per trip)
 
     for name, data in item_data.items():
-        freq_per_week = data["count"] / weeks_in_period
+        trip_count = len(data["receipt_ids"]) or data["count"]
+        freq_per_week = trip_count / weeks_in_period
         avg_price = data["total_spend"] / data["count"] if data["count"] else 0
+        avg_units_per_trip = data["total_quantity"] / trip_count if trip_count else 0
         avg_health = (
             sum(data["health_scores"]) / len(data["health_scores"])
             if data["health_scores"]
@@ -269,36 +277,49 @@ def _build_promo_interest_items(
             tags.append("healthy")
         if avg_health is not None and avg_health <= 2:
             tags.append("indulgence")
+        if avg_units_per_trip >= 2:
+            tags.append("bulk")
         entry = {
             "normalized_name": name,
+            "brands": sorted(data["brands"]) if data["brands"] else [],
             "granular_category": next(iter(data["granular_categories"]), None),
             "tags": tags,
             "context": (
-                f"Bought {data['count']}x in 3mo "
+                f"Bought on {trip_count} trips in 3mo "
                 f"({freq_per_week:.1f}/week), "
-                f"avg {chr(0x20AC)}{avg_price:.2f}"
+                f"avg {chr(0x20AC)}{avg_price:.2f}, "
+                f"avg {avg_units_per_trip:.1f} units/trip"
             ),
         }
 
         # Classify
-        if freq_per_week >= 0.75 and data["count"] >= 3:
-            staples.append((data["count"], entry))
+        if freq_per_week >= 0.5 and trip_count >= 3:
+            staples.append((trip_count, entry))
 
-        if data["total_spend"] >= 10:
+        if trip_count >= 2:
             high_spend.append((data["total_spend"], entry))
 
-        if (
-            len(data["brands"]) == 1
-            and data["is_premium_count"] >= 2
-            and data["count"] >= 2
-        ):
-            brand_loyal.append((data["count"], entry))
+        # Brand loyal: dominant brand accounts for >= 80% of purchases
+        if data["brands"] and data["count"] >= 2 and trip_count >= 2:
+            brand_counts: dict[str, int] = defaultdict(int)
+            for bt in transactions:
+                bt_name = bt.normalized_name or bt.item_name
+                if bt_name and bt_name.lower().strip() == name and bt.normalized_brand:
+                    brand_counts[bt.normalized_brand] += 1
+            if brand_counts:
+                top_brand_count = max(brand_counts.values())
+                brand_ratio = top_brand_count / data["count"]
+                if brand_ratio >= 0.8:
+                    brand_loyal.append((trip_count, entry))
 
-        if avg_health is not None and avg_health >= 4 and data["count"] >= 2:
+        if avg_health is not None and avg_health >= 4 and trip_count >= 3:
             health_picks.append((avg_health, entry))
 
-        if avg_health is not None and avg_health <= 2 and data["count"] >= 2:
-            treats.append((data["count"], entry))
+        if avg_health is not None and avg_health <= 2 and trip_count >= 2:
+            treats.append((trip_count, entry))
+
+        if avg_units_per_trip >= 2 and trip_count >= 2:
+            bulk_buys.append((avg_units_per_trip, entry))
 
     # Sort each bucket and deduplicate across categories
     staples.sort(key=lambda x: x[0], reverse=True)
@@ -306,12 +327,13 @@ def _build_promo_interest_items(
     brand_loyal.sort(key=lambda x: x[0], reverse=True)
     health_picks.sort(key=lambda x: x[0], reverse=True)
     treats.sort(key=lambda x: x[0], reverse=True)
+    bulk_buys.sort(key=lambda x: x[0], reverse=True)
 
-    # Allocate slots: staples get most, then high_spend, etc.
+    # Allocate slots with guaranteed minimum of 1 per non-empty bucket
     result = []
     seen_names: set[str] = set()
 
-    def _add_items(bucket: list, category: str, max_count: int):
+    def _add_items(bucket: list, category: str, max_count: int) -> int:
         added = 0
         for _, entry in bucket:
             if len(result) >= MAX_INTEREST_ITEMS:
@@ -324,11 +346,23 @@ def _build_promo_interest_items(
             entry["interest_category"] = category
             result.append(entry)
             added += 1
+        return added
 
-    _add_items(staples, "staple", 8)
-    _add_items(high_spend, "high_spend", 6)
-    _add_items(brand_loyal, "brand_loyal", 4)
-    _add_items(health_picks, "health_pick", 4)
-    _add_items(treats, "occasional_treat", 3)
+    buckets = [
+        (staples, "staple", 8),
+        (high_spend, "high_spend", 6),
+        (brand_loyal, "brand_loyal", 4),
+        (health_picks, "health_pick", 4),
+        (treats, "occasional_treat", 3),
+        (bulk_buys, "bulk_buy", 3),
+    ]
+
+    # Pass 1: guarantee at least 1 item per non-empty bucket
+    for bucket, category, _ in buckets:
+        _add_items(bucket, category, 1)
+
+    # Pass 2: fill remaining slots up to each bucket's max
+    for bucket, category, max_count in buckets:
+        _add_items(bucket, category, max_count)
 
     return result
