@@ -96,6 +96,9 @@ class CategorySpending(BaseModel):
     percentage: float
     transaction_count: int
     average_health_score: Optional[float] = None  # Average health score for this category (0-5)
+    group: Optional[str] = None  # Top-level group name (e.g., "Food & Dining")
+    group_color_hex: Optional[str] = None  # Hex color for the group (e.g., "#2ECC71")
+    group_icon: Optional[str] = None  # SF Symbol icon for the group (e.g., "fork.knife")
 
 
 class CategoryBreakdown(BaseModel):

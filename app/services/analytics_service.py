@@ -468,6 +468,28 @@ class AnalyticsService:
         # Format period string
         period_str = "All Time" if all_time else self._format_period(actual_start, actual_end)
 
+        # Enrich categories with group info from registry
+        registry = get_category_registry()
+        from app.services.category_registry import GROUP_COLORS, GROUP_ICONS
+        enriched_categories = []
+        for cat in categories:
+            info = registry.get_info(cat.name)
+            group_name = info.group if info else None
+            group_color = GROUP_COLORS.get(group_name, "#BDC3C7") if group_name else None
+            group_icon = GROUP_ICONS.get(group_name, "square.grid.2x2.fill") if group_name else None
+            enriched_categories.append(
+                CategorySpending(
+                    name=cat.name,
+                    spent=cat.spent,
+                    percentage=cat.percentage,
+                    transaction_count=cat.transaction_count,
+                    average_health_score=cat.average_health_score,
+                    group=group_name,
+                    group_color_hex=group_color,
+                    group_icon=group_icon,
+                )
+            )
+
         return StoreBreakdown(
             store_name=store_name,
             period=period_str,
@@ -475,7 +497,7 @@ class AnalyticsService:
             end_date=actual_end,
             total_store_spend=round(total_spend, 2),
             store_visits=len(receipt_ids),
-            categories=categories,
+            categories=enriched_categories,
             average_health_score=store_avg_health,
             total_items=total_items,
             average_item_price=average_item_price,
