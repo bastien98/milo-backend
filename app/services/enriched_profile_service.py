@@ -1,5 +1,5 @@
 import logging
-from collections import defaultdict
+from collections import Counter, defaultdict
 from datetime import date, timedelta
 from typing import Any
 
@@ -181,12 +181,26 @@ def _build_shopping_habits(
         else 0
     )
 
+    # Preferred shopping days (day-of-week distribution, days above 10%)
+    dow_counts = Counter(t.date.strftime("%A") for t in transactions)
+    total_dow = sum(dow_counts.values())
+    preferred_shopping_days = sorted(
+        [
+            {"day": day, "pct": round(cnt / total_dow * 100, 1)}
+            for day, cnt in dow_counts.items()
+            if cnt / total_dow >= 0.10
+        ],
+        key=lambda d: d["pct"],
+        reverse=True,
+    )
+
     return {
         "total_spend": round(total_spend, 2),
         "receipt_count": receipt_count,
         "avg_receipt_total": round(total_spend / receipt_count, 2) if receipt_count else 0,
         "shopping_frequency_per_week": round(receipt_count / weeks_in_period, 1),
         "preferred_stores": preferred_stores[:10],
+        "preferred_shopping_days": preferred_shopping_days,
         "category_breakdown": category_breakdown,
         "avg_health_score": avg_health,
         "premium_brand_ratio": premium_ratio,
@@ -279,17 +293,52 @@ def _build_promo_interest_items(
             tags.append("indulgence")
         if avg_units_per_trip >= 2:
             tags.append("bulk")
+
+        # Temporal signals
+        sorted_dates = sorted(set(data["dates"]))
+        last_purchased = sorted_dates[-1]
+        days_since = (date.today() - last_purchased).days
+
+        avg_gap: float | None = None
+        if len(sorted_dates) >= 2:
+            gaps = [
+                (sorted_dates[i + 1] - sorted_dates[i]).days
+                for i in range(len(sorted_dates) - 1)
+            ]
+            avg_gap = round(sum(gaps) / len(gaps), 1)
+
+        # Day-of-week distribution — pick top 1-2 days (>= 25% of trips)
+        dow_counts = Counter(d.strftime("%A") for d in data["dates"])
+        total_dow = sum(dow_counts.values())
+        preferred_days = [
+            day
+            for day, cnt in dow_counts.most_common()
+            if cnt / total_dow >= 0.25
+        ][:2]
+
+        # Build context string with temporal info
+        context_parts = [
+            f"Bought on {trip_count} trips in 3mo "
+            f"({freq_per_week:.1f}/week), "
+            f"avg {chr(0x20AC)}{avg_price:.2f}, "
+            f"avg {avg_units_per_trip:.1f} units/trip",
+        ]
+        context_parts.append(f"Last bought {days_since} days ago")
+        if avg_gap is not None:
+            context_parts.append(f"typically every {avg_gap} days")
+        if preferred_days:
+            context_parts.append(f"mostly on {', '.join(d[:3] for d in preferred_days)}")
+
         entry = {
             "normalized_name": name,
             "brands": sorted(data["brands"]) if data["brands"] else [],
             "granular_category": next(iter(data["granular_categories"]), None),
             "tags": tags,
-            "context": (
-                f"Bought on {trip_count} trips in 3mo "
-                f"({freq_per_week:.1f}/week), "
-                f"avg {chr(0x20AC)}{avg_price:.2f}, "
-                f"avg {avg_units_per_trip:.1f} units/trip"
-            ),
+            "last_purchased": last_purchased.isoformat(),
+            "days_since_last_purchase": days_since,
+            "avg_days_between_purchases": avg_gap,
+            "preferred_days": preferred_days,
+            "context": ". ".join(context_parts),
         }
 
         # Classify
