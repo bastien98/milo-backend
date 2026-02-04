@@ -192,6 +192,7 @@ def search_promos_for_item(pc: Pinecone, index, item: dict) -> list[dict]:
 
 def _pinecone_search(index, query_text: str, filter_dict: dict | None) -> list[dict]:
     """Execute a Pinecone search with integrated embedding, handling SDK variations."""
+    logger.info(f"    [vector search] query='{query_text}' filter={filter_dict}")
     query = {
         "inputs": {"text": query_text},
         "top_k": SEARCH_TOP_K,
@@ -199,18 +200,27 @@ def _pinecone_search(index, query_text: str, filter_dict: dict | None) -> list[d
     if filter_dict:
         query["filter"] = filter_dict
 
+    hits = []
     try:
         results = index.search_records(namespace="__default__", query=query)
-        return _extract_hits(results)
+        hits = _extract_hits(results)
     except (AttributeError, TypeError):
-        pass
+        try:
+            results = index.search(namespace="__default__", query=query)
+            hits = _extract_hits(results)
+        except Exception as e:
+            logger.warning(f"    Pinecone search failed: {e}")
+            return []
 
-    try:
-        results = index.search(namespace="__default__", query=query)
-        return _extract_hits(results)
-    except Exception as e:
-        logger.warning(f"    Pinecone search failed: {e}")
-        return []
+    for h in hits:
+        fields = h.get("fields", {})
+        logger.info(
+            f"      sim={h.get('_score', '?'):.4f}  "
+            f"{fields.get('normalized_name', '?')} | "
+            f"{fields.get('original_description', '?')[:60]}"
+        )
+    logger.info(f"    [vector search] {len(hits)} hits returned")
+    return hits
 
 
 def _rerank_hits(pc: Pinecone, query: str, hits: list[dict]) -> list[dict]:
@@ -223,6 +233,10 @@ def _rerank_hits(pc: Pinecone, query: str, hits: list[dict]) -> list[dict]:
         desc = fields.get("original_description", "")
         documents.append({"id": hit.get("_id", ""), "text": f"{text}. {desc}"})
 
+    logger.info(f"    [rerank] query='{query}' | {len(documents)} docs")
+    for i, doc in enumerate(documents):
+        logger.info(f"      doc[{i}]: {doc['text'][:80]}")
+
     try:
         reranked = pc.inference.rerank(
             model="pinecone-rerank-v0",
@@ -232,8 +246,13 @@ def _rerank_hits(pc: Pinecone, query: str, hits: list[dict]) -> list[dict]:
             return_documents=True,
         )
 
+        logger.info(f"    [rerank] results:")
         relevant = []
         for result in reranked.data:
+            status = "KEEP" if result.score >= RERANK_SCORE_THRESHOLD else "DROP"
+            doc_text = result.document.get("text", "")[:60] if result.document else "?"
+            logger.info(f"      {status} score={result.score:.4f}  {doc_text}")
+
             if result.score < RERANK_SCORE_THRESHOLD:
                 continue
 
