@@ -78,30 +78,45 @@ class GeminiVisionService:
 
 1. **original_description**: Raw text exactly as appears on receipt (including codes, quantities, etc.)
 
-2. **normalized_name**: Clean, semantic product name following these rules:
+2. **normalized_name**: Clean, generic product name following these rules:
    - ALWAYS output in **lowercase**
-   - REMOVE quantities from name (450ml, 1L, 500g, 10st, 6x33cl, etc.)
+   - REMOVE quantities (450ml, 1L, 500g, 10st, 6x33cl, etc.)
    - REMOVE packaging types (PET, Blik, Fles, Doos, Brik, etc.)
-   - REMOVE private label markers (Boni, 365, Everyday, Cara, etc.) when they don't define the product
-   - KEEP brand names (Coca-Cola, Jupiler, Danone, etc.)
+   - REMOVE ALL brand/manufacturer names from normalized_name — brands go ONLY in normalized_brand:
+     - Remove store/house brands: Boni, 365, Everyday, Cara, etc.
+     - Remove manufacturer brands: Vandemoortele, Dr. Oetker, Nestlé, Heinz, Devos Lemmens, Lay's, Duyvis, etc.
+   - EXCEPTION: Keep the brand ONLY when it IS the product identity (removing it leaves no meaningful name):
+     - Keep: "jupiler" (without brand = just "bier pils", too generic)
+     - Keep: "coca-cola zero" (without brand = "cola zero", too generic)
+     - Keep: "leffe bruin" (without brand = "abdijbier bruin", nobody says that)
+     - Keep: "nutella" (without brand = "hazelnootpasta", different identity)
+   - Keep the product's natural word order as on the receipt (after removing brand/quantities)
+   - DO NOT reorder product words — strip brand + quantities and keep the remaining order
    - Maintain original language (Dutch/French)
+   - **CRITICAL**: The SAME product must ALWAYS produce the SAME normalized_name, regardless of receipt format or OCR variations
    - Examples:
-     - "JUPILER BIER 6X33CL PET" → "jupiler"
-     - "BONI VOLLE MELK 1L" → "volle melk"
-     - "COCA COLA ZERO 1,5L PET" → "coca-cola zero"
-     - "VANDEMOORTELE VINAIGRETTE CAESAR 450ML" → "caesar vinaigrette"
-     - "LEFFE BRUIN 6X33CL" → "leffe bruin"
+     - "JUPILER BIER 6X33CL PET" → "jupiler" (brand IS the product)
+     - "BONI VOLLE MELK 1L" → "volle melk" (house brand removed)
+     - "COCA COLA ZERO 1,5L PET" → "coca-cola zero" (brand IS the product)
+     - "VANDEMOORTELE VINAIGRETTE CAESAR 450ML" → "vinaigrette caesar" (manufacturer removed, word order preserved)
+     - "LEFFE BRUIN 6X33CL" → "leffe bruin" (brand IS the product)
+     - "DR. OETKER CASA DI MAMA SALAME 390G" → "casa di mama salame" (manufacturer removed, sub-brand kept)
+     - "LAY'S CHIPS PAPRIKA 250G" → "chips paprika" (manufacturer removed)
+     - "DEVOS LEMMENS MAYONAISE 300ML" → "mayonaise" (manufacturer removed)
+     - "DUYVIS BORRELNOOTJES HOT 275G" → "borrelnootjes hot" (manufacturer removed)
 
-3. **normalized_brand**: The brand name ONLY, in **lowercase**. Used for semantic search, so extract accurately.
+3. **normalized_brand**: The brand/manufacturer name ONLY, in **lowercase**. MUST always be set when a brand is identifiable.
    - Extract the product's brand/manufacturer, NOT the store name
    - For store/house brands (Boni, 365, Everyday, Cara, Delhaize brand), use the house brand name
    - If no brand is identifiable, use null
+   - IMPORTANT: normalized_brand must be set even when the brand was kept in normalized_name
    - Examples:
      - "JUPILER BIER 6X33CL PET" → "jupiler"
      - "BONI VOLLE MELK 1L" → "boni"
      - "COCA COLA ZERO 1,5L PET" → "coca-cola"
      - "VANDEMOORTELE VINAIGRETTE CAESAR 450ML" → "vandemoortele"
      - "LEFFE BRUIN 6X33CL" → "leffe"
+     - "LAY'S CHIPS PAPRIKA 250G" → "lay's"
      - "BANANEN 1KG" → null
 
 4. **is_premium**: Boolean flag for brand tier classification:
