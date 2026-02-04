@@ -30,17 +30,11 @@ async def init_db():
     When USE_ALEMBIC=False (development):
         - Uses create_all() for convenience (creates tables if they don't exist)
     """
-    import logging
-    logger = logging.getLogger(__name__)
-
     # Import all models to ensure they're registered with SQLAlchemy
     from app.models import user, receipt, transaction, user_rate_limit, user_profile, budget, budget_ai_insight, budget_history  # noqa
     from app.models import bank_connection, bank_account, bank_transaction  # noqa
 
-    if settings.USE_ALEMBIC:
-        logger.info("Database models registered. Using Alembic for migrations (USE_ALEMBIC=True).")
-    else:
-        logger.info("Running create_all() for database initialization (USE_ALEMBIC=False).")
+    if not settings.USE_ALEMBIC:
         async with engine.begin() as conn:
             await conn.run_sync(Base.metadata.create_all)
 

@@ -1,12 +1,9 @@
-import logging
 import math
 from datetime import date, timedelta
 from typing import Optional
 from urllib.parse import urlencode
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
-
-logger = logging.getLogger(__name__)
 from fastapi.responses import RedirectResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -91,7 +88,6 @@ async def list_banks(
         )
 
     except EnableBankingAPIError as e:
-        logger.error(f"EnableBanking API error listing banks: {e.message}, details: {e.details}")
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail={
@@ -122,10 +118,6 @@ async def create_bank_connection(
 ):
     """Start bank authorization flow."""
     try:
-        logger.info(f"=== CREATE BANK CONNECTION ===")
-        logger.info(f"Bank name: '{data.bank_name}'")
-        logger.info(f"Country: '{data.country}'")
-
         service = EnableBankingService()
 
         # Start authorization with EnableBanking
@@ -196,13 +188,6 @@ async def bank_connection_callback(
         # Exchange code for session
         session_result = await service.create_session(code)
 
-        # Log the raw accounts data to debug account_uid extraction
-        logger.info(f"EnableBanking session created: session_id={session_result.session_id}")
-        logger.info(f"EnableBanking accounts count: {len(session_result.accounts)}")
-        for i, acc in enumerate(session_result.accounts):
-            logger.info(f"Account {i} raw data keys: {list(acc.keys())}")
-            logger.info(f"Account {i} raw data: {acc}")
-
         # Activate connection
         connection = await conn_repo.activate(
             connection=connection,
@@ -219,10 +204,6 @@ async def bank_connection_callback(
             exclude_id=connection.id,
         )
         for old_conn in old_connections:
-            logger.info(
-                f"Cleaning up old connection {old_conn.id} to {old_conn.aspsp_name} "
-                f"(status={old_conn.status}) after reconnection"
-            )
             # Try to revoke the old session with EnableBanking
             if old_conn.session_id:
                 try:
@@ -231,7 +212,6 @@ async def bank_connection_callback(
                     pass  # Ignore errors - session may already be expired
             # Delete old connection (cascades to accounts and transactions)
             await conn_repo.delete(old_conn.id)
-            logger.info(f"Deleted old connection {old_conn.id} and its accounts")
 
         # Create accounts from session response
         account_repo = BankAccountRepository(db)
@@ -241,12 +221,8 @@ async def bank_connection_callback(
             account_uid = account_data.get("uid", "")
 
             if not account_uid:
-                logger.error(f"No 'uid' field in account data! Keys: {list(account_data.keys())}")
-                logger.error(f"Full account data: {account_data}")
                 # Skip accounts without uid - they can't be used for API calls
                 continue
-
-            logger.info(f"Extracted account_uid: {account_uid} from account data")
 
             account, created = await account_repo.get_or_create(
                 connection_id=connection.id,
@@ -257,7 +233,6 @@ async def bank_connection_callback(
                 currency=account_data.get("currency", "EUR"),
                 resource_id=account_data.get("resource_id"),
             )
-            logger.info(f"Account {'created' if created else 'found'}: id={account.id}, account_uid={account.account_uid}")
 
         # Build redirect URL based on callback type
         success_params = urlencode({
@@ -390,21 +365,7 @@ async def list_bank_accounts(
     conn_repo = BankConnectionRepository(db)
 
     # Debug: Get all accounts (including inactive) to log the filtering
-    all_accounts = await account_repo.get_by_user(current_user.id, active_only=False)
     active_accounts = await account_repo.get_by_user(current_user.id, active_only=True)
-
-    logger.info(f"GET /bank-accounts: user={current_user.id}, total={len(all_accounts)}, active={len(active_accounts)}")
-
-    # Log details about each account for debugging
-    for acc in all_accounts:
-        conn = await conn_repo.get_by_id(acc.connection_id)
-        conn_status = conn.status.value if conn and hasattr(conn.status, 'value') else (conn.status if conn else "no_connection")
-        is_returned = any(a.id == acc.id for a in active_accounts)
-        logger.info(
-            f"  Account {acc.id[:8]}...: iban={acc.iban}, "
-            f"conn_status={conn_status}, acc_is_active={acc.is_active}, "
-            f"returned={is_returned}"
-        )
 
     return BankAccountListResponse(
         accounts=[
@@ -454,10 +415,8 @@ async def sync_bank_account(
 
     # Use explicit string comparison for status
     conn_status = connection.status.value if hasattr(connection.status, 'value') else connection.status
-    logger.info(f"Connection status check: connection_id={connection.id}, status={conn_status}, type={type(connection.status)}")
 
     if not connection or conn_status != "active":
-        logger.warning(f"Connection not active: status={conn_status}")
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail={"error": "connection_inactive", "message": f"Bank connection is not active (status: {conn_status})"},
@@ -465,10 +424,6 @@ async def sync_bank_account(
 
     try:
         service = EnableBankingService()
-
-        logger.info(f"=== SYNC START for account {account.id} ===")
-        logger.info(f"Account: id={account.id}, account_uid={account.account_uid}, iban={account.iban}")
-        logger.info(f"Connection: id={connection.id}, session_id={connection.session_id}, status={conn_status}")
 
         balance = None
         balance_type = None
@@ -495,7 +450,6 @@ async def sync_bank_account(
         except EnableBankingAPIError as e:
             # Balance fetch failed - this might be a sandbox limitation, continue to try transactions
             balance_error = e
-            logger.warning(f"Balance fetch failed (continuing to transactions): {e.message}")
 
         # Fetch transactions (this is the main sync goal)
         date_from = date.today() - timedelta(days=days_back)
@@ -510,18 +464,10 @@ async def sync_bank_account(
             # If both balance AND transactions fail, the session is likely invalid
             if balance_error:
                 # Both failed - likely session expired or invalid account
-                logger.error(f"Both balance and transactions failed - session may be invalid")
                 raise e
             else:
                 # Only transactions failed but balance worked - weird state
-                logger.warning(f"Transactions fetch failed but balance worked: {e.message}")
                 transactions = []
-
-        logger.info(f"Transactions fetched from EnableBanking: {len(transactions)}")
-        if transactions:
-            logger.info(f"First transaction: {transactions[0].transaction_id}, amount={transactions[0].amount}, date={transactions[0].booking_date}")
-        else:
-            logger.warning(f"No transactions returned from EnableBanking for date range {date_from} to {date.today()}")
 
         # Store new transactions with AI category suggestions
         txn_repo = BankTransactionRepository(db)
@@ -530,20 +476,13 @@ async def sync_bank_account(
         existing_count = 0
 
         for txn in transactions:
-            # Log each transaction for debugging
-            logger.info(f"  Transaction: id={txn.transaction_id}, amount={txn.amount}, date={txn.booking_date}, creditor={txn.creditor_name}, debtor={txn.debtor_name}")
-
             # Skip if already exists
             exists = await txn_repo.exists(account.id, txn.transaction_id)
             if exists:
                 existing_count += 1
-                logger.info(f"    → Already exists, skipping")
                 continue
 
-            logger.info(f"    → NEW transaction, will be added")
             new_transactions.append(txn)
-
-        logger.info(f"Transaction processing: total={len(transactions)}, existing={existing_count}, new={len(new_transactions)}")
 
         # Get AI category suggestions for new transactions in bulk
         if new_transactions:
@@ -586,16 +525,6 @@ async def sync_bank_account(
         # Update sync time
         await account_repo.update_sync_time(account)
 
-        # Get and log total pending count for debugging
-        pending_count = await txn_repo.get_pending_count_by_user(
-            # Need to get user_id from connection
-            connection.user_id
-        )
-
-        logger.info(f"=== SYNC SUCCESS ===")
-        logger.info(f"Account {account.id}: balance={balance}, fetched={len(transactions)}, new={new_count}")
-        logger.info(f"Total pending transactions for user: {pending_count}")
-
         return BankAccountSyncResponse(
             account_id=account.id,
             balance=balance,
@@ -610,18 +539,11 @@ async def sync_bank_account(
         error_type = e.details.get("error_type", "unknown")
         endpoint = e.details.get("endpoint", "unknown")
 
-        logger.error(f"=== SYNC FAILED ===")
-        logger.error(f"EnableBanking error: type={error_type}, message={e.message}")
-        logger.error(f"Details: endpoint={endpoint}, full_details={e.details}")
-        logger.error(f"Account: id={account.id}, account_uid={account.account_uid}")
-        logger.error(f"Connection: id={connection.id}, session_id={connection.session_id}")
-
         # Handle session/consent expired (404 on session or account endpoints)
         if error_type == "not_found":
             # Check if this is a session-level error or account-level error
             if "/sessions/" in endpoint and "/accounts/" not in endpoint:
                 # Session itself not found - definitely expired
-                logger.error("EnableBanking session not found - session expired")
                 await conn_repo.update_status(
                     connection,
                     BankConnectionStatus.EXPIRED,
@@ -639,7 +561,6 @@ async def sync_bank_account(
             else:
                 # Account not found within session - might be wrong account_uid
                 # Don't mark as expired, just report the error
-                logger.error(f"EnableBanking account not found - account_uid may be incorrect: {account.account_uid}")
                 raise HTTPException(
                     status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
                     detail={
@@ -651,7 +572,6 @@ async def sync_bank_account(
 
         # Handle authentication errors from EnableBanking
         if error_type == "authentication":
-            logger.error(f"EnableBanking JWT authentication error - check API credentials")
             # Don't mark connection as expired for JWT errors - this is a backend config issue
             raise HTTPException(
                 status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
@@ -694,16 +614,11 @@ async def list_bank_transactions(
     db: AsyncSession = Depends(get_db),
 ):
     """Get bank transactions for the current user."""
-    logger.info(f"=== GET PENDING TRANSACTIONS ===")
-    logger.info(f"User: {current_user.id}")
-
     repo = BankTransactionRepository(db)
 
     transactions, total = await repo.get_pending_by_user(
         current_user.id, page=page, page_size=page_size
     )
-
-    logger.info(f"Found {total} pending transactions, returning {len(transactions)} on page {page}")
 
     total_pages = math.ceil(total / page_size) if total > 0 else 1
 

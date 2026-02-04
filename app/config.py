@@ -8,7 +8,6 @@ class Settings(BaseSettings):
     # App
     APP_NAME: str = "Scandalicious Backend"
     DEBUG: bool = False
-    API_V1_PREFIX: str = "/api/v1"
 
     # Database
     DATABASE_URL: str = "postgresql+asyncpg://localhost:5432/scandalicious"
@@ -18,9 +17,6 @@ class Settings(BaseSettings):
     # Firebase
     FIREBASE_SERVICE_ACCOUNT: Optional[str] = None  # JSON string
     GOOGLE_APPLICATION_CREDENTIALS: Optional[str] = None  # File path
-
-    # Anthropic
-    ANTHROPIC_API_KEY: str = ""
 
     # Gemini
     GEMINI_API_KEY: str = ""

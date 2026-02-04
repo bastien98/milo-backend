@@ -1,5 +1,4 @@
 import json
-import logging
 from dataclasses import dataclass
 from typing import Optional, List
 
@@ -11,7 +10,6 @@ from app.models.enums import Category
 from app.config import get_settings
 
 settings = get_settings()
-logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -162,14 +160,12 @@ Return ONLY valid JSON in this exact format:
             )
 
         except json.JSONDecodeError as e:
-            logger.error(f"Failed to parse Gemini response: {e}")
             return CategorySuggestion(
                 category=Category.OTHER,
                 confidence=0.0,
                 reasoning="Failed to parse AI response",
             )
         except Exception as e:
-            logger.exception(f"Error during category suggestion: {e}")
             return CategorySuggestion(
                 category=Category.OTHER,
                 confidence=0.0,
@@ -251,13 +247,11 @@ Return ONLY valid JSON in this exact format:
             return results
 
         except json.JSONDecodeError as e:
-            logger.error(f"Failed to parse Gemini bulk response: {e}")
             raise GeminiAPIError(
                 "Failed to parse Gemini response",
                 details={"error_type": "parse_error", "error": str(e)},
             )
         except Exception as e:
-            logger.exception(f"Error during bulk category suggestion: {e}")
             raise GeminiAPIError(
                 f"Bulk categorization failed: {str(e)}",
                 details={"error_type": "unexpected", "error": str(e)},

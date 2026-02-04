@@ -1,4 +1,3 @@
-import logging
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, Request, HTTPException
@@ -9,7 +8,6 @@ from app.config import get_settings
 from app.core.exceptions import (
     ReceiptProcessingError,
     ImageValidationError,
-    ClaudeAPIError,
     VeryfiAPIError,
     GeminiAPIError,
     ResourceNotFoundError,
@@ -17,35 +15,19 @@ from app.core.exceptions import (
     RateLimitExceededError,
     EnableBankingAPIError,
 )
-from app.api.v1.router import api_router
 from app.api.v2.router import api_router as api_router_v2
 from app.db.session import init_db
 
 settings = get_settings()
 
-# Configure logging - suppress noisy third-party loggers
-logging.basicConfig(level=logging.DEBUG if settings.DEBUG else logging.INFO)
-logger = logging.getLogger(__name__)
-
-# Silence noisy third-party libraries
-logging.getLogger("urllib3").setLevel(logging.WARNING)
-logging.getLogger("cachecontrol").setLevel(logging.WARNING)
-logging.getLogger("httpx").setLevel(logging.WARNING)
-logging.getLogger("httpcore").setLevel(logging.WARNING)
-logging.getLogger("google").setLevel(logging.WARNING)
-logging.getLogger("firebase_admin").setLevel(logging.WARNING)
-logging.getLogger("multipart").setLevel(logging.WARNING)
-logging.getLogger("multipart.multipart").setLevel(logging.WARNING)
-
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     # Startup
-    logger.info("Starting Scandalicious Backend...")
     await init_db()
     yield
     # Shutdown
-    logger.info("Shutting down Scandalicious Backend...")
+    pass
 
 
 app = FastAPI(
@@ -55,13 +37,6 @@ app = FastAPI(
 ## Scandalicious API
 
 Receipt scanning and expense tracking API powered by Veryfi OCR and AI.
-
-### API Versions
-
-| Version | Receipts | Chat | Status | Base Path |
-|---------|----------|------|--------|-----------|
-| **v2** | Gemini 2.0 Flash | Gemini 2.0 Flash | **Recommended** | `/api/v2` |
-| v1 | Gemini 2.0 Flash | Claude | Legacy | `/api/v1` |
 
 ### Features
 - **Receipt Upload**: Scan receipts using Veryfi OCR with AI categorization & health scoring
@@ -82,7 +57,6 @@ Authorization: Bearer <firebase_id_token>
 """,
     lifespan=lifespan,
     openapi_tags=[
-        # V2 API (Gemini) - Recommended
         {"name": "v2 - receipts", "description": "📄 Upload and manage receipts (Gemini AI)"},
         {"name": "v2 - chat", "description": "💬 AI-powered spending assistant (Gemini AI)"},
         {"name": "v2 - transactions", "description": "💳 View and manage transactions"},
@@ -90,14 +64,6 @@ Authorization: Bearer <firebase_id_token>
         {"name": "v2 - rate-limit", "description": "⏱️ Rate limit status"},
         {"name": "v2 - profile", "description": "👤 User profile management"},
         {"name": "v2 - health", "description": "🏥 Health checks"},
-        # V1 API - Legacy
-        {"name": "receipts", "description": "Upload and manage receipts (Gemini AI)"},
-        {"name": "chat", "description": "AI-powered spending assistant (Claude AI - Legacy)"},
-        {"name": "transactions", "description": "View and manage transactions"},
-        {"name": "analytics", "description": "Spending analytics and insights"},
-        {"name": "rate-limit", "description": "Rate limit status"},
-        {"name": "profile", "description": "User profile management"},
-        {"name": "health", "description": "Health checks"},
     ],
 )
 
@@ -140,32 +106,9 @@ async def receipt_processing_exception_handler(
     )
 
 
-@app.exception_handler(ClaudeAPIError)
-async def claude_api_exception_handler(request: Request, exc: ClaudeAPIError):
-    error_type = exc.details.get("error_type", "unknown")
-    logger.error(f"ClaudeAPIError: {exc.message} (type={error_type}, details={exc.details})")
-
-    content = {
-        "error": "llm_service_error",
-        "message": "Receipt extraction service temporarily unavailable",
-        "details": {"retry_after": 30},
-    }
-
-    # Include detailed error info in debug mode
-    if settings.DEBUG:
-        content["debug"] = {
-            "error_type": error_type,
-            "message": exc.message,
-            "details": exc.details,
-        }
-
-    return JSONResponse(status_code=503, content=content)
-
-
 @app.exception_handler(VeryfiAPIError)
 async def veryfi_api_exception_handler(request: Request, exc: VeryfiAPIError):
     error_type = exc.details.get("error_type", "unknown")
-    logger.error(f"VeryfiAPIError: {exc.message} (type={error_type}, details={exc.details})")
 
     content = {
         "error": "ocr_service_error",
@@ -187,7 +130,6 @@ async def veryfi_api_exception_handler(request: Request, exc: VeryfiAPIError):
 @app.exception_handler(GeminiAPIError)
 async def gemini_api_exception_handler(request: Request, exc: GeminiAPIError):
     error_type = exc.details.get("error_type", "unknown")
-    logger.error(f"GeminiAPIError: {exc.message} (type={error_type}, details={exc.details})")
 
     content = {
         "error": "llm_service_error",
@@ -209,7 +151,6 @@ async def gemini_api_exception_handler(request: Request, exc: GeminiAPIError):
 @app.exception_handler(EnableBankingAPIError)
 async def enablebanking_api_exception_handler(request: Request, exc: EnableBankingAPIError):
     error_type = exc.details.get("error_type", "unknown")
-    logger.error(f"EnableBankingAPIError: {exc.message} (type={error_type}, details={exc.details})")
 
     content = {
         "error": "banking_service_error",
@@ -298,7 +239,6 @@ async def http_exception_handler(request: Request, exc: HTTPException):
 
 @app.exception_handler(Exception)
 async def general_exception_handler(request: Request, exc: Exception):
-    logger.exception("Unexpected error occurred")
     return JSONResponse(
         status_code=500,
         content={
@@ -308,8 +248,7 @@ async def general_exception_handler(request: Request, exc: Exception):
     )
 
 
-# Include API routers
-app.include_router(api_router, prefix=settings.API_V1_PREFIX)
+# Include API router
 app.include_router(api_router_v2, prefix="/api/v2")
 
 

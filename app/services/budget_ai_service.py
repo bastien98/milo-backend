@@ -1,5 +1,4 @@
 import json
-import logging
 import re
 import calendar
 from datetime import date, timedelta
@@ -36,7 +35,6 @@ from app.schemas.budget_ai import (
 from app.services.split_aware_calculation import SplitAwareCalculation
 
 settings = get_settings()
-logger = logging.getLogger(__name__)
 
 
 class BudgetAIService:
@@ -390,7 +388,6 @@ Return ONLY valid JSON with this exact structure:
         except GeminiAPIError:
             raise
         except Exception as e:
-            logger.exception(f"Error generating budget suggestion: {e}")
             raise GeminiAPIError(
                 f"Failed to generate budget suggestion: {str(e)}",
                 details={"error_type": "generation_error"},
@@ -439,7 +436,6 @@ Return ONLY valid JSON with this exact structure:
         except GeminiAPIError:
             raise
         except Exception as e:
-            logger.exception(f"Error generating check-in: {e}")
             raise GeminiAPIError(
                 f"Failed to generate check-in: {str(e)}",
                 details={"error_type": "generation_error"},
@@ -489,7 +485,6 @@ Return ONLY valid JSON with this exact structure:
         except GeminiAPIError:
             raise
         except Exception as e:
-            logger.exception(f"Error analyzing receipt: {e}")
             raise GeminiAPIError(
                 f"Failed to analyze receipt: {str(e)}",
                 details={"error_type": "generation_error"},
@@ -542,7 +537,6 @@ Return ONLY valid JSON with this exact structure:
         except GeminiAPIError:
             raise
         except Exception as e:
-            logger.exception(f"Error generating monthly report: {e}")
             raise GeminiAPIError(
                 f"Failed to generate monthly report: {str(e)}",
                 details={"error_type": "generation_error"},
@@ -1340,7 +1334,6 @@ Return ONLY valid JSON with this exact structure:
             return response.text
 
         except Exception as e:
-            logger.exception(f"Gemini API error: {e}")
             raise GeminiAPIError(
                 f"Gemini API error: {str(e)}",
                 details={"error_type": "api_error"},

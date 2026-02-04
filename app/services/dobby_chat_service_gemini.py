@@ -1,4 +1,3 @@
-import logging
 from datetime import date, timedelta
 from typing import List, Optional, AsyncGenerator
 from collections import defaultdict
@@ -16,7 +15,6 @@ from app.models.user_profile import UserProfile
 from app.schemas.chat import ChatMessage
 
 settings = get_settings()
-logger = logging.getLogger(__name__)
 
 
 class DobbyChatServiceGemini:
@@ -205,7 +203,6 @@ You will receive the user's profile information (name, etc.) and transaction dat
             # Get user's profile and transaction context
             profile = await self._get_user_profile(db, user_id)
             profile_context = self._build_profile_context(profile)
-            logger.info(f"Profile for user {user_id}: {profile}, context: {profile_context}")
             transaction_context = await self._get_user_transaction_context(db, user_id)
 
             # Build contents with conversation history
@@ -221,9 +218,6 @@ You will receive the user's profile information (name, etc.) and transaction dat
             context_parts = []
             if profile_context:
                 context_parts.append(profile_context)
-                logger.info(f"Including profile context: {profile_context[:100]}...")
-            else:
-                logger.warning(f"No profile context for user {user_id}")
             context_parts.append(transaction_context)
             full_context = "\n\n".join(context_parts)
 
@@ -233,7 +227,6 @@ You will receive the user's profile information (name, etc.) and transaction dat
 
 My question: {message}"""
 
-            logger.debug(f"Full user content length: {len(user_content)} chars")
             contents.append(types.Content(role="user", parts=[types.Part.from_text(text=user_content)]))
 
             # Call Gemini API
@@ -250,7 +243,6 @@ My question: {message}"""
             return response.text
 
         except Exception as e:
-            logger.exception(f"Gemini API error: {e}")
             raise GeminiAPIError(
                 f"Gemini API error: {str(e)}",
                 details={"error_type": "api_error", "api_error": str(e)},
@@ -271,7 +263,6 @@ My question: {message}"""
             # Get user's profile and transaction context
             profile = await self._get_user_profile(db, user_id)
             profile_context = self._build_profile_context(profile)
-            logger.info(f"Stream - Profile for user {user_id}: {profile}, context: {profile_context}")
             transaction_context = await self._get_user_transaction_context(db, user_id)
 
             # Build contents with conversation history
@@ -287,9 +278,6 @@ My question: {message}"""
             context_parts = []
             if profile_context:
                 context_parts.append(profile_context)
-                logger.info(f"Stream - Including profile context: {profile_context[:100]}...")
-            else:
-                logger.warning(f"Stream - No profile context for user {user_id}")
             context_parts.append(transaction_context)
             full_context = "\n\n".join(context_parts)
 
@@ -317,7 +305,6 @@ My question: {message}"""
                     yield chunk.text
 
         except Exception as e:
-            logger.exception(f"Gemini API error: {e}")
             raise GeminiAPIError(
                 f"Gemini API error: {str(e)}",
                 details={"error_type": "api_error", "api_error": str(e)},

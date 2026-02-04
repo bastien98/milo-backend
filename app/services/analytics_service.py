@@ -1,4 +1,3 @@
-import logging
 from datetime import date, timedelta
 from typing import Optional, Dict, List
 from collections import defaultdict
@@ -40,8 +39,6 @@ from app.schemas.analytics import (
 from app.models.enums import Category
 from app.services.split_aware_calculation import SplitAwareCalculation
 
-logger = logging.getLogger(__name__)
-
 
 class AnalyticsService:
     def __init__(self, db: AsyncSession):
@@ -66,10 +63,6 @@ class AnalyticsService:
             end_date: End date for the period (None if all_time)
             all_time: If True, query all transactions regardless of date
         """
-        logger.info(
-            f"Analytics query: user_id={user_id}, start_date={start_date}, "
-            f"end_date={end_date}, all_time={all_time}"
-        )
 
         # Build query based on whether this is an all-time query
         if all_time:
@@ -99,17 +92,9 @@ class AnalyticsService:
             actual_start = start_date
             actual_end = end_date
 
-        logger.info(
-            f"Analytics found {len(transactions)} transactions for user_id={user_id} "
-            f"{'(all time)' if all_time else f'in date range {actual_start} to {actual_end}'}"
-        )
         if transactions:
             dates = [t.date for t in transactions]
             unique_receipt_ids = set(t.receipt_id for t in transactions if t.receipt_id)
-            logger.debug(
-                f"Transaction dates: min={min(dates)}, max={max(dates)}, "
-                f"unique_receipts={len(unique_receipt_ids)}"
-            )
 
         # Get split-adjusted amounts for all transactions
         tx_amounts = await self.split_calc.get_transaction_user_amounts(user_id, transactions)
@@ -140,9 +125,6 @@ class AnalyticsService:
                 round(sum(data["health_scores"]) / len(data["health_scores"]), 2)
                 if data["health_scores"]
                 else None
-            )
-            logger.debug(
-                f"Store '{store_name}': visits={visit_count}, receipt_ids={data['receipt_ids']}"
             )
             stores.append(
                 StoreSpending(
@@ -196,10 +178,6 @@ class AnalyticsService:
         days_in_month = calendar.monthrange(year, month)[1]
         end_date = date(year, month, days_in_month)
 
-        logger.info(
-            f"Pie chart summary: user_id={user_id}, month={month}, year={year}, "
-            f"date_range={start_date} to {end_date}"
-        )
 
         # Query transactions for the month
         query = select(Transaction).where(
@@ -924,10 +902,6 @@ class AnalyticsService:
             top_stores_limit: Number of top stores to return
             min_category_percentage: Minimum percentage threshold for categories
         """
-        logger.info(
-            f"Aggregate stats request: user_id={user_id}, period_type={period_type}, "
-            f"num_periods={num_periods}, all_time={all_time}"
-        )
 
         # Determine date range
         if all_time:
@@ -1535,7 +1509,6 @@ class AnalyticsService:
         - Top categories by spend
         - First and last receipt dates
         """
-        logger.info(f"All-time stats request: user_id={user_id}, top_stores_limit={top_stores_limit}, top_categories_limit={top_categories_limit}")
 
         # Get all transactions for the user
         query = select(Transaction).where(Transaction.user_id == user_id)
@@ -1687,11 +1660,6 @@ class AnalyticsService:
         Returns:
             YearSummaryResponse with total spending, store breakdowns, and optional monthly breakdown
         """
-        logger.info(
-            f"Year summary request: user_id={user_id}, year={year}, "
-            f"include_monthly_breakdown={include_monthly_breakdown}, "
-            f"top_categories_limit={top_categories_limit}"
-        )
 
         # Define year boundaries
         start_date = date(year, 1, 1)

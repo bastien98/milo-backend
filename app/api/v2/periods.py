@@ -1,5 +1,3 @@
-import logging
-
 from fastapi import APIRouter, Depends, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -7,8 +5,6 @@ from app.api.deps import get_db, get_current_db_user
 from app.models.user import User
 from app.schemas.analytics import PeriodsResponse
 from app.services.analytics_service import AnalyticsService
-
-logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
@@ -32,21 +28,11 @@ async def get_periods(
     Only returns periods that have actual data (total_spend > 0).
     Periods are sorted by most recent first.
     """
-    logger.info(
-        f"Periods metadata request: user_id={current_user.id}, "
-        f"period_type={period_type}, num_periods={num_periods}"
-    )
-
     analytics = AnalyticsService(db)
     result = await analytics.get_periods_metadata(
         user_id=current_user.id,
         period_type=period_type,
         num_periods=num_periods,
-    )
-
-    logger.info(
-        f"Periods metadata result: user_id={current_user.id}, "
-        f"total_periods={result.total_periods}"
     )
 
     return result

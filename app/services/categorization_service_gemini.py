@@ -1,5 +1,4 @@
 import json
-import logging
 from dataclasses import dataclass
 from typing import List, Optional
 
@@ -12,7 +11,6 @@ from app.config import get_settings
 from app.services.veryfi_service import VeryfiLineItem
 
 settings = get_settings()
-logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -178,13 +176,11 @@ Return ONLY valid JSON with this exact format:
             return CategorizationResult(store_name=cleaned_store_name, items=categorized_items)
 
         except json.JSONDecodeError as e:
-            logger.error(f"Failed to parse Gemini response as JSON: {e}")
             raise GeminiAPIError(
                 "Failed to parse Gemini response as JSON",
                 details={"error_type": "parse_error", "parse_error": str(e)},
             )
         except Exception as e:
-            logger.exception(f"Unexpected error during categorization: {e}")
             raise GeminiAPIError(
                 f"Categorization failed: {str(e)}",
                 details={"error_type": "unexpected", "error": str(e)},
@@ -236,7 +232,6 @@ Return ONLY valid JSON with this exact format:
             # Use the first index as the primary source for price/quantity data
             primary_index = original_indices[0]
             if primary_index >= len(items):
-                logger.warning(f"Invalid index {primary_index} in categorization, skipping")
                 continue
 
             primary_item = items[primary_index]
@@ -266,13 +261,6 @@ Return ONLY valid JSON with this exact format:
             total_price = primary_item.total if primary_item.total is not None else primary_item.price
             quantity = int(primary_item.quantity) if primary_item.quantity else 1
             unit_price = primary_item.price if primary_item.price else (total_price / quantity if quantity > 0 else total_price)
-
-            # Log if duplicates were merged
-            if len(original_indices) > 1:
-                logger.info(
-                    f"Merged {len(original_indices)} duplicate entries for '{cleaned_name}' "
-                    f"(indices: {original_indices})"
-                )
 
             result.append(
                 CategorizedItem(

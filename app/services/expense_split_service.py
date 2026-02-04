@@ -1,9 +1,6 @@
-import logging
 from typing import Optional, List, Dict
 
 from sqlalchemy.ext.asyncio import AsyncSession
-
-logger = logging.getLogger(__name__)
 
 from app.db.repositories.expense_split_repo import ExpenseSplitRepository
 from app.db.repositories.transaction_repo import TransactionRepository
@@ -334,13 +331,6 @@ class ExpenseSplitService:
 
     def _to_response(self, split: ExpenseSplit) -> ExpenseSplitResponse:
         """Convert model to response schema."""
-        logger.info(
-            f"_to_response: split_id={split.id}, "
-            f"participants={len(split.participants)}, "
-            f"assignments={len(split.assignments)}"
-        )
-        for a in split.assignments:
-            logger.info(f"  Assignment: tx={a.transaction_id}, participants={a.participant_ids}")
         return ExpenseSplitResponse(
             id=split.id,
             receipt_id=split.receipt_id,

@@ -1,6 +1,5 @@
 import json
-import logging
-from typing import AsyncGenerator, Optional, Callable, Awaitable
+from typing import AsyncGenerator, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Response
 from fastapi.responses import StreamingResponse
@@ -17,7 +16,6 @@ from app.services.rate_limit_service import RateLimitService, RateLimitStatus
 from app.core.exceptions import GeminiAPIError, RateLimitExceededError
 
 router = APIRouter()
-logger = logging.getLogger(__name__)
 settings = get_settings()
 
 
@@ -95,7 +93,6 @@ async def chat(
     except GeminiAPIError:
         raise
     except Exception as e:
-        logger.exception(f"Chat error: {e}")
         raise HTTPException(status_code=500, detail="Failed to process chat request")
 
 
@@ -140,7 +137,6 @@ async def stream_response(
             error_data = json.dumps({"type": "error", "error": str(e.message)})
             yield f"data: {error_data}\n\n"
         except Exception as e:
-            logger.exception(f"Streaming chat error: {e}")
             error_data = json.dumps({"type": "error", "error": "Failed to process chat request"})
             yield f"data: {error_data}\n\n"
 
@@ -243,7 +239,6 @@ async def chat_test(
     except GeminiAPIError:
         raise
     except Exception as e:
-        logger.exception(f"Chat test error: {e}")
         raise HTTPException(status_code=500, detail="Failed to process chat request")
 
 

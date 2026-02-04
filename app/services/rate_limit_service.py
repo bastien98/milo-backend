@@ -1,4 +1,3 @@
-import logging
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Optional, Callable, Awaitable
@@ -13,7 +12,6 @@ from app.db.repositories.rate_limit_repo import (
 from app.db.session import async_session_maker
 from app.models.user_rate_limit import UserRateLimit
 
-logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -72,11 +70,8 @@ async def increment_rate_limit_counter(firebase_uid: str) -> None:
             if record:
                 record.messages_used += 1
                 await session.commit()
-                logger.debug(f"Incremented rate limit for {firebase_uid}: {record.messages_used}")
             else:
-                logger.warning(f"Rate limit record not found for {firebase_uid}")
         except Exception as e:
-            logger.error(f"Failed to increment rate limit for {firebase_uid}: {e}")
             await session.rollback()
 
 
@@ -94,11 +89,8 @@ async def increment_receipt_rate_limit_counter(firebase_uid: str) -> None:
             if record:
                 record.receipts_used += 1
                 await session.commit()
-                logger.debug(f"Incremented receipt rate limit for {firebase_uid}: {record.receipts_used}")
             else:
-                logger.warning(f"Rate limit record not found for {firebase_uid}")
         except Exception as e:
-            logger.error(f"Failed to increment receipt rate limit for {firebase_uid}: {e}")
             await session.rollback()
 
 

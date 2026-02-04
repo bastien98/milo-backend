@@ -1,5 +1,4 @@
 import base64
-import logging
 from dataclasses import dataclass
 from datetime import date
 from typing import List, Optional
@@ -10,7 +9,6 @@ from app.core.exceptions import VeryfiAPIError
 from app.config import get_settings
 
 settings = get_settings()
-logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -101,19 +99,16 @@ class VeryfiService:
                 )
 
                 if response.status_code == 401:
-                    logger.error("Veryfi API authentication failed")
                     raise VeryfiAPIError(
                         "Veryfi API authentication failed - invalid credentials",
                         details={"error_type": "authentication"},
                     )
                 elif response.status_code == 429:
-                    logger.warning("Veryfi API rate limit exceeded")
                     raise VeryfiAPIError(
                         "Veryfi API rate limit exceeded - please retry later",
                         details={"error_type": "rate_limit"},
                     )
                 elif response.status_code >= 400:
-                    logger.error(f"Veryfi API error: {response.status_code} - {response.text}")
                     raise VeryfiAPIError(
                         f"Veryfi API error (status {response.status_code})",
                         details={
@@ -127,13 +122,11 @@ class VeryfiService:
                 return self._parse_response(data)
 
         except httpx.TimeoutException as e:
-            logger.error(f"Veryfi API timeout: {e}")
             raise VeryfiAPIError(
                 "Veryfi API request timed out",
                 details={"error_type": "timeout"},
             )
         except httpx.RequestError as e:
-            logger.error(f"Veryfi API connection error: {e}")
             raise VeryfiAPIError(
                 "Failed to connect to Veryfi API",
                 details={"error_type": "connection", "error": str(e)},
@@ -141,7 +134,6 @@ class VeryfiService:
         except VeryfiAPIError:
             raise
         except Exception as e:
-            logger.exception(f"Unexpected error during Veryfi extraction: {e}")
             raise VeryfiAPIError(
                 f"Veryfi extraction failed: {str(e)}",
                 details={"error_type": "unexpected", "error": str(e)},
@@ -186,11 +178,6 @@ class VeryfiService:
         # Veryfi duplicate detection - only provides boolean flag, no similarity score
         is_duplicate = data.get("is_duplicate", False)
         original_doc_id = data.get("duplicate_of")  # Integer ID of original document
-
-        if is_duplicate:
-            logger.info(
-                f"Duplicate detected! Original document ID: {original_doc_id}"
-            )
 
         # Note: Veryfi doesn't provide a similarity score, only boolean is_duplicate
         duplicate_score = None

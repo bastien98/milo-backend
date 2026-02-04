@@ -52,3 +52,4 @@ firebase-service-account.json
 .claude/settings.local.json
 
 BACKEND_CONTEXT.txt
+WalletCerts/

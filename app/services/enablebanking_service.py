@@ -1,4 +1,3 @@
-import logging
 import secrets
 import time
 from dataclasses import dataclass
@@ -12,7 +11,6 @@ from app.config import get_settings
 from app.core.exceptions import EnableBankingAPIError
 
 settings = get_settings()
-logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -107,7 +105,6 @@ class EnableBankingService:
             )
 
         self.base_url = self.BASE_URL
-        logger.info(f"EnableBanking service initialized: sandbox={self.sandbox}, base_url={self.base_url}")
 
     def _load_private_key(self) -> str:
         """Load private key from settings or file.
@@ -117,23 +114,13 @@ class EnableBankingService:
         """
         if settings.ENABLEBANKING_PRIVATE_KEY:
             key = settings.ENABLEBANKING_PRIVATE_KEY
-            logger.debug(f"Raw private key length: {len(key)}, starts_with_begin: {key.startswith('-----BEGIN')}")
             has_literal_backslash_n = "\\n" in repr(key)
-            logger.debug(f"Contains literal backslash-n: {has_literal_backslash_n}")
 
             # Convert escaped newlines to actual newlines
             # This handles PEM keys stored as env vars with \n as literal characters
             if "\\n" in key:
                 key = key.replace("\\n", "\n")
-                logger.debug("Replaced \\\\n with actual newlines")
 
-            # Validate key structure
-            if not key.startswith("-----BEGIN"):
-                logger.error(f"Private key doesn't start with -----BEGIN. First 50 chars: {key[:50]}")
-            if "-----END" not in key:
-                logger.error("Private key doesn't contain -----END marker")
-
-            logger.debug(f"Processed key length: {len(key)}, line_count: {key.count(chr(10))}")
             return key
 
         if settings.ENABLEBANKING_PRIVATE_KEY_PATH:
@@ -171,12 +158,8 @@ class EnableBankingService:
                 algorithm="RS256",
                 headers=headers,
             )
-            logger.debug(f"Generated JWT token (first 50 chars): {token[:50]}...")
-            logger.debug(f"JWT kid (app_id): {self.app_id}")
             return token
         except Exception as e:
-            logger.error(f"Failed to generate JWT: {e}")
-            logger.error(f"Private key first 100 chars: {self.private_key[:100] if self.private_key else 'EMPTY'}")
             raise EnableBankingAPIError(
                 "Failed to generate authentication token. Check private key format.",
                 details={"error_type": "authentication", "error": str(e)},
@@ -199,7 +182,6 @@ class EnableBankingService:
     ) -> dict:
         """Make authenticated request to EnableBanking API."""
         url = f"{self.base_url}{endpoint}"
-        logger.debug(f"EnableBanking API request: {method} {url} params={params}")
 
         try:
             async with httpx.AsyncClient(timeout=60.0) as client:
@@ -212,27 +194,21 @@ class EnableBankingService:
                 )
 
                 if response.status_code == 401:
-                    logger.error(f"EnableBanking API authentication failed. Response: {response.text[:500]}")
                     raise EnableBankingAPIError(
                         "EnableBanking API authentication failed",
                         details={"error_type": "authentication"},
                     )
                 elif response.status_code == 404:
-                    logger.warning(f"EnableBanking resource not found: {endpoint}")
                     raise EnableBankingAPIError(
                         "Resource not found",
                         details={"error_type": "not_found", "endpoint": endpoint},
                     )
                 elif response.status_code == 429:
-                    logger.warning("EnableBanking API rate limit exceeded")
                     raise EnableBankingAPIError(
                         "EnableBanking API rate limit exceeded",
                         details={"error_type": "rate_limit"},
                     )
                 elif response.status_code >= 400:
-                    logger.error(
-                        f"EnableBanking API error: {response.status_code} - {response.text}"
-                    )
                     raise EnableBankingAPIError(
                         f"EnableBanking API error (status {response.status_code})",
                         details={
@@ -248,13 +224,11 @@ class EnableBankingService:
                 return response.json()
 
         except httpx.TimeoutException as e:
-            logger.error(f"EnableBanking API timeout: {e}")
             raise EnableBankingAPIError(
                 "EnableBanking API request timed out",
                 details={"error_type": "timeout"},
             )
         except httpx.RequestError as e:
-            logger.error(f"EnableBanking API connection error: {e}")
             raise EnableBankingAPIError(
                 "Failed to connect to EnableBanking API",
                 details={"error_type": "connection", "error": str(e)},
@@ -262,7 +236,6 @@ class EnableBankingService:
         except EnableBankingAPIError:
             raise
         except Exception as e:
-            logger.exception(f"Unexpected error during EnableBanking request: {e}")
             raise EnableBankingAPIError(
                 f"EnableBanking request failed: {str(e)}",
                 details={"error_type": "unexpected", "error": str(e)},
@@ -338,11 +311,6 @@ class EnableBankingService:
             },
         }
 
-        logger.info(f"=== EnableBanking /auth request ===")
-        logger.info(f"ASPSP name: '{aspsp_name}'")
-        logger.info(f"ASPSP country: '{aspsp_country.upper()}'")
-        logger.info(f"Full payload: {payload}")
-
         data = await self._request("POST", "/auth", json=payload)
 
         return AuthorizationResult(
@@ -363,14 +331,6 @@ class EnableBankingService:
         payload = {"code": code}
         data = await self._request("POST", "/sessions", json=payload)
 
-        # Log the full raw response for debugging
-        logger.info(f"=== EnableBanking /sessions response ===")
-        logger.info(f"Full response keys: {list(data.keys())}")
-        logger.info(f"Session ID: {data.get('session_id')}")
-        logger.info(f"Accounts count: {len(data.get('accounts', []))}")
-        for i, acc in enumerate(data.get("accounts", [])):
-            logger.info(f"Account {i}: {acc}")
-
         valid_until = None
         if data.get("access", {}).get("valid_until"):
             try:
@@ -380,7 +340,7 @@ class EnableBankingService:
                     valid_until_str = valid_until_str[:-1] + "+00:00"
                 valid_until = datetime.fromisoformat(valid_until_str)
             except (ValueError, KeyError):
-                logger.warning("Failed to parse valid_until date from EnableBanking")
+                pass
 
         return SessionResult(
             session_id=data.get("session_id", ""),
