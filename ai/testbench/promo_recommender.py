@@ -26,6 +26,7 @@ import os
 import ssl
 import sys
 import time
+from datetime import date
 from pathlib import Path
 
 # ---------------------------------------------------------------------------
@@ -144,10 +145,19 @@ def search_promos_for_item(pc: Pinecone, index, item: dict) -> list[dict]:
     interest_category = item.get("interest_category")
     brands = item.get("brands", [])
 
-    # Metadata filter
-    filter_dict = None
+    # Metadata filter — always exclude expired promos
+    today = date.today().isoformat()
+    validity_filter = {"validity_end": {"$gte": today}}
+
     if granular_category:
-        filter_dict = {"granular_category": {"$eq": granular_category}}
+        filter_dict = {
+            "$and": [
+                {"granular_category": {"$eq": granular_category}},
+                validity_filter,
+            ]
+        }
+    else:
+        filter_dict = validity_filter
 
     # Build category suffix for query text
     cat_suffix = ""
@@ -169,10 +179,10 @@ def search_promos_for_item(pc: Pinecone, index, item: dict) -> list[dict]:
     for query_text in query_texts:
         hits = _pinecone_search(index, query_text, filter_dict)
 
-        # Fallback without category filter
-        if not hits and filter_dict:
-            logger.info(f"    No results with category filter for '{query_text}', retrying without filter...")
-            hits = _pinecone_search(index, query_text, filter_dict=None)
+        # Fallback without category filter (but keep validity filter)
+        if not hits and granular_category:
+            logger.info(f"    No results with category filter for '{query_text}', retrying without category...")
+            hits = _pinecone_search(index, query_text, filter_dict=validity_filter)
 
         # Deduplicate across brand queries
         for hit in hits:
@@ -468,8 +478,10 @@ def _build_llm_context(profile: dict, promo_results: dict[str, list[dict]]) -> s
                 if p.get("promo_mechanism"):
                     parts.append(f"  Promo: {p['promo_mechanism']}")
                 parts.append(
-                    f"  Category: {p.get('granular_category', 'N/A')} | "
+                    f"  Store: {p.get('source_retailer', 'N/A')} | "
+                    f"Category: {p.get('granular_category', 'N/A')} | "
                     f"Brand: {p.get('brand', 'N/A')} | "
+                    f"Size: {p.get('unit_info') or 'N/A'} | "
                     f"Valid: {p.get('validity_start', '?')} to {p.get('validity_end', '?')}"
                 )
                 parts.append(f"  Relevance score: {p.get('relevance_score', 'N/A')}")

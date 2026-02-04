@@ -1,13 +1,13 @@
 #!/usr/bin/env python3
 """
-Colruyt Promo Folder Ingestion Pipeline
+Carrefour Belgium Promo Folder Ingestion Pipeline
 
-Extracts promotional items from a Colruyt promo folder PDF using Gemini,
+Extracts promotional items from a Carrefour Belgium promo folder PDF using Gemini,
 then upserts them into the Pinecone 'promos' index with integrated embedding.
 
 Usage (from scandelicious-backend/):
-    python ai/promo_pipelines/colruyt/ingest_folder.py promo_folder_colruyt.pdf
-    python ai/promo_pipelines/colruyt/ingest_folder.py promo_folder_colruyt.pdf --dry-run
+    python ai/promo_pipelines/carrefour/ingest_folder.py promo_folder_carrefour.pdf
+    python ai/promo_pipelines/carrefour/ingest_folder.py promo_folder_carrefour.pdf --dry-run
 """
 
 import argparse
@@ -51,8 +51,8 @@ MAX_RETRIES = 4
 RETRY_BASE_DELAY = 5  # seconds, doubles each retry
 FOLDER_DIR = Path(__file__).resolve().parent / "folder"
 
-RETAILER_NAME = "colruyt"
-RETAILER_DISPLAY_NAME = "Colruyt"
+RETAILER_NAME = "carrefour"
+RETAILER_DISPLAY_NAME = "Carrefour"
 
 logging.basicConfig(
     level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s"
@@ -83,37 +83,43 @@ class PromoItem:
 
 
 # ---------------------------------------------------------------------------
-# Colruyt-specific Gemini prompt
+# Carrefour Belgium-specific Gemini prompt
 # ---------------------------------------------------------------------------
-SYSTEM_PROMPT = '''You are a specialist in extracting promotional offers from Colruyt supermarket folders (Belgium).
-You have deep knowledge of Colruyt's folder layout, pricing labels, and promotional mechanics.
+SYSTEM_PROMPT = '''You are a specialist in extracting promotional offers from Carrefour Belgium supermarket folders.
+You have deep knowledge of Carrefour Belgium's folder layout, loyalty programme, pricing labels, and promotional mechanics.
 
-## COLRUYT FOLDER FORMAT
-- Colruyt folders are typically bilingual: Dutch on one side, French on the other.
-  Extract from EITHER language — do not duplicate items that appear in both languages.
-- The validity period is printed on the cover page or footer: "Geldig van DD/MM tot DD/MM"
-  or "Valable du DD/MM au DD/MM". Convert to YYYY-MM-DD (assume 2026 if year not shown).
+## CARREFOUR BELGIUM FOLDER FORMAT
+- Carrefour Belgium folders are bilingual: Dutch ("NL") and French ("FR") sections.
+  Extract from EITHER language — do not duplicate items that appear in both.
+- The validity period is printed on the cover or footer:
+  "Geldig van DD/MM tot DD/MM" (NL) or "Valable du DD/MM au DD/MM" (FR).
+  Convert to YYYY-MM-DD (assume 2026 if year not shown).
 - Apply the SAME validity dates to all items unless an item shows its own date range.
 - If no dates are visible on these pages, use null.
 
-## COLRUYT PROMO MECHANISMS
-Colruyt uses specific promotional labels. Recognize and extract these correctly:
-- **"Laagste Prijs"** / **"Prix le plus bas"**: Colruyt's core promise — these are regular promos, extract them normally
-- **"1+1 gratis"** / **"1+1 gratuit"**: Buy one get one free. promo_price = price of the first item
-- **"2e aan halve prijs"** / **"2ème à moitié prix"**: Second item at half price
-- **"2+1 gratis"** / **"2+1 gratuit"**: Buy 2 get 1 free
-- **"-30%"**, **"-25%"**, etc.: Percentage discount on the item
-- **"€X.XX korting"**: Fixed euro discount
-- **"X voor €Y"** / **"X pour €Y"**: Multi-buy deal (set promo_price to per-unit price)
-- **"Mega Deal"**: A highlighted deal — extract as a normal promo with its mechanism
+## CARREFOUR PROMO MECHANISMS
+Carrefour Belgium uses specific promotional labels. Recognize and extract these correctly:
+- **"Bonus Card"** / **"Carte Bonus"**: Loyalty card discount — extract as a normal promo, set promo_mechanism to "Bonus Card"
+- **"Prix Choc"** / **"Stuntprijs"**: Highlighted deep discount
+- **"1+1 gratuit"** / **"1+1 gratis"**: Buy one get one free. promo_price = price of the first item
+- **"2ème à -50%"** / **"2e aan -50%"**: Second item at half price
+- **"2+1 gratuit"** / **"2+1 gratis"**: Buy 2 get 1 free
+- **"3 pour €X"** / **"3 voor €X"**: Multi-buy deal (set promo_price to per-unit price: €X / 3)
+- **"-30%"**, **"-40%"**, etc.: Percentage discount
+- **"€X korting"** / **"€X de réduction"**: Fixed euro discount
+- **"Extra"**: An Extra loyalty point deal — set promo_mechanism to "Extra" or the full label
+- **"Bio"** promos: Organic product promotions — extract normally, these are real promos
 - Simple price reductions with no label: set promo_mechanism to null
 
-## COLRUYT STORE BRANDS
-Colruyt has three house brand tiers — always set brand to the house brand name:
-- **Boni**: Standard store brand (mid-range quality)
-- **Boni Selection**: Premium house brand
-- **Everyday**: Budget/economy brand (cheapest tier)
-- **CRU**: Premium delicatessen brand (high-end local/artisan products)
+## CARREFOUR STORE BRANDS
+Carrefour Belgium has multiple house brand tiers — always set brand to the house brand name:
+- **Carrefour**: Standard house brand (blue packaging, mid-range)
+- **Carrefour Bio**: Organic house brand (green packaging)
+- **Carrefour Classic**: Mainstream range
+- **Carrefour Extra**: Premium house brand (black/gold packaging)
+- **Simpl**: Budget/economy brand (cheapest tier, yellow/white packaging)
+- **Carrefour Original**: Select specialty products
+- **Carrefour Sensation**: Indulgent/treat products
 
 ## EXTRACTION RULES
 
@@ -121,28 +127,27 @@ Colruyt has three house brand tiers — always set brand to the house brand name
 
 1. **original_description**: Full product text as shown in the folder.
    Include brand, product name, variant, size/weight exactly as printed.
-   Example: "Jupiler Pils Blikken 24x25cl"
+   Example: "Carrefour Bio Lait Demi-Écrémé 1L"
 
 2. **normalized_name**: Clean, generic, lowercase product name:
-   - REMOVE the brand name (Jupiler, Boni, Everyday, Coca-Cola, Lay's, Danone, etc.)
-   - REMOVE quantities (450ml, 1L, 500g, 6x33cl, 24x25cl, etc.)
-   - REMOVE packaging (PET, Blik, Fles, Doos, Brik, etc.)
+   - REMOVE the brand name (Carrefour, Simpl, Coca-Cola, Danone, Lay's, etc.)
+   - REMOVE quantities (450ml, 1L, 500g, 6x33cl, etc.)
+   - REMOVE packaging (PET, Blik, Fles, Doos, Brik, Bouteille, etc.)
    - KEEP only what the product IS in its original language (Dutch or French)
-   - Examples specific to Colruyt folders:
+   - Examples specific to Carrefour Belgium folders:
+     - "Carrefour Bio Lait Demi-Écrémé 1L" → "lait demi-écrémé"
+     - "Simpl Eau de Source 6x1,5L" → "eau de source"
+     - "Carrefour Spaghetti 500g" → "spaghetti"
+     - "Carrefour Extra Chocolat Noir 72% 100g" → "chocolat noir 72%"
      - "Jupiler Pils Blikken 24x25cl" → "pils"
-     - "Boni Volle Melk 1L" → "volle melk"
-     - "Everyday Spaghetti 500g" → "spaghetti"
-     - "CRU Ambachtelijk Brood" → "ambachtelijk brood"
      - "Coca-Cola Zero 1,5L PET" → "cola zero"
-     - "Leffe Bruin Flessen 6x33cl" → "bruin bier"
      - "Lay's Chips Paprika 250g" → "chips paprika"
-     - "Everyday Keukenrol 8st" → "keukenrol"
-     - "Danone Activia Aardbei 4x125g" → "yoghurt aardbei"
-     - "Dove Douchegel Original 250ml" → "douchegel"
+     - "Lotus Speculoos Original 250g" → "speculoos"
+     - "Dash Lessive Liquide 40 lavages" → "lessive liquide"
 
 3. **brand**: Brand/manufacturer in **lowercase**.
-   - Store brands: "boni", "boni selection", "everyday", "cru"
-   - Name brands: "jupiler", "coca-cola", "danone", "leffe", "lay's"
+   - Store brands: "carrefour", "carrefour bio", "carrefour classic", "carrefour extra", "simpl", "carrefour original", "carrefour sensation"
+   - Name brands: "jupiler", "coca-cola", "danone", "lotus", "dash"
    - null for unbranded items (loose fruit, vegetables, bakery without brand)
 
 4. **granular_category**: Assign ONE from this list:
@@ -151,22 +156,24 @@ Colruyt has three house brand tiers — always set brand to the house brand name
 5. **original_price**: Regular price before promo (float, comma→dot). null if not shown.
 
 6. **promo_price**: Promotional price the customer pays (float, comma→dot).
-   - For "1+1 gratis": price of one item
-   - For multi-buy "X voor €Y": per-unit price (€Y / X)
+   - For "1+1 gratuit": price of one item
+   - For multi-buy "3 pour €X": per-unit price (€X / 3)
+   - For "Bonus Card" price: the discounted price with the card
    - null if only a percentage/mechanism is shown
 
 7. **promo_mechanism**: Promotional label as shown in the folder.
-   - Examples: "1+1 gratis", "2e aan halve prijs", "-30%", "Mega Deal", "€1.00 korting"
+   - Examples: "Bonus Card", "Prix Choc", "1+1 gratuit", "2ème à -50%", "-30%", "Extra"
    - null if it's just a simple price reduction with no label
 
 8. **unit_info**: Package size/weight as shown.
-   - Examples: "500g", "1L", "6x33cl", "per kg", "per stuk", "24x25cl"
+   - Examples: "500g", "1L", "6x33cl", "per kg", "per stuk", "24x25cl", "40 lavages"
    - null if not specified
 
 ### IMPORTANT RULES
 - Extract EVERY product, including small secondary items and non-food (household, personal care, pet)
-- Each unique product appears ONCE — deduplicate across Dutch/French sides
-- Colruyt "Laagste Prijs" items are standard promos — extract them
+- Each unique product appears ONCE — deduplicate across Dutch/French sections
+- Carrefour "Bonus Card" items are regular promos — extract them (many customers have the card)
+- Carrefour "Prix Choc" / "Stuntprijs" items are deep discounts — extract them
 - Skip decorative elements, recipe suggestions, and store information
 
 ## OUTPUT FORMAT
@@ -177,14 +184,14 @@ Return ONLY valid JSON:
   "validity_end": "YYYY-MM-DD",
   "items": [
     {{
-      "original_description": "Jupiler Pils Blikken 24x25cl",
-      "normalized_name": "pils",
-      "brand": "jupiler",
-      "granular_category": "Beer Pils",
-      "original_price": 12.99,
-      "promo_price": 9.99,
-      "promo_mechanism": null,
-      "unit_info": "24x25cl"
+      "original_description": "Carrefour Bio Lait Demi-Écrémé 1L",
+      "normalized_name": "lait demi-écrémé",
+      "brand": "carrefour bio",
+      "granular_category": "Milk Fresh",
+      "original_price": 1.29,
+      "promo_price": 0.99,
+      "promo_mechanism": "Bonus Card",
+      "unit_info": "1L"
     }}
   ]
 }}
