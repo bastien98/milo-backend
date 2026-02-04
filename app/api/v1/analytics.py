@@ -1,0 +1,375 @@
+import logging
+from datetime import date, timedelta
+from typing import Optional
+
+from fastapi import APIRouter, Depends, Query
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.api.deps import get_db, get_current_db_user
+from app.models.user import User
+from app.schemas.analytics import (
+    PeriodSummary,
+    CategoryBreakdown,
+    StoreBreakdown,
+    TrendsResponse,
+    AggregateResponse,
+    AllTimeResponse,
+    YearSummaryResponse,
+    PieChartSummaryResponse,
+)
+from app.services.analytics_service import AnalyticsService
+
+logger = logging.getLogger(__name__)
+
+router = APIRouter()
+
+
+def get_period_dates(
+    period: Optional[str],
+    start_date: Optional[date] = None,
+    end_date: Optional[date] = None,
+) -> tuple[Optional[date], Optional[date], bool]:
+    """Calculate start and end dates for a period.
+
+    Returns:
+        tuple: (start_date, end_date, is_all_time)
+        - If is_all_time is True, start_date and end_date will be None
+          and the service should query all data
+    """
+    today = date.today()
+
+    # All-time query: no period, no start_date, no end_date
+    if period is None and start_date is None and end_date is None:
+        return None, None, True
+
+    if start_date and end_date:
+        return start_date, end_date, False
+
+    # Default to month if no period specified but custom dates provided
+    effective_period = period or "month"
+
+    if effective_period == "week":
+        # Current week (Monday to Sunday)
+        start = today - timedelta(days=today.weekday())
+        end = start + timedelta(days=6)
+    elif effective_period == "month":
+        # Current month
+        start = today.replace(day=1)
+        # End of month
+        if today.month == 12:
+            end = date(today.year + 1, 1, 1) - timedelta(days=1)
+        else:
+            end = date(today.year, today.month + 1, 1) - timedelta(days=1)
+    elif effective_period == "year":
+        # Current year
+        start = date(today.year, 1, 1)
+        end = date(today.year, 12, 31)
+    else:
+        # Default to current month
+        start = today.replace(day=1)
+        if today.month == 12:
+            end = date(today.year + 1, 1, 1) - timedelta(days=1)
+        else:
+            end = date(today.year, today.month + 1, 1) - timedelta(days=1)
+
+    return start, end, False
+
+
+@router.get("/summary", response_model=PieChartSummaryResponse)
+async def get_summary(
+    month: int = Query(..., ge=1, le=12, description="Month (1-12)"),
+    year: int = Query(..., ge=2020, le=2100, description="Year (e.g., 2026)"),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_db_user),
+):
+    """
+    Get spending summary by category for a specific month/year (Pie Chart data).
+
+    Returns a list of categories with:
+    - `category_id`: Unique identifier (enum name)
+    - `name`: Display name
+    - `total_spent`: Total amount spent in this category
+    - `color_hex`: Hex color code for visualization
+    - `percentage`: Percentage of total spending
+    - `transaction_count`: Number of transactions
+    - `average_health_score`: Average health score (0-5)
+
+    This endpoint powers the Pie Chart visualization in the Analytics tab.
+    """
+    logger.info(
+        f"Analytics summary request: user_id={current_user.id}, month={month}, year={year}"
+    )
+
+    analytics = AnalyticsService(db)
+    result = await analytics.get_pie_chart_summary(
+        user_id=current_user.id,
+        month=month,
+        year=year,
+    )
+
+    logger.info(
+        f"Analytics summary result: user_id={current_user.id}, "
+        f"categories_count={len(result.categories)}, total_spent={result.total_spent}"
+    )
+
+    return result
+
+
+@router.get("/categories", response_model=CategoryBreakdown)
+async def get_categories(
+    period: Optional[str] = Query(None, description="Period: week, month, year, or custom. If not provided with no date params, returns all-time data."),
+    start_date: Optional[date] = Query(None, description="Start date for custom period"),
+    end_date: Optional[date] = Query(None, description="End date for custom period"),
+    store_name: Optional[str] = Query(None, description="Filter by store"),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_db_user),
+):
+    """
+    Get spending breakdown by category.
+
+    Shows how spending is distributed across the 16 categories.
+    Optionally filter by store.
+
+    **All-Time Mode**: When called without any date/period parameters,
+    returns aggregated data across ALL receipts ever uploaded.
+    """
+    start, end, is_all_time = get_period_dates(period, start_date, end_date)
+
+    analytics = AnalyticsService(db)
+    return await analytics.get_category_breakdown(
+        user_id=current_user.id,
+        start_date=start,
+        end_date=end,
+        store_name=store_name,
+        all_time=is_all_time,
+    )
+
+
+@router.get("/stores/{store_name}", response_model=StoreBreakdown)
+async def get_store_breakdown(
+    store_name: str,
+    period: Optional[str] = Query(None, description="Period: week, month, year, or custom. If not provided with no date params, returns all-time data."),
+    start_date: Optional[date] = Query(None, description="Start date for custom period"),
+    end_date: Optional[date] = Query(None, description="End date for custom period"),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_db_user),
+):
+    """
+    Get detailed breakdown for a specific store.
+
+    Shows total spending, visit count, and category breakdown
+    for the specified store.
+
+    **All-Time Mode**: When called without any date/period parameters,
+    returns aggregated data across ALL receipts ever uploaded for this store.
+    """
+    start, end, is_all_time = get_period_dates(period, start_date, end_date)
+
+    analytics = AnalyticsService(db)
+    return await analytics.get_store_breakdown(
+        user_id=current_user.id,
+        store_name=store_name,
+        start_date=start,
+        end_date=end,
+        all_time=is_all_time,
+    )
+
+
+@router.get(
+    "/stores/{store_name}/trends",
+    response_model=TrendsResponse,
+    summary="Get spending trends for a specific store",
+    description="Returns spending trends filtered for a specific store over multiple time periods. "
+    "Only periods with actual transactions are included (no empty periods). "
+    "The total_spend, transaction_count, and average_health_score only include transactions from the specified store.",
+)
+async def get_store_trends(
+    store_name: str,
+    period_type: str = Query("month", description="Period type: week, month, year"),
+    num_periods: int = Query(6, ge=1, le=52, description="Maximum number of periods to return"),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_db_user),
+):
+    """
+    Get spending trends for a specific store.
+
+    Returns historical spending data for the specified store over multiple time periods.
+    Useful for visualizing spending patterns at a particular store over time.
+
+    Only periods with actual transactions are returned - periods with no transactions
+    for this store are excluded. Results are sorted oldest first for chart display.
+    The num_periods parameter acts as a maximum limit, not an exact count.
+
+    Returns an empty trends array if the store doesn't exist or has no transactions.
+    """
+    analytics = AnalyticsService(db)
+    return await analytics.get_store_spending_trends(
+        user_id=current_user.id,
+        store_name=store_name,
+        period_type=period_type,
+        num_periods=num_periods,
+    )
+
+
+@router.get(
+    "/trends",
+    response_model=TrendsResponse,
+    summary="Get spending trends over time",
+    description="Returns spending trends over multiple time periods. "
+    "Only periods with actual transactions are included (no empty periods).",
+)
+async def get_trends(
+    period_type: str = Query("month", description="Period type: week, month, year"),
+    num_periods: int = Query(12, ge=1, le=52, description="Maximum number of periods to return"),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_db_user),
+):
+    """
+    Get spending trends over time.
+
+    Returns historical spending data for the user over multiple time periods.
+    Useful for visualizing spending patterns over time.
+
+    Only periods with actual transactions are returned - empty periods are excluded.
+    For example, if a user has transactions in January and March but not February,
+    only January and March will be returned. Results are sorted oldest first for
+    chart display. The num_periods parameter acts as a maximum limit, not an exact count.
+    """
+    analytics = AnalyticsService(db)
+    return await analytics.get_spending_trends(
+        user_id=current_user.id,
+        period_type=period_type,
+        num_periods=num_periods,
+    )
+
+
+@router.get(
+    "/aggregate",
+    response_model=AggregateResponse,
+    summary="Get aggregate statistics across multiple periods",
+    description="Returns aggregate statistics including totals, averages, extremes, "
+    "top categories, top stores, and health score distribution across multiple time periods.",
+)
+async def get_aggregate(
+    period_type: str = Query("month", description="Period granularity: week, month, year"),
+    num_periods: int = Query(12, ge=1, le=52, description="Number of periods to aggregate"),
+    start_date: Optional[date] = Query(None, description="Optional start date (YYYY-MM-DD)"),
+    end_date: Optional[date] = Query(None, description="Optional end date (YYYY-MM-DD)"),
+    all_time: bool = Query(False, description="If true, return all-time stats (ignores date filters)"),
+    top_categories_limit: int = Query(5, ge=1, le=20, description="Number of top categories to return"),
+    top_stores_limit: int = Query(5, ge=1, le=20, description="Number of top stores to return"),
+    min_category_percentage: float = Query(0, ge=0, le=100, description="Minimum percentage threshold for categories"),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_db_user),
+):
+    """
+    Get aggregate statistics across multiple periods.
+
+    Returns comprehensive aggregate data including:
+    - **totals**: Total spend, transactions, receipts, and items
+    - **averages**: Average spend per period, transaction value, item price, health score, etc.
+    - **extremes**: Max/min spending periods and highest/lowest health score periods
+    - **top_categories**: Top spending categories with percentages and health scores
+    - **top_stores**: Top stores by amount spent with visit counts
+    - **health_score_distribution**: Distribution of health scores across all transactions
+
+    Use `all_time=true` to get statistics across the entire user history.
+    Use `start_date` and `end_date` for custom date ranges.
+    """
+    logger.info(
+        f"Aggregate request: user_id={current_user.id}, period_type={period_type}, "
+        f"num_periods={num_periods}, all_time={all_time}"
+    )
+
+    analytics = AnalyticsService(db)
+    return await analytics.get_aggregate_stats(
+        user_id=current_user.id,
+        period_type=period_type,
+        num_periods=num_periods,
+        start_date=start_date,
+        end_date=end_date,
+        all_time=all_time,
+        top_categories_limit=top_categories_limit,
+        top_stores_limit=top_stores_limit,
+        min_category_percentage=min_category_percentage,
+    )
+
+
+@router.get(
+    "/all-time",
+    response_model=AllTimeResponse,
+    summary="Get all-time statistics",
+    description="Returns all-time statistics for the user including total receipts, items, "
+    "spend, top stores by visits and spend, top categories, and date range.",
+)
+async def get_all_time(
+    top_stores_limit: int = Query(3, ge=1, le=10, description="Number of top stores to return"),
+    top_categories_limit: int = Query(5, ge=1, le=20, description="Number of top categories to return"),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_db_user),
+):
+    """
+    Get all-time statistics for the user.
+
+    Returns comprehensive all-time data including:
+    - Total receipts, items, spend, and transactions
+    - Average item price and health score
+    - Top stores by visit count (with ranks)
+    - Top stores by total spend (with ranks)
+    - Top categories by total spend (with ranks, percentages, and health scores)
+    - First and last receipt dates
+
+    This endpoint is optimized for the scan view hero cards on the frontend.
+    """
+    logger.info(f"All-time request: user_id={current_user.id}, top_stores_limit={top_stores_limit}, top_categories_limit={top_categories_limit}")
+
+    analytics = AnalyticsService(db)
+    return await analytics.get_all_time_stats(
+        user_id=current_user.id,
+        top_stores_limit=top_stores_limit,
+        top_categories_limit=top_categories_limit,
+    )
+
+
+@router.get(
+    "/year/{year}",
+    response_model=YearSummaryResponse,
+    summary="Get year summary statistics",
+    description="Returns aggregated analytics data for a specific year including total spending, "
+    "store breakdowns, optional monthly breakdown, and top categories.",
+)
+async def get_year_summary(
+    year: int,
+    include_monthly_breakdown: bool = Query(True, description="Whether to include per-month spending breakdown"),
+    top_categories_limit: int = Query(5, ge=1, le=20, description="Number of top categories to return"),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_db_user),
+):
+    """
+    Get aggregated analytics data for a specific year.
+
+    Returns comprehensive year data including:
+    - **total_spend**: Total spending for the year
+    - **transaction_count**: Number of item transactions
+    - **receipt_count**: Number of unique receipts
+    - **total_items**: Sum of all item quantities
+    - **average_health_score**: Average health score across all items (0-5)
+    - **stores**: List of stores with amount spent, visits, percentage, and health score (sorted by amount_spent descending)
+    - **monthly_breakdown**: Per-month spending data (optional, only months with data, sorted by month_number ascending)
+    - **top_categories**: Top spending categories with percentages and health scores
+
+    All data is filtered by receipt_date within the specified year (Jan 1 - Dec 31).
+    """
+    logger.info(
+        f"Year summary request: user_id={current_user.id}, year={year}, "
+        f"include_monthly_breakdown={include_monthly_breakdown}, "
+        f"top_categories_limit={top_categories_limit}"
+    )
+
+    analytics = AnalyticsService(db)
+    return await analytics.get_year_summary(
+        user_id=current_user.id,
+        year=year,
+        include_monthly_breakdown=include_monthly_breakdown,
+        top_categories_limit=top_categories_limit,
+    )

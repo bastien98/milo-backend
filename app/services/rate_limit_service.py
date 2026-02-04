@@ -70,7 +70,6 @@ async def increment_rate_limit_counter(firebase_uid: str) -> None:
             if record:
                 record.messages_used += 1
                 await session.commit()
-            else:
         except Exception as e:
             await session.rollback()
 
@@ -89,7 +88,6 @@ async def increment_receipt_rate_limit_counter(firebase_uid: str) -> None:
             if record:
                 record.receipts_used += 1
                 await session.commit()
-            else:
         except Exception as e:
             await session.rollback()
 

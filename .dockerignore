@@ -1,0 +1,11 @@
+venv/
+.venv/
+__pycache__/
+*.pyc
+.git/
+.pytest_cache/
+.DS_Store
+*.csv
+test-receipts/
+PROFILE_API_README.md
+README.md

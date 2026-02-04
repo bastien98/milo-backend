@@ -398,6 +398,7 @@ async def update_budget(
     },
 )
 async def delete_budget(
+    month: str = Query(None, description="Month to delete in YYYY-MM format. Defaults to current month."),
     current_user: User = Depends(get_current_db_user),
     db: AsyncSession = Depends(get_db),
 ):
@@ -405,7 +406,11 @@ async def delete_budget(
     Delete the user's budget.
 
     This marks the budget as deleted in history (prevents auto-rollover)
-    and removes it from the active budgets table.
+    and removes it from the active budgets table (only for current month).
+
+    Parameters:
+    - month: Optional month in YYYY-MM format. If provided, marks that month's
+      history as deleted. If it's the current month, also deletes the active budget.
 
     Returns:
     - 204: Budget deleted successfully (no content)
@@ -415,21 +420,24 @@ async def delete_budget(
     repo = BudgetRepository(db)
     history_repo = BudgetHistoryRepository(db)
 
-    # Mark budget as deleted in history for current month
     current_month = date.today().strftime("%Y-%m")
-    await history_repo.mark_as_deleted(current_user.id, current_month)
+    target_month = month if month else current_month
 
-    # Delete from active budgets table
-    deleted = await repo.delete_by_user_id(current_user.id)
+    # Mark budget as deleted in history for the target month
+    await history_repo.mark_as_deleted(current_user.id, target_month)
 
-    if not deleted:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail={
-                "error": "No budget found",
-                "code": "NO_BUDGET",
-            },
-        )
+    if target_month == current_month:
+        # Current month: also delete from active budgets table
+        deleted = await repo.delete_by_user_id(current_user.id)
+
+        if not deleted:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail={
+                    "error": "No budget found",
+                    "code": "NO_BUDGET",
+                },
+            )
 
     return None
 
