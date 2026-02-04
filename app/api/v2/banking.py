@@ -5,6 +5,7 @@ from urllib.parse import urlencode
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from fastapi.responses import RedirectResponse
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_db, get_current_db_user
@@ -451,13 +452,15 @@ async def sync_bank_account(
             balance_error = e
 
         # Fetch transactions (this is the main sync goal)
+        # Use date_to = today + 1 day to handle UTC/local timezone edge cases
         date_from = date.today() - timedelta(days=days_back)
+        date_to = date.today() + timedelta(days=1)
         try:
             transactions = await service.get_transactions(
                 connection.session_id,
                 account.account_uid,
                 date_from=date_from,
-                date_to=date.today(),
+                date_to=date_to,
             )
         except EnableBankingAPIError as e:
             # If both balance AND transactions fail, the session is likely invalid
@@ -511,25 +514,29 @@ async def sync_bank_account(
             for i, txn in enumerate(new_transactions):
                 suggestion = suggestions[i] if i < len(suggestions) else None
 
-                await txn_repo.create(
-                    account_id=account.id,
-                    transaction_id=txn.transaction_id,
-                    amount=txn.amount,
-                    booking_date=txn.booking_date,
-                    currency=txn.currency,
-                    creditor_name=txn.creditor_name,
-                    creditor_iban=txn.creditor_iban,
-                    debtor_name=txn.debtor_name,
-                    debtor_iban=txn.debtor_iban,
-                    value_date=txn.value_date,
-                    description=txn.description,
-                    remittance_info=txn.remittance_info,
-                    entry_reference=txn.entry_reference,
-                    raw_response=txn.raw,
-                    suggested_category=suggestion.category if suggestion else None,
-                    category_confidence=suggestion.confidence if suggestion else None,
-                )
-                new_count += 1
+                try:
+                    async with db.begin_nested():
+                        await txn_repo.create(
+                            account_id=account.id,
+                            transaction_id=txn.transaction_id,
+                            amount=txn.amount,
+                            booking_date=txn.booking_date,
+                            currency=txn.currency,
+                            creditor_name=txn.creditor_name,
+                            creditor_iban=txn.creditor_iban,
+                            debtor_name=txn.debtor_name,
+                            debtor_iban=txn.debtor_iban,
+                            value_date=txn.value_date,
+                            description=txn.description,
+                            remittance_info=txn.remittance_info,
+                            entry_reference=txn.entry_reference,
+                            raw_response=txn.raw,
+                            suggested_category=suggestion.category if suggestion else None,
+                            category_confidence=suggestion.confidence if suggestion else None,
+                        )
+                    new_count += 1
+                except IntegrityError:
+                    existing_count += 1
 
         # Update sync time
         await account_repo.update_sync_time(account)

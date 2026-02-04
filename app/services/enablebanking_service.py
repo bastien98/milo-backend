@@ -435,23 +435,40 @@ class EnableBankingService:
         if date_to:
             params["date_to"] = date_to.isoformat()
 
-        # Note: EnableBanking API uses /accounts/{account_id}/transactions (not /sessions/.../accounts/...)
-        # The session context is provided via the JWT authentication
-        data = await self._request(
-            "GET",
-            f"/accounts/{account_id}/transactions",
-            params=params if params else None,
-        )
+        # Fetch all pages using continuation_key pagination
+        all_raw_txns = []
+        page = 0
+        while True:
+            page += 1
+            data = await self._request(
+                "GET",
+                f"/accounts/{account_id}/transactions",
+                params=params if params else None,
+            )
+
+            raw_txns = data.get("transactions", [])
+            continuation_key = data.get("continuation_key")
+            all_raw_txns.extend(raw_txns)
+
+            if not continuation_key:
+                break
+
+            # Add continuation_key for next page
+            params["continuation_key"] = continuation_key
+
+            # Safety limit to prevent infinite loops
+            if page >= 50:
+                break
 
         transactions = []
-        for txn in data.get("transactions", []):
+        for txn in all_raw_txns:
             # Parse amount
-            amount_data = txn.get("transaction_amount", {})
+            amount_data = txn.get("transaction_amount") or {}
             amount = float(amount_data.get("amount", 0))
             currency = amount_data.get("currency", "EUR")
 
             # Skip income/credit transactions - only process expenses
-            credit_debit = txn.get("credit_debit_indicator", "").upper()
+            credit_debit = (txn.get("credit_debit_indicator") or "").upper()
             if credit_debit != "DBIT":
                 continue
 
