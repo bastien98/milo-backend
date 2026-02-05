@@ -2,11 +2,19 @@
 
 ## Overview
 
-The promo recommender finds relevant Colruyt promotions for a user based on their shopping history. It works in 3 stages:
+The promo recommender finds relevant supermarket promotions for a user based on their shopping history. It works in 3 stages:
 
 1. **Enriched Profile** - Aggregate 90 days of transactions into interest items
 2. **Semantic Search + Rerank** - Find matching promos in Pinecone vector DB
-3. **LLM Recommendations** - Generate personalized advice via Gemini
+3. **LLM Recommendations** - Generate personalized advice via LLM
+
+### Models used
+
+| Stage | Model | Purpose |
+|-------|-------|---------|
+| Vector search (embedding) | `llama-text-embed-v2` | Pinecone integrated inference for semantic similarity |
+| Rerank (cross-encoder) | `bge-reranker-v2-m3` | Pinecone integrated rerank to score true relevance |
+| LLM | Gemini 3 Pro Preview / Claude Sonnet 4 | Generate personalized recommendations (first available key wins) |
 
 ## Stage 1: Enriched Profile
 
@@ -54,41 +62,27 @@ Finds candidate promos using embedding similarity (`llama-text-embed-v2` via Pin
 
 ### Step 2b: Rerank
 
-A cross-encoder (`pinecone-rerank-v0`) scores each candidate against the user's item to judge true relevance.
+Search and rerank run as a single integrated Pinecone API call. The cross-encoder (`bge-reranker-v2-m3`) re-scores each vector search candidate against the query to judge true relevance.
 
-**Rerank query (what the user is looking for):**
-
-| Bucket | Query | Example |
-|--------|-------|---------|
-| `brand_loyal` | `{Brand} {Name}` (dominant brand) | `vandemoortele caesar vinaigrette` |
-| All others | `{Name}` | `volle melk` |
-
-No category in the rerank query to avoid penalizing promos categorized differently (e.g., user buys "Milk Fresh" but promo is indexed as "Milk Long Life").
-
-**Rerank document (what the promo looks like to the cross-encoder):**
+**Rerank field:** `text` — the structured embedding text stored on each Pinecone record, e.g.:
 
 ```
-{normalized_name}. {original_description}
+pringles chips 165g (Chips)
+lay's chips oven baked naturel 150 g (Chips)
 ```
 
-Example:
-```
-halfvolle melk. Campina volle of halfvolle melk fles of brik 1 L vb.: Halfvolle melk brik
-```
+This field contains `{brand} {normalized_name} {unit_info} ({category})` and gives the cross-encoder a concise, consistent representation to compare against the query.
 
-- `normalized_name` = clean product name from the promo record (no brand, weight, or category)
-- `original_description` = raw Colruyt promo text with all product variants
-- Threshold: rerank score >= 0.20 to keep
+**Rerank query:** same as the vector search query (see table above).
 
-### Why this split matters
+- Threshold: rerank score >= 0.55 to keep
+- Top N: 5 results max per interest item
 
-- **Vector search** uses category in the query to steer embeddings toward the right product space. Embeddings handle semantic proximity gracefully ("Milk Fresh" and "Milk Long Life" are close in embedding space).
-- **Rerank** strips category to avoid penalizing cross-category matches. The cross-encoder does exact text comparison where a category mismatch could hurt scores.
-- **Brand in rerank query** only for `brand_loyal` items, so the cross-encoder prefers brand-specific promos for users who consistently buy a specific brand.
+**Note on model choice:** `bge-reranker-v2-m3` produces well-calibrated scores (genuine matches score 0.5–0.9, irrelevant items score <0.05). The alternative `pinecone-rerank-v0` scores an order of magnitude lower on the same data (~0.04–0.06 for relevant matches), making threshold tuning impractical.
 
 ## Stage 3: LLM Recommendations
 
-All matched promos + the user's shopping habits are sent to Gemini 2.0 Flash, which generates:
+All matched promos + the user's shopping habits are sent to an LLM (Gemini 3 Pro Preview or Claude Sonnet 4, whichever API key is available), which generates:
 - Top priority promos (direct matches to staples/high-spend items)
 - Smart stock-up opportunities
 - Worth-trying suggestions

@@ -165,10 +165,10 @@ def _build_shopping_habits(
     premium_count = sum(1 for t in items_with_brand if t.is_premium)
     premium_ratio = round(premium_count / len(items_with_brand), 2) if items_with_brand else 0
 
-    # Granular categories (top 15)
+    # Granular categories (top 15, excluding "Discounts" which is not a product category)
     gran_cat_counts: dict[str, int] = defaultdict(int)
     for t in transactions:
-        if t.granular_category:
+        if t.granular_category and t.granular_category != "Discounts":
             gran_cat_counts[t.granular_category] += 1
     top_granular = [
         cat for cat, _ in sorted(gran_cat_counts.items(), key=lambda x: x[1], reverse=True)[:15]
@@ -198,6 +198,25 @@ def _build_shopping_habits(
         reverse=True,
     )
 
+    # Disposable bag spending — detect carrier bags so the LLM can suggest
+    # bringing a reusable bag instead of searching for bag promotions.
+    BAG_KEYWORDS = {"draagtas", "tas", "zak", "bag", "sachet", "carrier bag"}
+    bag_txns = [
+        t for t in transactions
+        if t.normalized_name
+        and any(kw in t.normalized_name.lower() for kw in BAG_KEYWORDS)
+    ]
+    bag_spending = None
+    if bag_txns:
+        bag_total = sum(t.item_price for t in bag_txns)
+        bag_count = len(bag_txns)
+        bag_spending = {
+            "total_spent": round(bag_total, 2),
+            "times_purchased": bag_count,
+            "avg_price": round(bag_total / bag_count, 2),
+            "estimated_yearly": round(bag_total / max(weeks_in_period, 1) * 52, 2),
+        }
+
     return {
         "total_spend": round(total_spend, 2),
         "receipt_count": receipt_count,
@@ -210,6 +229,7 @@ def _build_shopping_habits(
         "premium_brand_ratio": premium_ratio,
         "top_granular_categories": top_granular,
         "typical_basket_size": typical_basket,
+        "disposable_bag_spending": bag_spending,
     }
 
 
@@ -246,6 +266,10 @@ def _build_promo_interest_items(
         name_lower = name.lower().strip()
         # Skip deposits and discounts (they don't represent actual products)
         if t.is_deposit or t.is_discount:
+            continue
+        # Skip items with "Other" granular_category — these are utility items
+        # (carrier bags, etc.) that produce garbage promo search results
+        if not t.granular_category or t.granular_category == "Other":
             continue
 
         item_data[name_lower]["count"] += 1
@@ -345,12 +369,12 @@ def _build_promo_interest_items(
             "context": ". ".join(context_parts),
         }
 
-        # Classify
+        # Classify — store metadata dict alongside entry for computing interest_reason
         if freq_per_week >= 0.5 and trip_count >= 3:
-            staples.append((trip_count, entry))
+            staples.append((trip_count, entry, {"freq": freq_per_week}))
 
         if trip_count >= 2:
-            high_spend.append((data["total_spend"], entry))
+            high_spend.append((data["total_spend"], entry, {}))  # rank computed after sorting
 
         # Brand loyal: dominant brand accounts for >= 80% of purchases
         if data["brands"] and data["count"] >= 2 and trip_count >= 2:
@@ -360,19 +384,20 @@ def _build_promo_interest_items(
                 if bt_name and bt_name.lower().strip() == name and bt.normalized_brand:
                     brand_counts[bt.normalized_brand] += 1
             if brand_counts:
-                top_brand_count = max(brand_counts.values())
+                top_brand = max(brand_counts, key=brand_counts.get)  # type: ignore[arg-type]
+                top_brand_count = brand_counts[top_brand]
                 brand_ratio = top_brand_count / data["count"]
                 if brand_ratio >= 0.8:
-                    brand_loyal.append((trip_count, entry))
+                    brand_loyal.append((trip_count, entry, {"brand": top_brand}))
 
         if avg_health is not None and avg_health >= 4 and trip_count >= 3:
-            health_picks.append((avg_health, entry))
+            health_picks.append((avg_health, entry, {"score": avg_health}))
 
         if avg_health is not None and avg_health <= 2 and trip_count >= 2:
-            treats.append((trip_count, entry))
+            treats.append((trip_count, entry, {}))
 
         if avg_units_per_trip >= 2 and trip_count >= 2:
-            bulk_buys.append((avg_units_per_trip, entry))
+            bulk_buys.append((avg_units_per_trip, entry, {"units": avg_units_per_trip}))
 
     # Sort each bucket and deduplicate across categories
     staples.sort(key=lambda x: x[0], reverse=True)
@@ -382,13 +407,17 @@ def _build_promo_interest_items(
     treats.sort(key=lambda x: x[0], reverse=True)
     bulk_buys.sort(key=lambda x: x[0], reverse=True)
 
+    # Add rank metadata to high_spend items after sorting
+    for i, (score, entry, meta) in enumerate(high_spend):
+        meta["rank"] = i + 1
+
     # Allocate slots with guaranteed minimum of 1 per non-empty bucket
     result = []
     seen_names: set[str] = set()
 
-    def _add_items(bucket: list, category: str, max_count: int) -> int:
+    def _add_items(bucket: list, category: str, max_count: int, reason_template: str) -> int:
         added = 0
-        for _, entry in bucket:
+        for _, entry, meta in bucket:
             if len(result) >= MAX_INTEREST_ITEMS:
                 break
             if added >= max_count:
@@ -397,25 +426,75 @@ def _build_promo_interest_items(
                 continue
             seen_names.add(entry["normalized_name"])
             entry["interest_category"] = category
+            # Format the reason template with available metadata
+            try:
+                entry["interest_reason"] = reason_template.format(**meta)
+            except KeyError:
+                entry["interest_reason"] = reason_template
             result.append(entry)
             added += 1
         return added
 
+    # Bucket definitions: (list, category_name, max_slots, reason_template)
     buckets = [
-        (staples, "staple", 8),
-        (high_spend, "high_spend", 6),
-        (brand_loyal, "brand_loyal", 4),
-        (health_picks, "health_pick", 4),
-        (treats, "occasional_treat", 3),
-        (bulk_buys, "bulk_buy", 3),
+        (staples, "staple", 8, "Bought frequently ({freq:.1f}x/week)"),
+        (high_spend, "top_purchase", 6, "Top {rank} by total spend in your history"),
+        (brand_loyal, "brand_loyal", 4, "Consistently buy same brand ({brand})"),
+        (health_picks, "health_pick", 4, "Healthy choice (health score {score:.1f}/5)"),
+        (treats, "occasional_treat", 3, "Indulgence item you enjoy periodically"),
+        (bulk_buys, "bulk_buy", 3, "Often bought in bulk ({units:.1f} units/trip)"),
     ]
 
     # Pass 1: guarantee at least 1 item per non-empty bucket
-    for bucket, category, _ in buckets:
-        _add_items(bucket, category, 1)
+    for bucket, category, _, reason_template in buckets:
+        _add_items(bucket, category, 1, reason_template)
 
     # Pass 2: fill remaining slots up to each bucket's max
-    for bucket, category, max_count in buckets:
-        _add_items(bucket, category, max_count)
+    for bucket, category, max_count, reason_template in buckets:
+        _add_items(bucket, category, max_count, reason_template)
+
+    # Pass 3: Add category-level interests if we have sparse item-level data
+    # This helps users with few receipts still get relevant promo recommendations
+    MIN_ITEMS_BEFORE_CATEGORY_FALLBACK = 5
+    MAX_CATEGORY_ITEMS = 3
+
+    if len(result) < MIN_ITEMS_BEFORE_CATEGORY_FALLBACK:
+        # Compute top spending granular categories (excluding Discounts and Other)
+        category_spend: dict[str, float] = defaultdict(float)
+        for t in transactions:
+            if t.granular_category and t.granular_category not in ("Discounts", "Other"):
+                category_spend[t.granular_category] += t.item_price
+
+        # Get categories already represented in results
+        represented_categories = {item.get("granular_category") for item in result}
+
+        # Sort by spend and add category-level items
+        sorted_categories = sorted(category_spend.items(), key=lambda x: x[1], reverse=True)
+        category_items_added = 0
+
+        for cat, spend in sorted_categories:
+            if len(result) >= MAX_INTEREST_ITEMS:
+                break
+            if category_items_added >= MAX_CATEGORY_ITEMS:
+                break
+            if cat in represented_categories:
+                continue
+
+            # Add a category-level interest item (no specific product)
+            result.append({
+                "normalized_name": cat.lower(),  # Use category name as search term
+                "brands": [],
+                "granular_category": cat,
+                "tags": ["category_level"],
+                "last_purchased": None,
+                "days_since_last_purchase": None,
+                "avg_days_between_purchases": None,
+                "preferred_days": [],
+                "context": f"You spend €{spend:.2f} on {cat} but no single product stands out",
+                "interest_category": "category_fallback",
+                "interest_reason": f"High spend category (€{spend:.2f} total)",
+            })
+            represented_categories.add(cat)
+            category_items_added += 1
 
     return result

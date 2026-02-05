@@ -77,7 +77,7 @@ PINECONE_INDEX_HOST = "promos-k16b2f4.svc.aped-4627-b74a.pinecone.io"
 # Search tuning
 SEARCH_TOP_K = 20  # Initial candidates per item from vector search
 RERANK_TOP_N = 5  # Max results after reranking
-RERANK_SCORE_THRESHOLD = 0.3  # Min relevance score to keep
+RERANK_SCORE_THRESHOLD = 0.55  # Min relevance score to keep
 
 # LLM
 GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "")
@@ -133,31 +133,26 @@ async def fetch_enriched_profile(user_id: str) -> dict:
 def search_promos_for_item(pc: Pinecone, index, item: dict) -> list[dict]:
     """Search Pinecone for promotions matching a single promo interest item.
 
+    Uses integrated search+rerank (single API call) which passes the raw vector
+    hits through the reranker server-side — matching the Pinecone console behavior.
+
     For brand_loyal items: runs one search per brand using {Brand} {Name} ({Category}),
-    then deduplicates hits across all brand queries before reranking.
+    then deduplicates hits across all brand queries.
 
     For all other items: searches using {Name} ({Category}).
-
-    Always applies granular_category metadata filter with fallback.
     """
     normalized_name = item["normalized_name"]
     granular_category = item.get("granular_category")
     interest_category = item.get("interest_category")
     brands = item.get("brands", [])
 
-    # Metadata filter — always exclude expired promos
-    today = date.today().isoformat()
-    validity_filter = {"validity_end": {"$gte": today}}
-
+    # Metadata filter
+    # NOTE: validity_end is stored as a string in Pinecone, so $gte won't work
+    # (Pinecone requires numeric operands for $gte). Skip date filtering for now.
     if granular_category:
-        filter_dict = {
-            "$and": [
-                {"granular_category": {"$eq": granular_category}},
-                validity_filter,
-            ]
-        }
+        filter_dict = {"granular_category": {"$eq": granular_category}}
     else:
-        filter_dict = validity_filter
+        filter_dict = None
 
     # Build category suffix for query text
     cat_suffix = ""
@@ -166,23 +161,21 @@ def search_promos_for_item(pc: Pinecone, index, item: dict) -> list[dict]:
 
     # --- Build query texts ---
     if interest_category == "brand_loyal" and brands:
-        # One search per brand: {Brand} {Name} ({Category})
         query_texts = [f"{brand} {normalized_name}{cat_suffix}" for brand in brands]
     else:
-        # Generic: {Name} ({Category})
         query_texts = [f"{normalized_name}{cat_suffix}"]
 
-    # --- Vector search across all queries ---
+    # --- Integrated search + rerank across all queries ---
     seen_ids: set[str] = set()
-    all_hits: list[dict] = []
+    all_results: list[dict] = []
 
     for query_text in query_texts:
-        hits = _pinecone_search(index, query_text, filter_dict)
+        hits = _pinecone_search_and_rerank(index, query_text, filter_dict)
 
-        # Fallback without category filter (but keep validity filter)
+        # Fallback without category filter
         if not hits and granular_category:
             logger.info(f"    No results with category filter for '{query_text}', retrying without category...")
-            hits = _pinecone_search(index, query_text, filter_dict=validity_filter)
+            hits = _pinecone_search_and_rerank(index, query_text, filter_dict=None)
 
         # Deduplicate across brand queries
         for hit in hits:
@@ -191,22 +184,27 @@ def search_promos_for_item(pc: Pinecone, index, item: dict) -> list[dict]:
                 continue
             if hit_id:
                 seen_ids.add(hit_id)
-            all_hits.append(hit)
+            all_results.append(hit)
 
-    if not all_hits:
-        return []
+    # Filter by rerank score threshold and build promo dicts
+    relevant = []
+    for hit in all_results:
+        score = hit.get("_score", 0)
+        if score >= RERANK_SCORE_THRESHOLD:
+            relevant.append(_build_promo_dict(hit.get("fields", {}), score))
 
-    # --- Rerank ---
-    if interest_category == "brand_loyal" and brands:
-        rerank_query = f"{brands[0]} {normalized_name}"
-    else:
-        rerank_query = normalized_name
-    return _rerank_hits(pc, rerank_query, all_hits)
+    return relevant[:RERANK_TOP_N]
 
 
-def _pinecone_search(index, query_text: str, filter_dict: dict | None) -> list[dict]:
-    """Execute a Pinecone search with integrated embedding, handling SDK variations."""
-    logger.info(f"    [vector search] query='{query_text}' filter={filter_dict}")
+def _pinecone_search_and_rerank(index, query_text: str, filter_dict: dict | None) -> list[dict]:
+    """Execute integrated search + rerank in a single Pinecone API call.
+
+    This matches the Pinecone console behavior — the reranker runs server-side
+    on the `text` field, producing much higher-quality relevance scores than
+    calling pc.inference.rerank() separately.
+    """
+    logger.info(f"    [search+rerank] query='{query_text}' filter={filter_dict}")
+
     query = {
         "inputs": {"text": query_text},
         "top_k": SEARCH_TOP_K,
@@ -214,77 +212,48 @@ def _pinecone_search(index, query_text: str, filter_dict: dict | None) -> list[d
     if filter_dict:
         query["filter"] = filter_dict
 
+    rerank = {
+        "model": "bge-reranker-v2-m3",
+        "rank_fields": ["text"],
+        "top_n": RERANK_TOP_N,
+    }
+
     hits = []
     try:
-        results = index.search_records(namespace="__default__", query=query)
+        results = index.search_records(namespace="__default__", query=query, rerank=rerank)
         hits = _extract_hits(results)
     except (AttributeError, TypeError):
         try:
-            results = index.search(namespace="__default__", query=query)
+            results = index.search(namespace="__default__", query=query, rerank=rerank)
             hits = _extract_hits(results)
         except Exception as e:
-            logger.warning(f"    Pinecone search failed: {e}")
+            logger.warning(f"    Pinecone search+rerank failed: {e}")
             return []
 
+    # Log and print results
     for h in hits:
         fields = h.get("fields", {})
         logger.info(
-            f"      sim={h.get('_score', '?'):.4f}  "
+            f"      score={h.get('_score', '?'):.4f}  "
             f"{fields.get('normalized_name', '?')} | "
             f"{fields.get('original_description', '?')[:60]}"
         )
-    logger.info(f"    [vector search] {len(hits)} hits returned")
+    logger.info(f"    [search+rerank] {len(hits)} results returned")
+
+    print(f"\n{'─'*60}")
+    print(f"SEARCH+RERANK RESULTS for query: '{query_text}'")
+    print(f"{'─'*60}")
+    for i, h in enumerate(hits):
+        fields = h.get("fields", {})
+        status = "KEEP" if h.get("_score", 0) >= RERANK_SCORE_THRESHOLD else "DROP"
+        print(f"\n  #{i+1}  score={h.get('_score', '?'):.4f}  [{status}]")
+        for k, v in sorted(fields.items()):
+            print(f"    {k}: {v}")
+    if not hits:
+        print("  (no results)")
+    print(f"{'─'*60}\n")
+
     return hits
-
-
-def _rerank_hits(pc: Pinecone, query: str, hits: list[dict]) -> list[dict]:
-    """Rerank search hits using Pinecone's reranker and filter by score threshold."""
-    # Build documents for the reranker
-    documents = []
-    for hit in hits:
-        fields = hit.get("fields", {})
-        name = fields.get("normalized_name", "")
-        desc = fields.get("original_description", "")
-        documents.append({"id": hit.get("_id", ""), "text": f"{name}. {desc}"})
-
-    logger.info(f"    [rerank] query='{query}' | {len(documents)} docs")
-    for i, doc in enumerate(documents):
-        logger.info(f"      doc[{i}]: {doc['text'][:80]}")
-
-    try:
-        reranked = pc.inference.rerank(
-            model="pinecone-rerank-v0",
-            query=query,
-            documents=documents,
-            top_n=RERANK_TOP_N,
-            return_documents=True,
-        )
-
-        logger.info(f"    [rerank] results:")
-        relevant = []
-        for result in reranked.data:
-            status = "KEEP" if result.score >= RERANK_SCORE_THRESHOLD else "DROP"
-            doc_text = result.document.get("text", "")[:60] if result.document else "?"
-            logger.info(f"      {status} score={result.score:.4f}  {doc_text}")
-
-            if result.score < RERANK_SCORE_THRESHOLD:
-                continue
-
-            original_idx = result.index
-            if original_idx < len(hits):
-                hit = hits[original_idx]
-                fields = hit.get("fields", {})
-                relevant.append(_build_promo_dict(fields, result.score))
-
-        return relevant
-
-    except Exception as e:
-        logger.warning(f"    Reranking failed ({e}), falling back to vector scores")
-        # Fallback: return top N by original vector similarity score
-        return [
-            _build_promo_dict(hit.get("fields", {}), hit.get("_score", 0))
-            for hit in hits[:RERANK_TOP_N]
-        ]
 
 
 def _build_promo_dict(fields: dict, score: float) -> dict:
@@ -375,6 +344,7 @@ Structure your response with:
 - Top Priority Promos — biggest impact on their regular spending
 - Smart Stock-Up Opportunities — items they buy often that are on promo
 - Worth Trying — promotions on items similar to what they buy
+- Money-Saving Tips — if the user's profile includes disposable_bag_spending data, calculate how much they could save per year by bringing their own reusable bag instead of buying disposable bags each trip
 - Estimated Weekly Savings — grounded in the user's enriched profile (purchase frequency, quantities) combined with confirmed promo discounts only
 
 If few or no promotions match the user's profile, say so honestly rather than padding the response with speculative suggestions.
