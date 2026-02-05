@@ -34,17 +34,6 @@ class Settings(BaseSettings):
     # CORS
     CORS_ORIGINS: List[str] = ["*"]
 
-    # EnableBanking (Open Banking)
-    ENABLEBANKING_APP_ID: str = ""
-    ENABLEBANKING_PRIVATE_KEY: Optional[str] = None  # PEM-encoded private key string
-    ENABLEBANKING_PRIVATE_KEY_PATH: Optional[str] = None  # Path to private key file
-    ENABLEBANKING_REDIRECT_URL: str = ""  # OAuth callback URL
-    ENABLEBANKING_SANDBOX: bool = False  # Use sandbox API for testing
-
-    # Callback redirects for banking
-    FRONTEND_URL: str = "https://app.milo.com"  # Web app URL for redirects
-    MOBILE_DEEP_LINK_SCHEME: str = "milo"  # Deep link scheme for mobile app
-
     # Database migrations
     USE_ALEMBIC: bool = True  # If True, skip create_all() in init_db() (Alembic handles migrations)
 

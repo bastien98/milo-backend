@@ -92,31 +92,6 @@ class ReceiptRepository:
         await self.db.refresh(receipt)
         return receipt
 
-    async def create_from_bank_import(
-        self,
-        user_id: str,
-        store_name: str,
-        receipt_date: date,
-        total_amount: float,
-    ) -> Receipt:
-        """Create a receipt from a bank transaction import."""
-        receipt = Receipt(
-            user_id=user_id,
-            original_filename=None,
-            file_type=None,
-            file_size_bytes=None,
-            status=ReceiptStatus.COMPLETED,
-            source=ReceiptSource.BANK_IMPORT,
-            store_name=store_name,
-            receipt_date=receipt_date,
-            total_amount=total_amount,
-            processed_at=datetime.now(),
-        )
-        self.db.add(receipt)
-        await self.db.flush()
-        await self.db.refresh(receipt)
-        return receipt
-
     async def update(
         self,
         receipt_id: str,

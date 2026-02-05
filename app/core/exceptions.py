@@ -52,7 +52,3 @@ class GeminiAPIError(ScandaliciousException):
     pass
 
 
-class EnableBankingAPIError(ScandaliciousException):
-    """Raised when EnableBanking API call fails."""
-
-    pass
