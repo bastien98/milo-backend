@@ -37,7 +37,7 @@ class CategorizationServiceGemini:
     MODEL = "gemini-2.0-flash"
     MAX_TOKENS = 4096
 
-    SYSTEM_PROMPT = """You are a receipt and transaction categorization assistant. Given a store name and list of items from a receipt (grocery, restaurant, utility bill, service receipt, etc.), clean up the data, categorize each item into one of the sub-categories below, assign a health score where applicable, and DEDUPLICATE items.
+    SYSTEM_PROMPT = """You are a grocery receipt categorization assistant. Given a store name and list of items from a grocery receipt, clean up the data, categorize each item into one of the grocery sub-categories below, assign a health score, and DEDUPLICATE items.
 
 IMPORTANT - MULTI-SECTION RECEIPT HANDLING:
 Receipt images may consist of multiple overlapping sections captured from a long receipt. This means the SAME LINE ITEM may appear multiple times in the input list due to overlap between sections. You MUST identify and merge these duplicates:
@@ -65,168 +65,42 @@ For each UNIQUE item (after deduplication), provide:
    - Keep brand names if recognizable (e.g., "Coca-Cola", "Danone")
    - Use title case for proper formatting
 
-2. category: Classify into EXACTLY one of these sub-categories (use the exact string):
+2. category: Classify into EXACTLY one of these grocery sub-categories (use the exact string):
 
-   HOUSING & UTILITIES:
-   - "Rent Payment"
-   - "Mortgage Principal & Interest"
-   - "Property Tax"
-   - "HOA / Syndic Fees"
-   - "Electricity"
-   - "Water & Sewer"
-   - "Natural Gas / Heating Oil"
-   - "Trash & Recycling"
-   - "Internet / Wi-Fi"
-   - "Cable / Satellite TV"
-   - "Mobile Phone Plan"
-   - "Home Phone / Landline"
-   - "Home Security Service"
-   - "Repairs (Plumbing/HVAC)"
-   - "Lawn Care / Gardening"
-   - "Cleaning Services"
-   - "Furniture & Decor"
-   - "Home Improvement Supplies"
+   FRESH FOOD:
+   - "Fresh Produce (Fruit & Veg)" (fruits, vegetables, herbs, salads)
+   - "Meat Poultry & Seafood" (meat, poultry, fish, seafood, charcuterie)
+   - "Dairy Cheese & Eggs" (milk, cheese, yogurt, eggs, butter, cream)
+   - "Bakery & Bread" (bread, pastries, croissants, baguettes)
 
-   FOOD & DINING:
-   - "Fresh Produce (Fruit & Veg)" (fruits, vegetables)
-   - "Meat Poultry & Seafood" (meat, poultry, fish, seafood)
-   - "Dairy Cheese & Eggs" (milk, cheese, yogurt, eggs, butter)
-   - "Bakery & Bread" (bread, pastries, croissants)
-   - "Pantry Staples (Pasta/Rice/Oil)" (pasta, rice, oil, canned goods, spices, sugar, flour)
-   - "Frozen Foods" (frozen foods)
-   - "Snacks & Candy" (chips, chocolate, candy, cookies)
-   - "Beverages (Non-Alcoholic)" (sodas, juices, energy drinks, water)
-   - "Baby Food & Formula"
-   - "Pet Food & Supplies" (pet food, pet accessories)
-   - "Household Consumables (Paper/Cleaning)" (cleaning products, paper towels, bags)
-   - "Personal Hygiene (Soap/Shampoo)" (shampoo, soap, dental, deodorant)
-   - "Ready Meals & Prepared Food" (prepared foods, salads, soups, pizza, lasagna)
+   PANTRY & FROZEN:
+   - "Pantry Staples (Pasta/Rice/Oil)" (pasta, rice, oil, canned goods, spices, sugar, flour, sauces, condiments)
+   - "Frozen Foods" (frozen vegetables, frozen meals, ice cream, frozen pizza)
+   - "Ready Meals & Prepared Food" (prepared foods, salads, soups, pizza, lasagna, deli items)
+
+   SNACKS & BEVERAGES:
+   - "Snacks & Candy" (chips, chocolate, candy, cookies, biscuits, nuts as snacks)
+   - "Beverages (Non-Alcoholic)" (sodas, juices, energy drinks, water, coffee, tea)
+   - "Beer & Wine (Retail)" (beer, wine, spirits, cider, including deposit/leeggoed)
+
+   HOUSEHOLD & CARE:
+   - "Household Consumables (Paper/Cleaning)" (cleaning products, paper towels, bags, detergent, sponges)
+   - "Personal Hygiene (Soap/Shampoo)" (shampoo, soap, dental care, deodorant, razors)
+
+   OTHER:
+   - "Baby Food & Formula" (baby food, formula, baby snacks)
+   - "Pet Food & Supplies" (pet food, pet treats, pet accessories)
    - "Tobacco Products" (cigarettes, rolling tobacco, lighters, rolling papers, filters, e-cigarettes, vapes)
-   - "Fast Food / Quick Service"
-   - "Sit-down Restaurants"
-   - "Coffee Shops & Cafes"
-   - "Bars & Nightlife"
-   - "Food Delivery (Apps)" (Deliveroo, UberEats, etc.)
-   - "Liquor Store / Wine Shop" (spirits, wine from a liquor store)
-   - "Beer & Wine (Retail)" (beer and wine bought at a retail/grocery store, including deposit/leeggoed)
+   - "Other" (anything that doesn't fit the above categories)
 
-   TRANSPORTATION:
-   - "Car Payment (Loan/Lease)"
-   - "Auto Insurance"
-   - "Registration & Inspection Fees"
-   - "Fuel (Gas/Diesel/Electric)"
-   - "Maintenance & Oil Changes"
-   - "Repairs & Parts"
-   - "Car Wash & Detailing"
-   - "Ride Share (Uber/Lyft)"
-   - "Public Transit (Bus/Train)"
-   - "Taxi Services"
-   - "Parking Fees & Tolls"
-   - "Bike/Scooter Rentals"
-
-   HEALTH & WELLNESS:
-   - "Primary Care / Doctor Visits"
-   - "Specialist Visits"
-   - "Dental Care"
-   - "Vision / Optometry"
-   - "Pharmacy & Prescriptions"
-   - "Health Insurance Premiums"
-   - "Life Insurance"
-   - "Disability Insurance"
-   - "Gym Memberships"
-   - "Sports Equipment"
-   - "Vitamins & Supplements"
-   - "Therapy / Counseling"
-
-   SHOPPING & PERSONAL CARE:
-   - "Apparel (Adults)"
-   - "Apparel (Kids)"
-   - "Shoes & Footwear"
-   - "Jewelry & Watches"
-   - "Dry Cleaning & Tailoring"
-   - "Computers & Tablets"
-   - "Phones & Accessories"
-   - "Software Subscriptions"
-   - "Gaming & Consoles"
-   - "Hair Salon / Barbershop"
-   - "Spa & Massage"
-   - "Cosmetics & Makeup"
-   - "Nail Salon"
-
-   ENTERTAINMENT & LEISURE:
-   - "Streaming Video (Netflix/Hulu)"
-   - "Streaming Audio (Spotify/Music)"
-   - "News & Magazines"
-   - "Movies & Theaters"
-   - "Concerts & Festivals"
-   - "Sporting Events"
-   - "Museums & Exhibitions"
-   - "Arts & Crafts"
-   - "Books & Audiobooks"
-   - "Musical Instruments"
-   - "Photography"
-
-   FINANCIAL & LEGAL:
-   - "Emergency Fund Transfer"
-   - "Retirement (Pension/401k)"
-   - "Investments / Brokerage"
-   - "Crypto Purchases"
-   - "Credit Card Payments"
-   - "Student Loan Payments"
-   - "Personal Loan Payments"
-   - "Bank Fees (Overdraft/ATM)"
-   - "Credit Card Interest"
-   - "Income Tax Payments"
-   - "Tax Prep Services"
-   - "Legal Fees"
-
-   FAMILY & EDUCATION:
-   - "Tuition & Fees"
-   - "Student Loan Interest"
-   - "Textbooks & Supplies"
-   - "Online Courses"
-   - "Daycare / Babysitting"
-   - "Toys & Games"
-   - "Baby Supplies (Diapers)"
-   - "Extracurriculars"
-   - "Veterinary Bills"
-   - "Pet Grooming"
-   - "Pet Sitting / Boarding"
-
-   TRAVEL & VACATION:
-   - "Airfare"
-   - "Train/Bus (Long Distance)"
-   - "Car Rental"
-   - "Cruise Tickets"
-   - "Hotels & Resorts"
-   - "Airbnb / Vacation Rentals"
-   - "Vacation Dining"
-   - "Sightseeing & Tours"
-   - "Souvenirs"
-   - "Travel Insurance"
-
-   GIFTS & DONATIONS:
-   - "Birthday Gifts"
-   - "Holiday Gifts"
-   - "Wedding/Party Gifts"
-   - "Charitable Donations"
-   - "Religious Tithing"
-   - "Political Contributions"
-
-   MISCELLANEOUS:
-   - "Cash Withdrawals"
-   - "Reimbursements (Pending)"
-   - "Adjustment / Correction"
-   - "Unknown Transaction"
-
-3. health_score: ONLY for items in the FOOD & DINING group, rate healthiness from 0 to 5:
+3. health_score: Rate healthiness from 0 to 5 for ALL food items:
    - 5: Very healthy (fresh vegetables, fruits, water, plain nuts)
    - 4: Healthy (whole grains, lean proteins, eggs, plain dairy)
    - 3: Moderately healthy (bread, pasta, cheese, some ready meals)
    - 2: Less healthy (processed meats, sweetened drinks, some snacks)
    - 1: Unhealthy (chips, candy, cookies, sodas, sugary cereals)
    - 0: Very unhealthy (alcohol, energy drinks, heavily processed foods)
-   For ALL items NOT in Food & Dining group, set health_score: null
+   For non-food items (household, personal care, tobacco, pet supplies), set health_score: null
 
 4. original_indices: List of indices from the input that correspond to this item.
    - For unique items: single index, e.g., [0]

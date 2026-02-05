@@ -2,9 +2,9 @@
 Category Registry - loads category hierarchy from CSV and provides lookups.
 
 The category system has 3 levels:
-- Group (top): e.g., "Food & Dining", "Transportation"
-- Category (mid): e.g., "Groceries", "Vehicle Ownership"
-- Sub-Category (leaf): e.g., "Fresh Produce (Fruit & Veg)", "Fuel (Gas/Diesel/Electric)"
+- Group (top): e.g., "Fresh Food", "Snacks & Beverages"
+- Category (mid): e.g., "Fruits & Vegetables", "Snacks"
+- Sub-Category (leaf): e.g., "Fresh Produce (Fruit & Veg)", "Snacks & Candy"
 
 Transactions store the sub-category display name as a string.
 """
@@ -40,32 +40,20 @@ class GroupNode:
 
 # Group-level colors (hex) for pie chart visualization
 GROUP_COLORS: Dict[str, str] = {
-    "Housing & Utilities": "#8E44AD",      # Royal Purple
-    "Food & Dining": "#2ECC71",            # Emerald Green
-    "Transportation": "#3498DB",           # Electric Blue
-    "Health & Wellness": "#E74C3C",        # Coral Red
-    "Shopping & Personal Care": "#E91E8C", # Magenta Pink
-    "Entertainment & Leisure": "#F1C40F",  # Golden Yellow
-    "Financial & Legal": "#7F8C8D",        # Steel Gray
-    "Family & Education": "#E67E22",       # Warm Orange
-    "Travel & Vacation": "#5DADE2",        # Sky Blue
-    "Gifts & Donations": "#F06292",        # Rose Pink
-    "Miscellaneous": "#95A5A6",            # Slate Gray
+    "Fresh Food": "#2ECC71",               # Emerald Green
+    "Pantry & Frozen": "#E67E22",          # Warm Orange
+    "Snacks & Beverages": "#E74C3C",       # Coral Red
+    "Household & Care": "#8E44AD",         # Royal Purple
+    "Other": "#95A5A6",                    # Slate Gray
 }
 
 # Group-level SF Symbol icons (sent to iOS)
 GROUP_ICONS: Dict[str, str] = {
-    "Housing & Utilities": "house.fill",
-    "Food & Dining": "fork.knife",
-    "Transportation": "car.fill",
-    "Health & Wellness": "heart.fill",
-    "Shopping & Personal Care": "bag.fill",
-    "Entertainment & Leisure": "film.fill",
-    "Financial & Legal": "banknote.fill",
-    "Family & Education": "book.fill",
-    "Travel & Vacation": "airplane",
-    "Gifts & Donations": "gift.fill",
-    "Miscellaneous": "square.grid.2x2.fill",
+    "Fresh Food": "leaf.fill",
+    "Pantry & Frozen": "cabinet.fill",
+    "Snacks & Beverages": "cup.and.saucer.fill",
+    "Household & Care": "house.fill",
+    "Other": "square.grid.2x2.fill",
 }
 
 

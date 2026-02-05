@@ -20,7 +20,7 @@ LEGACY_CATEGORY_MIGRATION_MAP = {
     "BABY_KIDS": "Baby Food & Formula",
     "PET_SUPPLIES": "Pet Food & Supplies",
     "TOBACCO": "Tobacco Products",
-    "OTHER": "Unknown Transaction",
+    "OTHER": "Other",
 }
 
 

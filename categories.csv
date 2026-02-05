@@ -1,131 +1,17 @@
 Group,Category,Sub-Category
-Housing & Utilities,Rent & Mortgage,Rent Payment
-Housing & Utilities,Rent & Mortgage,Mortgage Principal & Interest
-Housing & Utilities,Rent & Mortgage,Property Tax
-Housing & Utilities,Rent & Mortgage,HOA / Syndic Fees
-Housing & Utilities,Utilities,Electricity
-Housing & Utilities,Utilities,Water & Sewer
-Housing & Utilities,Utilities,Natural Gas / Heating Oil
-Housing & Utilities,Utilities,Trash & Recycling
-Housing & Utilities,Home Services,Internet / Wi-Fi
-Housing & Utilities,Home Services,Cable / Satellite TV
-Housing & Utilities,Home Services,Mobile Phone Plan
-Housing & Utilities,Home Services,Home Phone / Landline
-Housing & Utilities,Home Services,Home Security Service
-Housing & Utilities,Maintenance & Improvement,Repairs (Plumbing/HVAC)
-Housing & Utilities,Maintenance & Improvement,Lawn Care / Gardening
-Housing & Utilities,Maintenance & Improvement,Cleaning Services
-Housing & Utilities,Maintenance & Improvement,Furniture & Decor
-Housing & Utilities,Maintenance & Improvement,Home Improvement Supplies
-Food & Dining,Groceries,Fresh Produce (Fruit & Veg)
-Food & Dining,Groceries,Meat Poultry & Seafood
-Food & Dining,Groceries,Dairy Cheese & Eggs
-Food & Dining,Groceries,Bakery & Bread
-Food & Dining,Groceries,Pantry Staples (Pasta/Rice/Oil)
-Food & Dining,Groceries,Frozen Foods
-Food & Dining,Groceries,Snacks & Candy
-Food & Dining,Groceries,Beverages (Non-Alcoholic)
-Food & Dining,Groceries,Baby Food & Formula
-Food & Dining,Groceries,Pet Food & Supplies
-Food & Dining,Groceries,Household Consumables (Paper/Cleaning)
-Food & Dining,Groceries,Personal Hygiene (Soap/Shampoo)
-Food & Dining,Groceries,Ready Meals & Prepared Food
-Food & Dining,Groceries,Tobacco Products
-Food & Dining,Restaurants & Dining Out,Fast Food / Quick Service
-Food & Dining,Restaurants & Dining Out,Sit-down Restaurants
-Food & Dining,Restaurants & Dining Out,Coffee Shops & Cafes
-Food & Dining,Restaurants & Dining Out,Bars & Nightlife
-Food & Dining,Restaurants & Dining Out,Food Delivery (Apps)
-Food & Dining,Alcohol,Liquor Store / Wine Shop
-Food & Dining,Alcohol,Beer & Wine (Retail)
-Transportation,Vehicle Ownership,Car Payment (Loan/Lease)
-Transportation,Vehicle Ownership,Auto Insurance
-Transportation,Vehicle Ownership,Registration & Inspection Fees
-Transportation,Operation,Fuel (Gas/Diesel/Electric)
-Transportation,Operation,Maintenance & Oil Changes
-Transportation,Operation,Repairs & Parts
-Transportation,Operation,Car Wash & Detailing
-Transportation,Public & Shared,Ride Share (Uber/Lyft)
-Transportation,Public & Shared,Public Transit (Bus/Train)
-Transportation,Public & Shared,Taxi Services
-Transportation,Public & Shared,Parking Fees & Tolls
-Transportation,Public & Shared,Bike/Scooter Rentals
-Health & Wellness,Medical,Primary Care / Doctor Visits
-Health & Wellness,Medical,Specialist Visits
-Health & Wellness,Medical,Dental Care
-Health & Wellness,Medical,Vision / Optometry
-Health & Wellness,Medical,Pharmacy & Prescriptions
-Health & Wellness,Insurance,Health Insurance Premiums
-Health & Wellness,Insurance,Life Insurance
-Health & Wellness,Insurance,Disability Insurance
-Health & Wellness,Fitness & Wellbeing,Gym Memberships
-Health & Wellness,Fitness & Wellbeing,Sports Equipment
-Health & Wellness,Fitness & Wellbeing,Vitamins & Supplements
-Health & Wellness,Fitness & Wellbeing,Therapy / Counseling
-Shopping & Personal Care,Clothing,Apparel (Adults)
-Shopping & Personal Care,Clothing,Apparel (Kids)
-Shopping & Personal Care,Clothing,Shoes & Footwear
-Shopping & Personal Care,Clothing,Jewelry & Watches
-Shopping & Personal Care,Clothing,Dry Cleaning & Tailoring
-Shopping & Personal Care,Electronics,Computers & Tablets
-Shopping & Personal Care,Electronics,Phones & Accessories
-Shopping & Personal Care,Electronics,Software Subscriptions
-Shopping & Personal Care,Electronics,Gaming & Consoles
-Shopping & Personal Care,Personal Care,Hair Salon / Barbershop
-Shopping & Personal Care,Personal Care,Spa & Massage
-Shopping & Personal Care,Personal Care,Cosmetics & Makeup
-Shopping & Personal Care,Personal Care,Nail Salon
-Entertainment & Leisure,Subscriptions,Streaming Video (Netflix/Hulu)
-Entertainment & Leisure,Subscriptions,Streaming Audio (Spotify/Music)
-Entertainment & Leisure,Subscriptions,News & Magazines
-Entertainment & Leisure,Events,Movies & Theaters
-Entertainment & Leisure,Events,Concerts & Festivals
-Entertainment & Leisure,Events,Sporting Events
-Entertainment & Leisure,Events,Museums & Exhibitions
-Entertainment & Leisure,Hobbies,Arts & Crafts
-Entertainment & Leisure,Hobbies,Books & Audiobooks
-Entertainment & Leisure,Hobbies,Musical Instruments
-Entertainment & Leisure,Hobbies,Photography
-Financial & Legal,Savings,Emergency Fund Transfer
-Financial & Legal,Savings,Retirement (Pension/401k)
-Financial & Legal,Savings,Investments / Brokerage
-Financial & Legal,Savings,Crypto Purchases
-Financial & Legal,Debt,Credit Card Payments
-Financial & Legal,Debt,Student Loan Payments
-Financial & Legal,Debt,Personal Loan Payments
-Financial & Legal,Fees & Taxes,Bank Fees (Overdraft/ATM)
-Financial & Legal,Fees & Taxes,Credit Card Interest
-Financial & Legal,Fees & Taxes,Income Tax Payments
-Financial & Legal,Fees & Taxes,Tax Prep Services
-Financial & Legal,Fees & Taxes,Legal Fees
-Family & Education,Education,Tuition & Fees
-Family & Education,Education,Student Loan Interest
-Family & Education,Education,Textbooks & Supplies
-Family & Education,Education,Online Courses
-Family & Education,Children,Daycare / Babysitting
-Family & Education,Children,Toys & Games
-Family & Education,Children,Baby Supplies (Diapers)
-Family & Education,Children,Extracurriculars
-Family & Education,Pets,Veterinary Bills
-Family & Education,Pets,Pet Grooming
-Family & Education,Pets,Pet Sitting / Boarding
-Travel & Vacation,Transportation,Airfare
-Travel & Vacation,Transportation,Train/Bus (Long Distance)
-Travel & Vacation,Transportation,Car Rental
-Travel & Vacation,Transportation,Cruise Tickets
-Travel & Vacation,Accommodation,Hotels & Resorts
-Travel & Vacation,Accommodation,Airbnb / Vacation Rentals
-Travel & Vacation,Spending,Vacation Dining
-Travel & Vacation,Spending,Sightseeing & Tours
-Travel & Vacation,Spending,Souvenirs
-Travel & Vacation,Spending,Travel Insurance
-Gifts & Donations,Gifts,Birthday Gifts
-Gifts & Donations,Gifts,Holiday Gifts
-Gifts & Donations,Gifts,Wedding/Party Gifts
-Gifts & Donations,Charity,Charitable Donations
-Gifts & Donations,Charity,Religious Tithing
-Gifts & Donations,Charity,Political Contributions
-Miscellaneous,Uncategorized,Cash Withdrawals
-Miscellaneous,Uncategorized,Reimbursements (Pending)
-Miscellaneous,Uncategorized,Adjustment / Correction
-Miscellaneous,Uncategorized,Unknown Transaction
+Fresh Food,Fruits & Vegetables,Fresh Produce (Fruit & Veg)
+Fresh Food,Meat & Seafood,Meat Poultry & Seafood
+Fresh Food,Dairy & Eggs,Dairy Cheese & Eggs
+Fresh Food,Bakery,Bakery & Bread
+Pantry & Frozen,Pantry,Pantry Staples (Pasta/Rice/Oil)
+Pantry & Frozen,Frozen,Frozen Foods
+Pantry & Frozen,Ready Meals,Ready Meals & Prepared Food
+Snacks & Beverages,Snacks,Snacks & Candy
+Snacks & Beverages,Non-Alcoholic Drinks,Beverages (Non-Alcoholic)
+Snacks & Beverages,Alcohol,Beer & Wine (Retail)
+Household & Care,Household,Household Consumables (Paper/Cleaning)
+Household & Care,Personal Care,Personal Hygiene (Soap/Shampoo)
+Other,Baby & Kids,Baby Food & Formula
+Other,Pet Supplies,Pet Food & Supplies
+Other,Tobacco,Tobacco Products
+Other,Uncategorized,Other
