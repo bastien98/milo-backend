@@ -10,7 +10,6 @@ from app.services.veryfi_service import VeryfiService
 from app.services.categorization_service_gemini import CategorizationServiceGemini
 from app.db.repositories.receipt_repo import ReceiptRepository
 from app.db.repositories.transaction_repo import TransactionRepository
-from app.services.transaction_dedup_service import TransactionDedupService
 
 
 class ReceiptProcessorV2:
@@ -159,24 +158,6 @@ class ReceiptProcessorV2:
                 total_amount=final_total,
                 processed_at=datetime.utcnow(),
             )
-
-            # Step 7b: Dedup - check for matching bank transactions
-            # If a bank transaction matches this receipt, mark it as receipt_matched
-            # so the user doesn't see the same expense twice
-            try:
-                dedup_service = TransactionDedupService(self.receipt_repo.db)
-                if cleaned_store_name and final_date and final_total:
-                    matching_bank_txns = await dedup_service.find_matching_bank_transactions(
-                        user_id=user_id,
-                        store_name=cleaned_store_name,
-                        receipt_date=final_date,
-                        total_amount=final_total,
-                    )
-                    for bt in matching_bank_txns:
-                        await dedup_service.mark_bank_transaction_matched(bt, receipt.id)
-            except Exception:
-                # Dedup is best-effort - don't fail the receipt upload if it errors
-                pass
 
             # Step 8: Return results
             return ReceiptUploadResponse(
