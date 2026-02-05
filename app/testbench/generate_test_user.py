@@ -22,8 +22,8 @@ else:
 print(f"Using User ID: {USER_ID}\n")
 
 # 2. Timeframe Configuration
-START_DATE = datetime(2024, 1, 1)
-END_DATE = datetime(2026, 1, 30)
+START_DATE = datetime(2026, 2, 1)
+END_DATE = datetime(2026, 2, 5)
 
 # 3. Frequency Configuration
 AVG_RECEIPTS_PER_MONTH = 50 # How many times the user shops per month on average

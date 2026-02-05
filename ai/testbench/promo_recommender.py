@@ -140,6 +140,8 @@ def search_promos_for_item(pc: Pinecone, index, item: dict) -> list[dict]:
     then deduplicates hits across all brand queries.
 
     For all other items: searches using {Name} ({Category}).
+
+    If no results pass the threshold, falls back to broader category-based search.
     """
     normalized_name = item["normalized_name"]
     granular_category = item.get("granular_category")
@@ -191,9 +193,48 @@ def search_promos_for_item(pc: Pinecone, index, item: dict) -> list[dict]:
     for hit in all_results:
         score = hit.get("_score", 0)
         if score >= RERANK_SCORE_THRESHOLD:
-            relevant.append(_build_promo_dict(hit.get("fields", {}), score))
+            promo = _build_promo_dict(hit.get("fields", {}), score)
+            # Filter out promos with bad pricing data
+            if _is_valid_promo(promo):
+                relevant.append(promo)
+
+    # --- Fallback: if no results above threshold, try broader category search ---
+    if not relevant and granular_category and interest_category != "category_fallback":
+        # Use category name as a broader search term (e.g., "salami" from "Salami & Sausage")
+        category_term = granular_category.split(" & ")[0].lower()  # "Salami & Sausage" -> "salami"
+        if category_term != normalized_name:
+            logger.info(f"    No high-relevance matches, trying broader search with '{category_term}'...")
+            fallback_hits = _pinecone_search_and_rerank(index, f"{category_term}{cat_suffix}", filter_dict)
+            for hit in fallback_hits:
+                score = hit.get("_score", 0)
+                if score >= RERANK_SCORE_THRESHOLD:
+                    promo = _build_promo_dict(hit.get("fields", {}), score)
+                    if _is_valid_promo(promo):
+                        relevant.append(promo)
+            relevant = relevant[:RERANK_TOP_N]
 
     return relevant[:RERANK_TOP_N]
+
+
+def _is_valid_promo(promo: dict) -> bool:
+    """Check if a promo has valid pricing data."""
+    original = promo.get("original_price")
+    promo_price = promo.get("promo_price")
+
+    # Filter out promos with zero or missing original price
+    if original is not None and promo_price is not None:
+        try:
+            orig_float = float(original)
+            promo_float = float(promo_price)
+            # Bad data: original price is 0 or promo price > original price
+            if orig_float <= 0:
+                return False
+            if promo_float > orig_float:
+                return False
+        except (ValueError, TypeError):
+            pass
+
+    return True
 
 
 def _pinecone_search_and_rerank(index, query_text: str, filter_dict: dict | None) -> list[dict]:
@@ -405,7 +446,26 @@ def _build_llm_context(profile: dict, promo_results: dict[str, list[dict]]) -> s
     parts.append(json.dumps(profile["shopping_habits"], indent=2, default=str))
 
     parts.append("\n### Promo Interest Items (ranked by relevance)")
-    parts.append(json.dumps(profile["promo_interest_items"], indent=2, default=str))
+    # Format interest items with clear structure including interest_reason
+    for item in profile["promo_interest_items"]:
+        name = item.get("normalized_name", "?")
+        category = item.get("granular_category", "N/A")
+        interest_cat = item.get("interest_category", "?")
+        reason = item.get("interest_reason", "")
+        context = item.get("context", "")
+        brands = item.get("brands", [])
+        tags = item.get("tags", [])
+
+        parts.append(f"\n**{name}** ({category})")
+        parts.append(f"  - Type: {interest_cat}")
+        if reason:
+            parts.append(f"  - Why selected: {reason}")
+        if brands:
+            parts.append(f"  - Brands: {', '.join(brands)}")
+        if tags:
+            parts.append(f"  - Tags: {', '.join(tags)}")
+        if context:
+            parts.append(f"  - Context: {context}")
 
     parts.append(f"\n### Data Period")
     parts.append(
