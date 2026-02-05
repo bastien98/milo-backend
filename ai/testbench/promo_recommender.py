@@ -59,7 +59,7 @@ from pinecone import Pinecone
 # ---------------------------------------------------------------------------
 # Configuration
 # ---------------------------------------------------------------------------
-USER_ID = "c9b6bc31-d05a-4ab4-97fc-f40ff5fe6f67"
+USER_ID = os.environ.get("TEST_USER_ID", "c9b6bc31-d05a-4ab4-97fc-f40ff5fe6f67")
 
 # Production database
 DB_CONFIG = {
