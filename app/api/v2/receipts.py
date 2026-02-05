@@ -1,3 +1,5 @@
+import logging
+import time
 from collections import defaultdict
 from datetime import date
 from math import ceil
@@ -9,6 +11,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.api.deps import get_db, get_current_db_user
 from app.core.security import get_current_user, FirebaseUser
 from app.models.user import User
+
+logger = logging.getLogger(__name__)
 from app.schemas.receipt import (
     ReceiptUploadResponse,
     ReceiptResponse,
@@ -56,11 +60,19 @@ async def upload_receipt(
     **Duplicate Detection**: If a receipt with the same content hash was previously
     uploaded, returns `is_duplicate: true` with empty `receipt_id` and no transactions saved.
     """
+    t_total = time.monotonic()
+
     # Check receipt upload rate limit
+    t0 = time.monotonic()
     rate_limit_service = RateLimitService(db)
     rate_limit_status = await rate_limit_service.check_receipt_rate_limit(firebase_user.uid)
+    logger.info(f"⏱ rate_limit_check: {time.monotonic() - t0:.3f}s")
 
     if not rate_limit_status.allowed:
+        logger.warning(
+            f"Receipt upload rate limited: user_id={current_user.id}, "
+            f"used={rate_limit_status.receipts_used}/{rate_limit_status.receipts_limit}"
+        )
         raise RateLimitExceededError(
             message=f"Receipt upload limit exceeded. You have used {rate_limit_status.receipts_used}/{rate_limit_status.receipts_limit} uploads this month.",
             details={
@@ -71,6 +83,13 @@ async def upload_receipt(
             },
         )
 
+    # Log upload start
+    logger.info(
+        f"Receipt upload started: user_id={current_user.id}, "
+        f"filename={file.filename}, content_type={file.content_type}, "
+        f"date_override={receipt_date}"
+    )
+
     receipt_repo = ReceiptRepository(db)
     transaction_repo = TransactionRepository(db)
 
@@ -79,22 +98,41 @@ async def upload_receipt(
         transaction_repo=transaction_repo,
     )
 
+    t0 = time.monotonic()
     result = await processor.process_receipt(
         user_id=current_user.id,
         file=file,
         receipt_date_override=receipt_date,
     )
+    logger.info(f"⏱ process_receipt_total: {time.monotonic() - t0:.3f}s")
+
+    # Log result
+    if result.is_duplicate:
+        logger.info(f"Receipt upload duplicate: user_id={current_user.id}, filename={file.filename}")
+    else:
+        logger.info(
+            f"Receipt upload complete: user_id={current_user.id}, "
+            f"receipt_id={result.receipt_id}, store={result.store_name}, "
+            f"items={result.items_count}, total={result.total_amount}"
+        )
 
     # Increment the rate limit counter after successful upload
+    t0 = time.monotonic()
     await rate_limit_status.increment_on_success()
+    logger.info(f"⏱ rate_limit_increment: {time.monotonic() - t0:.3f}s")
 
     # Invalidate cached AI budget suggestions (new receipt = new data)
     if not result.is_duplicate:
+        t0 = time.monotonic()
         insight_repo = BudgetAIInsightRepository(db)
         await insight_repo.invalidate_suggestions(current_user.id)
-        # Rebuild enriched profile with updated transaction data
-        await EnrichedProfileService.rebuild_profile(current_user.id, db)
+        logger.info(f"⏱ invalidate_insights: {time.monotonic() - t0:.3f}s")
 
+        t0 = time.monotonic()
+        await EnrichedProfileService.rebuild_profile(current_user.id, db)
+        logger.info(f"⏱ rebuild_enriched_profile: {time.monotonic() - t0:.3f}s")
+
+    logger.info(f"⏱ UPLOAD_TOTAL: {time.monotonic() - t_total:.3f}s")
     return result
 
 
@@ -175,6 +213,7 @@ async def list_receipts(
                         # New fields for semantic search
                         original_description=t.original_description,
                         normalized_name=t.normalized_name,
+                        is_discount=t.is_discount,
                         is_deposit=t.is_deposit,
                         granular_category=t.granular_category,
                     )

@@ -23,6 +23,7 @@ from app.db.repositories.transaction_repo import TransactionRepository
 from app.db.repositories.receipt_repo import ReceiptRepository
 from app.services.enablebanking_service import EnableBankingService
 from app.services.bank_categorization_service import BankCategorizationService
+from app.services.enriched_profile_service import EnrichedProfileService
 from app.core.exceptions import EnableBankingAPIError
 from app.schemas.banking import (
     BankInfo,
@@ -868,6 +869,10 @@ async def import_bank_transactions(
                 )
             )
             failed_count += 1
+
+    # Rebuild enriched profile if any transactions were imported (also invalidates cache)
+    if imported_count > 0:
+        await EnrichedProfileService.rebuild_profile(current_user.id, db)
 
     return TransactionImportResponse(
         imported_count=imported_count,

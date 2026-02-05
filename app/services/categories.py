@@ -313,6 +313,11 @@ GRANULAR_CATEGORIES: dict[str, Category] = {
     "Tobacco": Category.TOBACCO,
 
     # ===================
+    # DISCOUNTS
+    # ===================
+    "Discounts": Category.OTHER,
+
+    # ===================
     # OTHER
     # ===================
     "Other": Category.OTHER,

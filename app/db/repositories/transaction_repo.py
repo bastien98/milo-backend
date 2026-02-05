@@ -90,6 +90,7 @@ class TransactionRepository:
         normalized_name: Optional[str] = None,
         normalized_brand: Optional[str] = None,
         is_premium: bool = False,
+        is_discount: bool = False,
         is_deposit: bool = False,
         granular_category: Optional[str] = None,
     ) -> Transaction:
@@ -110,6 +111,7 @@ class TransactionRepository:
             normalized_name=normalized_name,
             normalized_brand=normalized_brand,
             is_premium=is_premium,
+            is_discount=is_discount,
             is_deposit=is_deposit,
             granular_category=granular_category,
         )

@@ -6,6 +6,7 @@ from typing import Any
 from sqlalchemy import select, func, and_
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.cache import invalidate_user
 from app.models.transaction import Transaction
 from app.models.receipt import Receipt
 from app.models.enums import ReceiptStatus
@@ -14,7 +15,7 @@ from app.db.repositories.enriched_profile_repo import EnrichedProfileRepository
 logger = logging.getLogger(__name__)
 
 # How many days of history to aggregate
-LOOKBACK_DAYS = 90
+LOOKBACK_DAYS = 120
 # Max promo interest items
 MAX_INTEREST_ITEMS = 25
 
@@ -72,6 +73,9 @@ class EnrichedProfileService:
                 data_period_end=period_end,
                 receipts_analyzed=receipt_count,
             )
+
+            # Invalidate analytics/budget cache since transaction data has changed
+            invalidate_user(user_id)
 
             logger.info(
                 f"Enriched profile rebuilt for user {user_id}: "
@@ -240,8 +244,8 @@ def _build_promo_interest_items(
         if not name:
             continue
         name_lower = name.lower().strip()
-        # Skip deposits
-        if t.is_deposit:
+        # Skip deposits and discounts (they don't represent actual products)
+        if t.is_deposit or t.is_discount:
             continue
 
         item_data[name_lower]["count"] += 1

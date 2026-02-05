@@ -165,4 +165,8 @@ async def upload_receipt(
     # Increment the rate limit counter after successful upload
     await rate_limit_status.increment_on_success()
 
+    # Rebuild enriched profile with updated transaction data (also invalidates cache)
+    if not result.is_duplicate:
+        await EnrichedProfileService.rebuild_profile(current_user.id, db)
+
     return result

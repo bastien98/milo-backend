@@ -3,7 +3,7 @@ from datetime import datetime
 from datetime import date as date_type
 from typing import TYPE_CHECKING, Optional
 
-from sqlalchemy import String, DateTime, Integer, Float, ForeignKey, Enum, Date, Index, Text, Boolean
+from sqlalchemy import String, DateTime, Integer, Float, ForeignKey, Enum, Date, Index, Text, Boolean, func
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db.base import Base
@@ -43,6 +43,7 @@ class Transaction(Base):
         String(255), nullable=True, index=True
     )
     is_premium: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    is_discount: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     is_deposit: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     granular_category: Mapped[Optional[str]] = mapped_column(
         String(100), nullable=True, index=True
@@ -61,7 +62,7 @@ class Transaction(Base):
 
     # Timestamps
     created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), server_default="now()"
+        DateTime(timezone=True), server_default=func.now()
     )
 
     # Relationships

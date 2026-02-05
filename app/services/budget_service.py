@@ -6,6 +6,7 @@ from collections import defaultdict
 from sqlalchemy import select, func, and_
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.cache import cached
 from app.models.transaction import Transaction
 from app.models.budget import Budget
 from app.models.enums import Category
@@ -27,6 +28,7 @@ class BudgetService:
     def __init__(self, db: AsyncSession):
         self.db = db
 
+    @cached(include_month=True)
     async def get_current_month_spend(self, user_id: str) -> float:
         """Get total spending for the current month."""
         today = date.today()
@@ -43,6 +45,7 @@ class BudgetService:
         )
         return float(result.scalar() or 0)
 
+    @cached(include_month=True)
     async def get_current_month_spend_by_category(
         self, user_id: str
     ) -> dict[str, float]:
@@ -68,6 +71,7 @@ class BudgetService:
         # Convert enum values to their display names
         return {row.category.value: float(row.spent) for row in result.all()}
 
+    @cached()
     async def get_historical_category_percentages(
         self, user_id: str, months: int = 3
     ) -> dict[str, float]:
@@ -258,6 +262,7 @@ class BudgetService:
             category_progress=category_progress,
         )
 
+    @cached()
     async def get_budget_suggestion(
         self, user_id: str, months: int = 3
     ) -> Optional[BudgetSuggestionResponse]:

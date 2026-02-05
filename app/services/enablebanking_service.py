@@ -2,7 +2,7 @@ import logging
 import secrets
 import time
 from dataclasses import dataclass
-from datetime import datetime, date, timedelta
+from datetime import datetime, date, timedelta, timezone
 from typing import Optional, List
 
 import httpx
@@ -323,7 +323,7 @@ class EnableBankingService:
         """
         state = secrets.token_urlsafe(32)
 
-        valid_until = datetime.utcnow() + timedelta(days=consent_days)
+        valid_until = datetime.now(timezone.utc) + timedelta(days=consent_days)
 
         payload = {
             "aspsp": {

@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Optional, List, Tuple
 
 from sqlalchemy import select
@@ -126,7 +126,7 @@ class BankAccountRepository:
         """Update account balance."""
         account.balance = balance
         account.balance_type = balance_type
-        account.last_synced_at = datetime.utcnow()
+        account.last_synced_at = datetime.now(timezone.utc)
 
         await self.db.flush()
         await self.db.refresh(account)
@@ -134,7 +134,7 @@ class BankAccountRepository:
 
     async def update_sync_time(self, account: BankAccount) -> BankAccount:
         """Update last sync time."""
-        account.last_synced_at = datetime.utcnow()
+        account.last_synced_at = datetime.now(timezone.utc)
 
         await self.db.flush()
         await self.db.refresh(account)

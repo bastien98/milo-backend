@@ -2,7 +2,7 @@ import uuid
 from datetime import datetime, date
 from typing import TYPE_CHECKING, Optional, List
 
-from sqlalchemy import String, DateTime, Integer, Float, ForeignKey, Text, Enum, Date
+from sqlalchemy import String, DateTime, Integer, Float, ForeignKey, Text, Enum, Date, func
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db.base import Base
@@ -46,7 +46,7 @@ class Receipt(Base):
 
     # Timestamps
     created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), server_default="now()"
+        DateTime(timezone=True), server_default=func.now()
     )
     processed_at: Mapped[Optional[datetime]] = mapped_column(
         DateTime(timezone=True), nullable=True

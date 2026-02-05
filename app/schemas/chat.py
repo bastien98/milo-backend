@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Optional, List
 
 from pydantic import BaseModel, Field
@@ -22,7 +22,7 @@ class ChatRequest(BaseModel):
 class ChatResponse(BaseModel):
     """Response from the Dobby AI chat endpoint (non-streaming)."""
     response: str = Field(..., description="AI assistant's response")
-    created_at: datetime = Field(default_factory=datetime.utcnow)
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
 
 class ChatStreamChunk(BaseModel):
