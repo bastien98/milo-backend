@@ -80,6 +80,8 @@ class PromoItem:
     validity_end: Optional[str]
     source_retailer: str
     source_type: str
+    page_number: Optional[int] = None
+    promo_folder_url: Optional[str] = None
 
 
 # ---------------------------------------------------------------------------
@@ -163,6 +165,10 @@ Colruyt has three house brand tiers — always set brand to the house brand name
    - Examples: "500g", "1L", "6x33cl", "per kg", "per stuk", "24x25cl"
    - null if not specified
 
+9. **page_number**: The page number within the current batch where this item appears.
+   - Pages are numbered starting from 1 within the batch provided
+   - If an item spans multiple pages, use the first page where it appears
+
 ### IMPORTANT RULES
 - Extract EVERY product, including small secondary items and non-food (household, personal care, pet)
 - Each unique product appears ONCE — deduplicate across Dutch/French sides
@@ -184,7 +190,8 @@ Return ONLY valid JSON:
       "original_price": 12.99,
       "promo_price": 9.99,
       "promo_mechanism": null,
-      "unit_info": "24x25cl"
+      "unit_info": "24x25cl",
+      "page_number": 1
     }}
   ]
 }}
@@ -194,8 +201,11 @@ Return ONLY valid JSON:
 # ---------------------------------------------------------------------------
 # PDF splitting
 # ---------------------------------------------------------------------------
-def split_pdf_into_batches(pdf_path: Path, pages_per_batch: int) -> list[bytes]:
-    """Split a PDF into smaller PDFs of pages_per_batch pages each."""
+def split_pdf_into_batches(pdf_path: Path, pages_per_batch: int) -> list[tuple[bytes, int]]:
+    """Split a PDF into smaller PDFs of pages_per_batch pages each.
+
+    Returns a list of (batch_bytes, start_page) tuples where start_page is 1-indexed.
+    """
     doc = fitz.open(pdf_path)
     total_pages = len(doc)
     logger.info(f"PDF has {total_pages} pages, splitting into batches of {pages_per_batch}")
@@ -205,7 +215,8 @@ def split_pdf_into_batches(pdf_path: Path, pages_per_batch: int) -> list[bytes]:
         end = min(start + pages_per_batch, total_pages)
         batch_doc = fitz.open()
         batch_doc.insert_pdf(doc, from_page=start, to_page=end - 1)
-        batches.append(batch_doc.tobytes())
+        # start_page is 1-indexed for user-friendly page numbers
+        batches.append((batch_doc.tobytes(), start + 1))
         batch_doc.close()
         logger.info(f"  Batch {len(batches)}: pages {start + 1}-{end}")
 
@@ -221,8 +232,16 @@ def _build_system_prompt() -> str:
     return SYSTEM_PROMPT.format(categories=CATEGORIES_PROMPT_LIST)
 
 
-def extract_batch(client: genai.Client, batch_pdf: bytes, batch_num: int, system_prompt: str) -> dict:
-    """Extract promo items from a single PDF batch via Gemini with exponential backoff."""
+def extract_batch(client: genai.Client, batch_pdf: bytes, batch_num: int, start_page: int, system_prompt: str) -> dict:
+    """Extract promo items from a single PDF batch via Gemini with exponential backoff.
+
+    Args:
+        client: Gemini client
+        batch_pdf: PDF bytes for this batch
+        batch_num: Batch number (1-indexed)
+        start_page: The 1-indexed page number in the original PDF where this batch starts
+        system_prompt: The system prompt for Gemini
+    """
     for attempt in range(1, MAX_RETRIES + 1):
         delay = RETRY_BASE_DELAY * (2 ** (attempt - 1))
         label = f"[Batch {batch_num}]"
@@ -264,7 +283,22 @@ def extract_batch(client: genai.Client, batch_pdf: bytes, batch_num: int, system
             continue
 
         json_str = _extract_json(response_text)
-        data = json.loads(json_str)
+        try:
+            data = json.loads(json_str)
+        except json.JSONDecodeError as e:
+            logger.warning(f"{label} JSON parse error after {elapsed:.1f}s: {e}")
+            if attempt == MAX_RETRIES:
+                raise RuntimeError(f"Batch {batch_num} returned invalid JSON after {MAX_RETRIES} retries")
+            continue
+
+        # Adjust page numbers: Gemini returns 1-indexed page within batch,
+        # we need to convert to actual PDF page number
+        for item in data.get("items", []):
+            batch_page = item.get("page_number")
+            if batch_page is not None:
+                # Convert batch-relative page (1-indexed) to actual PDF page
+                item["page_number"] = start_page + batch_page - 1
+
         item_count = len(data.get("items", []))
         logger.info(f"{label} Done in {elapsed:.1f}s — {item_count} items extracted")
         return data
@@ -285,8 +319,8 @@ def extract_promos_from_pdf(pdf_path: Path) -> dict:
     validity_start = None
     validity_end = None
 
-    for i, batch_pdf in enumerate(batches):
-        data = extract_batch(client, batch_pdf, i + 1, system_prompt)
+    for i, (batch_pdf, start_page) in enumerate(batches):
+        data = extract_batch(client, batch_pdf, i + 1, start_page, system_prompt)
         if data.get("validity_start") and not validity_start:
             validity_start = data["validity_start"]
             validity_end = data.get("validity_end")
@@ -328,11 +362,24 @@ def _extract_json(text: str) -> str:
 # ---------------------------------------------------------------------------
 # Parsing & validation
 # ---------------------------------------------------------------------------
+def load_metadata() -> dict:
+    """Load metadata.json from the folder directory."""
+    metadata_path = FOLDER_DIR / "metadata.json"
+    if metadata_path.exists():
+        with open(metadata_path) as f:
+            return json.load(f)
+    return {}
+
+
 def parse_promo_items(data: dict) -> list[PromoItem]:
     """Parse Gemini response into validated PromoItem list."""
     validity_start = data.get("validity_start")
     validity_end = data.get("validity_end")
     items = []
+
+    # Load promo_folder_url from metadata
+    metadata = load_metadata()
+    promo_folder_url = metadata.get("promo_folder_url")
 
     for raw in data.get("items", []):
         granular = raw.get("granular_category", "Other")
@@ -379,6 +426,8 @@ def parse_promo_items(data: dict) -> list[PromoItem]:
                 validity_end=validity_end,
                 source_retailer=RETAILER_NAME,
                 source_type="folder",
+                page_number=raw.get("page_number"),
+                promo_folder_url=promo_folder_url,
             )
         )
 
@@ -453,6 +502,34 @@ def delete_retailer_promos(index, retailer: str, validity_start: str, validity_e
     return len(ids_to_delete)
 
 
+def clear_all_retailer_promos(retailer: str) -> int:
+    """Delete ALL promos for a retailer regardless of validity period."""
+    logger.info(f"Clearing ALL {retailer} promos from Pinecone index...")
+
+    pc = Pinecone(api_key=PINECONE_API_KEY)
+    index = pc.Index(host=PINECONE_INDEX_HOST)
+
+    ids_to_delete = []
+    for id_batch in index.list(namespace="__default__"):
+        if not id_batch:
+            break
+        fetched = index.fetch(ids=list(id_batch), namespace="__default__")
+        for vec_id, vec in fetched.vectors.items():
+            meta = vec.metadata or {}
+            if meta.get("source_retailer") == retailer:
+                ids_to_delete.append(vec_id)
+
+    if ids_to_delete:
+        for i in range(0, len(ids_to_delete), 100):
+            batch = ids_to_delete[i : i + 100]
+            index.delete(ids=batch, namespace="__default__")
+        logger.info(f"Deleted {len(ids_to_delete)} total records for {retailer}")
+    else:
+        logger.info(f"No existing records found for {retailer}")
+
+    return len(ids_to_delete)
+
+
 def upsert_to_pinecone(items: list[PromoItem], batch_size: int = 50) -> int:
     """Upsert promo items to Pinecone with integrated embedding."""
     before = len(items)
@@ -492,6 +569,8 @@ def upsert_to_pinecone(items: list[PromoItem], batch_size: int = 50) -> int:
             "validity_end": item.validity_end or "",
             "source_retailer": item.source_retailer,
             "source_type": item.source_type,
+            "page_number": item.page_number if item.page_number is not None else 0,
+            "promo_folder_url": item.promo_folder_url or "",
         }
         records.append(record)
 
@@ -527,6 +606,11 @@ def main():
         action="store_true",
         help="Extract and parse only; do not upsert to Pinecone",
     )
+    parser.add_argument(
+        "--clear-index",
+        action="store_true",
+        help=f"Clear ALL existing {RETAILER_DISPLAY_NAME} promos from Pinecone before ingesting",
+    )
     args = parser.parse_args()
 
     pdf_path = FOLDER_DIR / args.pdf_filename
@@ -541,6 +625,13 @@ def main():
     if not args.dry_run and not PINECONE_API_KEY:
         logger.error("PINECONE_API_KEY not set in environment")
         sys.exit(1)
+
+    # Clear all retailer promos if requested
+    if args.clear_index and not args.dry_run:
+        if not PINECONE_API_KEY:
+            logger.error("PINECONE_API_KEY not set in environment")
+            sys.exit(1)
+        clear_all_retailer_promos(RETAILER_NAME)
 
     # Step 1: Extract from PDF via Gemini
     logger.info("=" * 60)
@@ -573,10 +664,14 @@ def main():
     if len(items) > 5:
         logger.info(f"  ... and {len(items) - 5} more")
 
+    # Ensure results directory exists
+    results_dir = FOLDER_DIR / "results"
+    results_dir.mkdir(exist_ok=True)
+
     # Step 4: Upsert to Pinecone (or dry-run)
     if args.dry_run:
         logger.info("DRY RUN — skipping Pinecone upsert")
-        output_path = FOLDER_DIR / "extracted_promos.json"
+        output_path = results_dir / "extracted_promos.json"
         with open(output_path, "w") as f:
             json.dump(
                 [
@@ -592,6 +687,8 @@ def main():
                         "unit_info": i.unit_info,
                         "validity_start": i.validity_start,
                         "validity_end": i.validity_end,
+                        "page_number": i.page_number,
+                        "promo_folder_url": i.promo_folder_url,
                     }
                     for i in items
                 ],
@@ -602,6 +699,33 @@ def main():
         logger.info(f"Wrote {len(items)} items to {output_path}")
     else:
         count = upsert_to_pinecone(items)
+        # Also save to results directory for reference
+        output_path = results_dir / "extracted_promos.json"
+        with open(output_path, "w") as f:
+            json.dump(
+                [
+                    {
+                        "normalized_name": i.normalized_name,
+                        "original_description": i.original_description,
+                        "brand": i.brand,
+                        "granular_category": i.granular_category,
+                        "parent_category": i.parent_category,
+                        "original_price": i.original_price,
+                        "promo_price": i.promo_price,
+                        "promo_mechanism": i.promo_mechanism,
+                        "unit_info": i.unit_info,
+                        "validity_start": i.validity_start,
+                        "validity_end": i.validity_end,
+                        "page_number": i.page_number,
+                        "promo_folder_url": i.promo_folder_url,
+                    }
+                    for i in items
+                ],
+                f,
+                indent=2,
+                ensure_ascii=False,
+            )
+        logger.info(f"Wrote {len(items)} items to {output_path}")
         logger.info(f"Done! {count} promo records in Pinecone 'promos' index.")
 
 
