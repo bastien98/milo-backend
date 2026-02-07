@@ -5,22 +5,30 @@ from pydantic import BaseModel, Field
 
 
 # =============================================================================
-# AI Budget Suggestion Schemas
+# Simple Budget Suggestion Schemas (No AI)
 # =============================================================================
 
 
 class RecommendedBudget(BaseModel):
-    """AI-recommended budget details."""
+    """Recommended budget details based on historical spending."""
 
     amount: float = Field(..., description="Recommended monthly budget amount in EUR")
     confidence: Literal["high", "medium", "low"] = Field(
-        ..., description="Confidence level of the recommendation"
+        ..., description="Confidence level based on data available"
     )
     reasoning: str = Field(..., description="Explanation for this recommendation")
 
 
+class SimpleCategoryAllocation(BaseModel):
+    """Simple category allocation based on historical spending."""
+
+    category: str = Field(..., description="Category name")
+    suggested_amount: float = Field(..., description="Suggested budget amount for this category")
+    percentage: float = Field(..., description="Percentage of total budget")
+
+
 class CategoryAllocationSuggestion(BaseModel):
-    """AI-suggested category allocation."""
+    """AI-suggested category allocation (legacy - kept for compatibility)."""
 
     category: str = Field(..., description="Category name")
     suggested_amount: float = Field(..., description="Suggested budget amount for this category")
@@ -82,8 +90,24 @@ class AIBudgetSuggestionResponse(BaseModel):
     )
 
 
+class SimpleBudgetSuggestionResponse(BaseModel):
+    """Response for simple budget suggestion endpoint (no AI).
+
+    Uses historical spending data to calculate recommendations.
+    No AI-generated insights, tips, or savings opportunities.
+    """
+
+    # Core fields
+    recommended_budget: RecommendedBudget
+    category_allocations: List[SimpleCategoryAllocation]
+
+    # Metadata fields
+    based_on_months: int = Field(..., description="Number of months analyzed")
+    total_spend_analyzed: float = Field(..., description="Total spending analyzed in EUR")
+
+
 # =============================================================================
-# AI Check-in Schemas
+# AI Check-in Schemas (Legacy - kept for compatibility)
 # =============================================================================
 
 

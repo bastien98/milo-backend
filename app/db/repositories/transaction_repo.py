@@ -1,10 +1,31 @@
 from datetime import date
 from typing import Optional, List
+import re
 
-from sqlalchemy import select, func, and_, delete
+from sqlalchemy import select, func, and_, delete, or_
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.transaction import Transaction
+
+
+def normalize_category_for_matching(category: str) -> str:
+    """Normalize a category name to match database enum format.
+
+    Handles conversion from display names like "Meat Fish" or "Meat & Fish"
+    to database enum format like "MEAT_FISH".
+    """
+    # Remove special characters and normalize
+    s = category.upper()
+    # Remove parentheses and their contents
+    s = re.sub(r'\([^)]*\)', '', s)
+    # Replace special chars with underscores
+    for ch in "&/-,. ":
+        s = s.replace(ch, "_")
+    # Collapse multiple underscores
+    s = re.sub(r'_+', '_', s)
+    # Strip leading/trailing underscores
+    s = s.strip('_')
+    return s
 
 
 class TransactionRepository:
@@ -51,7 +72,15 @@ class TransactionRepository:
         if store_name:
             conditions.append(Transaction.store_name == store_name)
         if category:
-            conditions.append(Transaction.category == category)
+            # Handle both old enum names (MEAT_FISH) and new display names (Meat Fish)
+            normalized = normalize_category_for_matching(category)
+            conditions.append(
+                or_(
+                    Transaction.category == category,  # Exact match
+                    Transaction.category == normalized,  # Normalized match (e.g., MEAT_FISH)
+                    func.upper(Transaction.category) == normalized,  # Case-insensitive
+                )
+            )
 
         # Get total count
         count_result = await self.db.execute(

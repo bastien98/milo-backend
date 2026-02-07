@@ -8,10 +8,8 @@ from app.api.deps import get_db, get_current_db_user
 from app.models.user import User
 from app.db.repositories.budget_repo import BudgetRepository
 from app.db.repositories.budget_history_repo import BudgetHistoryRepository
-from app.db.repositories.budget_ai_insight_repo import BudgetAIInsightRepository
 from app.services.budget_service import BudgetService
-from app.services.budget_ai_service import BudgetAIService
-from app.core.exceptions import GeminiAPIError
+from app.services.budget_insights_service import BudgetInsightsService
 from app.schemas.budget import (
     BudgetCreate,
     BudgetUpdate,
@@ -23,15 +21,8 @@ from app.schemas.budget import (
     BudgetHistoryEntry,
     BudgetHistoryResponse,
 )
-from app.schemas.budget_ai import (
-    AIBudgetSuggestionResponse,
-    AICheckInResponse,
-    AIReceiptAnalysisRequest,
-    AIReceiptAnalysisResponse,
-    AIMonthlyReportResponse,
-    AIInsightFeedbackRequest,
-    AIInsightFeedbackResponse,
-)
+from app.schemas.budget_ai import SimpleBudgetSuggestionResponse
+from app.schemas.budget_insights import BudgetInsightsResponse
 
 router = APIRouter()
 
@@ -532,13 +523,12 @@ async def get_budget_suggestion(
 
 @router.get(
     "/ai-suggestion",
-    response_model=AIBudgetSuggestionResponse,
+    response_model=SimpleBudgetSuggestionResponse,
     responses={
         404: {"description": "No spending history found"},
-        503: {"description": "AI service temporarily unavailable"},
     },
 )
-async def get_ai_budget_suggestion(
+async def get_budget_suggestion_simple(
     months: int = Query(
         default=3,
         ge=1,
@@ -548,334 +538,117 @@ async def get_ai_budget_suggestion(
     target_amount: float | None = Query(
         default=None,
         gt=0,
-        description="Optional target budget amount. When provided, AI will intelligently "
-        "allocate categories to fit this budget, prioritizing cuts to high savings "
-        "potential categories while preserving essentials.",
+        description="Optional target budget amount. Category allocations will be "
+        "scaled proportionally to fit this target.",
     ),
     current_user: User = Depends(get_current_db_user),
     db: AsyncSession = Depends(get_db),
 ):
     """
-    Generate an AI-powered budget recommendation with personalized insights.
+    Generate a budget recommendation based on historical spending.
 
-    Uses AI to analyze spending patterns and provide:
-    - Recommended monthly budget
-    - Category allocations with reasoning
-    - Savings opportunities
-    - Spending insights and patterns
-    - Personalized tips
-    - Budget health score
+    Analyzes spending patterns to provide:
+    - Recommended monthly budget (10% below average spending)
+    - Category allocations based on historical percentages
 
     When target_amount is provided:
-    - AI intelligently recalculates category allocations to fit the target
-    - Prioritizes cutting categories with high savings potential
-    - Preserves essential categories (Fresh Produce, Dairy)
-    - Returns allocation_strategy explaining the approach
-    - Budget health score reflects achievability of the target
+    - Category allocations are scaled proportionally to fit the target
+
+    Confidence levels:
+    - High: 3+ months of data
+    - Medium: 1-2 months of data
+    - Low: No data (default Belgian averages used)
 
     Returns:
-    - 200: AI budget suggestion
+    - 200: Budget suggestion
     - 401: Invalid or missing authentication token
-    - 404: No spending history found
-    - 503: AI service temporarily unavailable
     """
-    try:
-        ai_service = BudgetAIService()
-        result = await ai_service.generate_budget_suggestion(
-            db, current_user.id, months, target_amount=target_amount
-        )
-        return result
+    service = BudgetService(db)
+    result = await service.get_simple_budget_suggestion(
+        current_user.id, months, target_amount=target_amount
+    )
+    return result
 
-    except GeminiAPIError as e:
-        if "no_data" in str(e.details.get("error_type", "")):
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail={
-                    "error": "No spending history found",
-                    "code": "NO_HISTORY",
-                },
-            )
-        raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail={
-                "error": "AI service temporarily unavailable",
-                "code": "AI_ERROR",
-                "message": str(e.message),
-            },
-        )
+
+# =============================================================================
+# Budget Insights (Deterministic, No AI)
+# =============================================================================
 
 
 @router.get(
-    "/ai-check-in",
-    response_model=AICheckInResponse,
+    "/insights",
+    response_model=BudgetInsightsResponse,
     responses={
-        404: {"description": "No budget found"},
-        503: {"description": "AI service temporarily unavailable"},
+        404: {
+            "model": BudgetNotFoundResponse,
+            "description": "No budget found (required for progress insights)",
+        }
     },
 )
-async def get_ai_checkin(
-    current_user: User = Depends(get_current_db_user),
-    db: AsyncSession = Depends(get_db),
-):
-    """
-    AI check-in on budget progress.
-
-    Provides a friendly, encouraging analysis of current month progress:
-    - Personalized greeting based on status
-    - Status summary with emoji
-    - Daily budget remaining
-    - Projected end-of-month spending
-    - Focus areas needing attention
-    - Weekly tip
-    - Motivational message
-
-    Returns:
-    - 200: AI check-in response
-    - 401: Invalid or missing authentication token
-    - 404: No budget found
-    - 503: AI service temporarily unavailable
-    """
-    insight_repo = BudgetAIInsightRepository(db)
-
-    # Generate check-in
-    try:
-        ai_service = BudgetAIService()
-        result = await ai_service.generate_checkin(db, current_user.id)
-
-        # Store the insight
-        await insight_repo.create(
-            user_id=current_user.id,
-            insight_type="checkin",
-            ai_response=result.model_dump(),
-            model_used=ai_service.MODEL,
-        )
-
-        # Clean up old check-ins (keep last 30)
-        await insight_repo.delete_old_insights(current_user.id, "checkin", keep_count=30)
-
-        return result
-
-    except GeminiAPIError as e:
-        if "no_budget" in str(e.details.get("error_type", "")):
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail={
-                    "error": "No budget found",
-                    "code": "NO_BUDGET",
-                },
-            )
-        raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail={
-                "error": "AI service temporarily unavailable",
-                "code": "AI_ERROR",
-                "message": str(e.message),
-            },
-        )
-
-
-@router.post(
-    "/ai-analyze-receipt",
-    response_model=AIReceiptAnalysisResponse,
-    responses={
-        404: {"description": "Receipt not found"},
-        503: {"description": "AI service temporarily unavailable"},
-    },
-)
-async def analyze_receipt_ai(
-    request: AIReceiptAnalysisRequest,
-    current_user: User = Depends(get_current_db_user),
-    db: AsyncSession = Depends(get_db),
-):
-    """
-    Instant AI feedback on a scanned receipt.
-
-    Analyzes a receipt in context of the user's budget and provides:
-    - Impact summary
-    - Status indicator (great/fine/caution/warning)
-    - Notable items
-    - Quick tip (if relevant)
-    - Budget remaining after this receipt
-
-    No caching - provides real-time analysis.
-
-    Returns:
-    - 200: AI receipt analysis
-    - 401: Invalid or missing authentication token
-    - 404: Receipt not found or doesn't belong to user
-    - 503: AI service temporarily unavailable
-    """
-    try:
-        ai_service = BudgetAIService()
-        result = await ai_service.analyze_receipt(
-            db, current_user.id, request.receipt_id
-        )
-
-        # Optionally store for history (but don't cache)
-        insight_repo = BudgetAIInsightRepository(db)
-        await insight_repo.create(
-            user_id=current_user.id,
-            insight_type="receipt_analysis",
-            ai_response=result.model_dump(),
-            model_used=ai_service.MODEL,
-            receipt_id=request.receipt_id,
-        )
-
-        # Clean up old receipt analyses (keep last 50)
-        await insight_repo.delete_old_insights(
-            current_user.id, "receipt_analysis", keep_count=50
-        )
-
-        return result
-
-    except GeminiAPIError as e:
-        if "not_found" in str(e.details.get("error_type", "")):
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail={
-                    "error": "Receipt not found",
-                    "code": "NOT_FOUND",
-                },
-            )
-        raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail={
-                "error": "AI service temporarily unavailable",
-                "code": "AI_ERROR",
-                "message": str(e.message),
-            },
-        )
-
-
-@router.get(
-    "/ai-month-report",
-    response_model=AIMonthlyReportResponse,
-    responses={
-        404: {"description": "No receipts found for this month"},
-        503: {"description": "AI service temporarily unavailable"},
-    },
-)
-async def get_ai_monthly_report(
-    month: str = Query(
-        ...,
-        pattern=r"^\d{4}-\d{2}$",
-        description="Month in YYYY-MM format (e.g., 2026-01)",
+async def get_budget_insights(
+    include_benchmarks: bool = Query(
+        default=True,
+        description="Include Belgian household benchmark comparisons",
+    ),
+    include_flags: bool = Query(
+        default=True,
+        description="Include over-budget category flags",
+    ),
+    include_quick_wins: bool = Query(
+        default=True,
+        description="Include quick wins (savings opportunities)",
+    ),
+    include_volatility: bool = Query(
+        default=True,
+        description="Include volatility alerts for unpredictable categories",
+    ),
+    include_progress: bool = Query(
+        default=True,
+        description="Include rich progress metrics (requires active budget)",
     ),
     current_user: User = Depends(get_current_db_user),
     db: AsyncSession = Depends(get_db),
 ):
     """
-    End-of-month AI summary and report.
+    Get budget insights based on spending history.
 
-    Generates a comprehensive monthly report with:
-    - Catchy headline summary
-    - Overall grade and score
-    - Wins and challenges
-    - Category-by-category grades
-    - Spending trends
-    - Next month focus recommendations
-    - Fun stats
+    All calculations are deterministic and formula-based (no AI).
 
-    Reports for completed months are cached permanently.
+    Features:
+    - **Belgian Benchmarks**: Compare your spending to Belgian household averages
+    - **Over-budget Flags**: Identify categories consistently over budget
+    - **Quick Wins**: Calculate yearly savings from small category cuts
+    - **Volatility Alerts**: Flag categories with unpredictable spending
+    - **Rich Progress**: Daily pace, projections, and health score (0-100)
 
-    Returns:
-    - 200: AI monthly report
-    - 401: Invalid or missing authentication token
-    - 404: No receipts found for this month
-    - 503: AI service temporarily unavailable
-    """
-    insight_repo = BudgetAIInsightRepository(db)
-
-    # Check if this is a past month (complete)
-    from datetime import date
-    year, month_num = map(int, month.split("-"))
-    today = date.today()
-    is_past_month = (year < today.year) or (year == today.year and month_num < today.month)
-
-    # Check cache for past months
-    if is_past_month:
-        cached = await insight_repo.get_monthly_report(current_user.id, month)
-        if cached and cached.ai_response:
-            return AIMonthlyReportResponse(**cached.ai_response)
-
-    # Generate report
-    try:
-        ai_service = BudgetAIService()
-        result = await ai_service.generate_monthly_report(db, current_user.id, month)
-
-        # Cache the result (especially for past months)
-        await insight_repo.create(
-            user_id=current_user.id,
-            insight_type="monthly_report",
-            month=month,
-            ai_response=result.model_dump(),
-            model_used=ai_service.MODEL,
-        )
-
-        return result
-
-    except GeminiAPIError as e:
-        if "no_data" in str(e.details.get("error_type", "")):
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail={
-                    "error": "No receipts found for this month",
-                    "code": "NO_DATA",
-                },
-            )
-        raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail={
-                "error": "AI service temporarily unavailable",
-                "code": "AI_ERROR",
-                "message": str(e.message),
-            },
-        )
-
-
-@router.post(
-    "/ai-feedback",
-    response_model=AIInsightFeedbackResponse,
-    status_code=status.HTTP_201_CREATED,
-)
-async def submit_ai_feedback(
-    request: AIInsightFeedbackRequest,
-    current_user: User = Depends(get_current_db_user),
-    db: AsyncSession = Depends(get_db),
-):
-    """
-    Submit feedback on an AI insight.
-
-    Helps improve AI recommendations by tracking user feedback.
+    Note: Progress insights require an active budget. Other insights work
+    without a budget (based on spending history only).
 
     Returns:
-    - 201: Feedback submitted successfully
+    - 200: Budget insights data
     - 401: Invalid or missing authentication token
-    - 404: Insight not found
+    - 404: No budget found (only if include_progress=true)
     """
-    insight_repo = BudgetAIInsightRepository(db)
+    budget_repo = BudgetRepository(db)
+    budget = await budget_repo.get_by_user_id(current_user.id)
 
-    # Verify insight exists
-    insight = await insight_repo.get_by_id(request.insight_id)
-    if not insight or insight.user_id != current_user.id:
+    # Budget is required only if progress is requested
+    if include_progress and not budget:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail={
-                "error": "Insight not found",
-                "code": "NOT_FOUND",
+                "error": "No budget found",
+                "code": "NO_BUDGET",
             },
         )
 
-    # Add feedback
-    feedback = await insight_repo.add_feedback(
-        insight_id=request.insight_id,
+    insights_service = BudgetInsightsService(db)
+    return await insights_service.get_all_insights(
         user_id=current_user.id,
-        feedback_type=request.feedback_type,
-    )
-
-    return AIInsightFeedbackResponse(
-        id=feedback.id,
-        insight_id=feedback.insight_id,
-        feedback_type=feedback.feedback_type,
-        created_at=feedback.created_at,
+        budget=budget,
+        include_benchmarks=include_benchmarks,
+        include_flags=include_flags,
+        include_quick_wins=include_quick_wins,
+        include_volatility=include_volatility,
+        include_progress=include_progress,
     )

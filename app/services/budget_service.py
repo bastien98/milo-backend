@@ -17,6 +17,11 @@ from app.schemas.budget import (
     SavingsOption,
     CategoryAllocation,
 )
+from app.schemas.budget_ai import (
+    SimpleBudgetSuggestionResponse,
+    RecommendedBudget,
+    SimpleCategoryAllocation,
+)
 from app.services.split_aware_calculation import SplitAwareCalculation
 from app.services.category_registry import get_category_registry
 
@@ -367,4 +372,147 @@ class BudgetService:
             average_monthly_spend=round(average_monthly_spend, 2),
             category_breakdown=category_breakdown,
             savings_options=savings_options,
+        )
+
+    async def get_simple_budget_suggestion(
+        self, user_id: str, months: int = 3, target_amount: float | None = None
+    ) -> SimpleBudgetSuggestionResponse:
+        """Generate a simple budget suggestion based on historical spending.
+
+        No AI involved - uses pure mathematical calculations.
+
+        Args:
+            user_id: The user's ID
+            months: Number of months to analyze (default 3)
+            target_amount: Optional target budget amount. If provided, category
+                          allocations are scaled to fit this target.
+
+        Returns:
+            SimpleBudgetSuggestionResponse with recommended budget and category allocations
+        """
+        today = date.today()
+
+        # Calculate the date range for the last N complete months
+        end_date = today.replace(day=1)  # First day of current month (exclusive)
+
+        year = end_date.year
+        month = end_date.month - months
+        while month <= 0:
+            month += 12
+            year -= 1
+        start_date = date(year, month, 1)
+
+        # Get all transactions for the period
+        result = await self.db.execute(
+            select(Transaction).where(
+                and_(
+                    Transaction.user_id == user_id,
+                    Transaction.date >= start_date,
+                    Transaction.date < end_date,
+                )
+            )
+        )
+        transactions = list(result.scalars().all())
+
+        # Determine actual months with data
+        if transactions:
+            tx_amounts = await self.split_calc.get_transaction_user_amounts(user_id, transactions)
+            monthly_spend: dict = defaultdict(float)
+            for tx, amount in tx_amounts:
+                month_key = tx.date.replace(day=1)
+                monthly_spend[month_key] += amount
+
+            num_months = len(monthly_spend)
+            total_spend = sum(monthly_spend.values())
+            average_monthly_spend = total_spend / num_months if num_months > 0 else 0
+
+            # Calculate category totals
+            category_totals: dict = defaultdict(float)
+            for tx, amount in tx_amounts:
+                category_totals[tx.category] += amount
+        else:
+            # No data - provide default values
+            num_months = 0
+            total_spend = 0
+            average_monthly_spend = 0
+            category_totals = {}
+
+        # Determine confidence based on months of data
+        if num_months >= 3:
+            confidence = "high"
+            reasoning = f"Based on {num_months} months of consistent spending data."
+        elif num_months >= 1:
+            confidence = "medium"
+            reasoning = f"Based on {num_months} month{'s' if num_months > 1 else ''} of spending data. More data will improve accuracy."
+        else:
+            confidence = "low"
+            # Provide Belgian household average as starting point
+            average_monthly_spend = 400  # Default Belgian household average
+            reasoning = "Suggested starting point based on typical household spending. Scan receipts to personalize."
+
+        # Calculate recommended budget (10% below average for savings target)
+        if target_amount:
+            recommended_amount = target_amount
+        else:
+            recommended_amount = round(average_monthly_spend * 0.9 / 5) * 5  # Round to nearest €5
+
+        # Ensure minimum budget
+        recommended_amount = max(100, recommended_amount)
+
+        # Calculate category allocations
+        category_allocations: List[SimpleCategoryAllocation] = []
+
+        if category_totals and num_months > 0:
+            # Use actual spending patterns
+            for category_name, total_spent in sorted(
+                category_totals.items(), key=lambda x: x[1], reverse=True
+            ):
+                avg_spend = total_spent / num_months
+                percentage = (avg_spend / average_monthly_spend * 100) if average_monthly_spend > 0 else 0
+
+                # Scale to target/recommended amount
+                if target_amount:
+                    scaled_amount = (percentage / 100) * target_amount
+                else:
+                    scaled_amount = (percentage / 100) * recommended_amount
+
+                category_allocations.append(
+                    SimpleCategoryAllocation(
+                        category=category_name,
+                        suggested_amount=round(scaled_amount, 2),
+                        percentage=round(percentage, 1),
+                    )
+                )
+        else:
+            # No data - provide default Belgian household breakdown
+            default_categories = [
+                ("Groceries", 35.0),
+                ("Beverages", 12.0),
+                ("Household", 10.0),
+                ("Snacks & Treats", 10.0),
+                ("Personal Care", 8.0),
+                ("Meat & Fish", 8.0),
+                ("Dairy", 7.0),
+                ("Fresh Produce", 5.0),
+                ("Other", 5.0),
+            ]
+            for category_name, pct in default_categories:
+                amount = (pct / 100) * recommended_amount
+                category_allocations.append(
+                    SimpleCategoryAllocation(
+                        category=category_name,
+                        suggested_amount=round(amount, 2),
+                        percentage=pct,
+                    )
+                )
+
+        return SimpleBudgetSuggestionResponse(
+            recommended_budget=RecommendedBudget(
+                amount=recommended_amount,
+                confidence=confidence,
+                reasoning=reasoning,
+            ),
+            category_allocations=category_allocations,
+            based_on_months=num_months,
+            total_spend_analyzed=round(total_spend, 2) if transactions else 0,
         )
