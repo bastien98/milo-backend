@@ -362,59 +362,196 @@ def _normalize_hit(hit) -> dict:
 # ---------------------------------------------------------------------------
 # Step 3: LLM recommendation generation
 # ---------------------------------------------------------------------------
-SYSTEM_PROMPT = """You are the user's personal promo hunter — a sharp, enthusiastic savings expert who knows Belgian supermarkets inside out.
+SYSTEM_PROMPT = """\
+You are the user's personal promo hunter inside a Belgian grocery savings app called Scandelicious.
+You write like a savvy, enthusiastic friend who found amazing deals and can't wait to share them. "We're in this together" vibe.
 
-Your job: turn raw promo data into a punchy, scannable weekly savings briefing that makes the user feel like they have an unfair advantage over other shoppers.
+## HARD RULES — never break these
+- ONLY reference promotions explicitly present in the provided data. Never invent, guess, or speculate about deals.
+- Skip items with zero matching promos silently. No filler, no "keep an eye out" suggestions.
+- Every deal must include: **brand name**, product, exact price, promo mechanism, store, and validity date.
+- Always bold the **Brand Name** and the **final price**. Always strikethrough the old price with ~~€X.XX~~.
+- Keep Belgian promo terms as-is: "1+1 Gratis", "-50%", "2+1 Gratis", "Rode Prijzen", etc. — do NOT translate them.
+- Use Belgian-style dates: day name + DD/MM (e.g., "Mon 09/02"). Derive the day name from the date.
+- Use € for all prices.
 
-## HARD RULES (never break these)
-- ONLY mention promotions explicitly present in the provided data. Never invent or speculate.
-- If an item has zero matching promos, skip it silently. No filler, no "watch out for future deals."
-- Every recommendation must be traceable to a specific promo entry with exact brand, product, price, mechanism, and dates.
+## UNDERSTANDING USER METRICS
+Each interest item includes a `metrics` block with the user's purchase history for that item:
+- `total_spend`: Total € spent on this item
+- `trip_count`: Number of shopping trips where they bought this
+- `avg_units_per_trip`: Average quantity per purchase
+- `avg_unit_price`: Average price paid per unit
+- `purchase_frequency_days`: Average days between purchases (null if < 2 purchases)
+- `days_since_last_purchase`: Days since they last bought this
+- `restock_urgency`: Ratio of days_since / purchase_frequency. **Use this to prioritize deals:**
+  - ≥1.5: OVERDUE — they're past due, highlight this deal urgently
+  - ≥1.0: DUE NOW — right on schedule, good timing for a deal
+  - ≥0.7: due soon — coming up, worth mentioning
+  - <0.7 or null: not urgent yet or insufficient data
 
-## FORMATTING RULES (always follow)
-- ALWAYS include the **brand name** in every mention of a product — in headings, bullet points, AND the savings summary. Write "**Lipton** Ice Tea", never just "Ice Tea". Write "**Iglo** Paella", never just "Frozen Meals".
-- Use **bold** for brand names, prices, and savings amounts throughout.
-- Keep it scannable: short punchy lines, no walls of text.
-- Use EUR symbol (€) for all prices.
+**Null values** in metrics mean insufficient purchase history to calculate that metric reliably. Don't reference specific numbers when they're null.
+
+Items marked [CATEGORY FALLBACK] represent broader category interests when specific item data is sparse — personalize based on the category rather than specific product history.
 
 ## TONE
-- Confident, direct, slightly excited about great deals. Like a friend who found amazing promos and can't wait to share.
-- Address the user as "you" — make it personal.
-- Short sentences. No corporate speak. No filler paragraphs.
+- Second person ("you"). Confident, punchy, warm. Short sentences.
+- No corporate speak. No filler paragraphs. No apologies for missing coverage.
 
-## STRUCTURE
+## EMOJI GUIDE — use these consistently for product categories
+🧊 Drinks (tea, soda, water, juice)
+🥛 Dairy (milk, yoghurt, skyr, cheese)
+🐟 Fish & Seafood
+🍗 Meat & Poultry
+🍝 Pasta, Rice & Meals
+🍕 Frozen (pizza, snacks, meals)
+🍎 Fruit
+🥬 Vegetables & Salad
+🥜 Nuts & Snacks
+🍞 Bread & Bakery
+🧴 Household & Personal Care
+🧀 Cheese (when it's the main item)
+🍫 Sweets & Chocolate
+🍺 Alcohol
 
-### 1. Opening hook (2-3 lines max)
-Mention their main store(s), how many promos you found for them, and tease the total savings number upfront. Make them want to keep reading.
+## OUTPUT STRUCTURE — follow this exactly
 
-### 2. Best Deals This Week
-The top 3-5 highest-impact promos ranked by savings amount. For each:
-- **{Brand} {Product}** — {promo mechanism}
-- {Store} | Valid until {date}
-- ~~€{original}~~ → **€{promo_price}** (you save **€{amount}**)
-- _Why this matters:_ one sentence linking to their buying pattern (e.g., "You buy this almost every trip — that's €X/month back in your pocket")
+### 1. Header
+🇧🇪 **Weekly Savings: €{total} found!**
+{count} deals matched to your shopping habits.
 
-### 3. Stock Up While It Lasts
-Items they buy frequently that are on promo — worth buying extra. Same format as above but emphasize the volume play.
+### 2. 🏆 Top Pick (1 item only — the single biggest win)
+Show the #1 deal in a prominent block:
 
-### 4. Worth a Detour
-Great deals at stores they don't usually visit, but only if the savings justify the trip. Be explicit about which store and why it's worth it.
+**{Brand} {Product}**
+📍 {Store}
+**€{promo_price}** (~~€{original_price}~~) | {mechanism}
 
-### 5. Your Savings Snapshot
-A clean summary table or list:
-- **{Brand} {Product}** ({mechanism}): save **€{amount}**
-- ...
-- **Total potential savings: €{total}** — that's {percentage}% off your typical weekly spend!
+> 💡 {One sentence linking to their buying pattern with a concrete number, e.g., "You buy ~3.5 units per trip. This cuts your usual bulk cost in half!"}
 
-End with a single energizing line that makes them look forward to next week's report.
+### 3. 🛒 Suggested Shopping Trip
+This is the main section. Present a practical shopping plan organized by store.
+
+**IMPORTANT**: Order stores by total savings (highest first). Only include stores with deals.
+
+For each store, use this format:
+
+---
+{color} **{Store Name}** — Save **€{store_total_savings}**
+📅 Valid until {Day DD/MM}
+
+**Shopping List:**
+- [ ] {emoji} **{Brand} {Product}** — **€{promo_price}** (~~€{original_price}~~) | {mechanism}
+- [ ] {emoji} **{Brand} {Product}** — **€{promo_price}** (~~€{original_price}~~) | {mechanism}
+...
+
+💡 *{One personalized tip for this store trip, referencing user's habits}*
+
+---
+
+Use colored squares for store identity:
+- 🟦 Carrefour Hypermarkt
+- 🟧 Colruyt
+- 🟩 Delhaize
+- 🟨 Albert Heijn
+- 🟪 Lidl
+- 🟥 Aldi
+- ⬜ Other stores
+
+### 4. 🔄 Smart Switch (only if applicable)
+Suggest swapping ONE brand for a cheaper alternative that's on promo. Only include if the savings are meaningful.
+
+🔄 **Try {Brand B} instead of {Brand A}**
+{emoji} Save **€{amount}** ({mechanism})
+> {One sentence explaining the switch — taste similarity, same category, why it's worth trying}
+
+Skip this section entirely if no good switch exists.
+
+### 5. 💰 Trip Summary
+Show a clean breakdown of savings by store and grand total:
+
+| Store | Items | Est. Savings |
+|-------|-------|--------------|
+| {Store 1} | {count} | €{amount} |
+| {Store 2} | {count} | €{amount} |
+| **Total** | **{total_count}** | **€{grand_total}** |
+
+> 💡 **Best value trip**: {Store with highest savings} — {count} items for €{savings} saved!
+
+### 6. Closing nudge (1 line)
+End with a single short, specific line that makes the user want to come back next week. Reference something from their profile — a product they buy often that might get a deal soon, or a trend in their spending.
 
 ## WHAT TO SKIP
-- No generic shopping tips (reusable bags, meal planning, etc.) unless the data specifically supports it with a concrete number.
-- No recommendations for items without confirmed promos.
-- No apologizing for missing coverage. If there are few matches, keep the report short and confident about what IS available.
-- No category-only mentions. Always name the specific brand and product.
+- No generic shopping tips (reusable bags, meal planning, etc.)
+- No recommendations for items without confirmed promos in the data
+- No sections with zero content — omit them entirely
+- No category-only mentions — always name the specific brand and product
+- No repeated items across sections (each deal appears once, in its most relevant section)
 
-Respond in English."""
+## FEW-SHOT EXAMPLE
+
+Given a user who shops at Delhaize, buys Lipton Ice Tea in bulk, eats Iglo frozen meals, and loves St Moret cheese, here is the expected output:
+
+---
+
+🇧🇪 **Weekly Savings: €16.91 found!**
+7 deals matched to your shopping habits.
+
+### 🏆 Top Pick
+
+**Lipton Ice Tea** (Original/Green/Peach)
+📍 Carrefour Hypermarkt
+**€5.73** (~~€11.45~~) | 1+1 Gratis
+
+> 💡 You buy ~3.5 units per trip. This cuts your usual bulk cost in half!
+
+### 🛒 Suggested Shopping Trip
+
+---
+🟦 **Carrefour Hypermarkt** — Save **€9.82**
+📅 Valid until Mon 09/02
+
+**Shopping List:**
+- [ ] 🧊 **Lipton Ice Tea** — **€5.73** (~~€11.45~~) | 1+1 Gratis
+- [ ] 🥛 **Danone Skyr** — **€2.52** (~~€5.04~~) | 1+1 Gratis
+- [ ] 🐟 **Carrefour Zalm Gravlax** — **€5.90** (~~€7.39~~) | -20%
+- [ ] 🧀 **Tartare Verse Kaas** — **€1.59** (~~€3.18~~) | 1+1 Gratis
+
+💡 *Your ice tea and skyr are both overdue — knock them both out in one trip!*
+
+---
+🟧 **Colruyt** — Save **€7.09**
+📅 Valid until Tue 10/02
+
+**Shopping List:**
+- [ ] 🍝 **Iglo Pasta Meals** — **€2.50** (~~€4.99~~) | -50% vanaf 2
+- [ ] 🍕 **Mora Fun Mix Selection** — **€7.21** (~~€9.61~~) | -25% vanaf 2
+- [ ] 🍎 **Boni Jonagold Appelen** — **€1.29** (~~€1.99~~) | -35%
+
+💡 *Stock up on frozen meals — your Iglo habit loves a good freezer restock.*
+
+---
+
+### 🔄 Smart Switch
+
+🔄 **Try Tartare instead of St Moret**
+🧀 Save **€1.59** (1+1 Gratis at Carrefour)
+> Same creamy fresh cheese taste, but you get two packs for the price of one this week!
+
+### 💰 Trip Summary
+
+| Store | Items | Est. Savings |
+|-------|-------|--------------|
+| Carrefour Hypermarkt | 4 | €9.82 |
+| Colruyt | 3 | €7.09 |
+| **Total** | **7** | **€16.91** |
+
+> 💡 **Best value trip**: Carrefour Hypermarkt — 4 items for €9.82 saved!
+
+Your **Iglo** Paella wasn't on sale this week, but frozen meal deals are trending up at Colruyt — fingers crossed for next week! 🤞
+
+---
+
+Respond in English. Follow the structure above precisely."""
 
 
 def generate_recommendations(profile: dict, promo_results: dict[str, list[dict]]) -> str:
@@ -422,7 +559,13 @@ def generate_recommendations(profile: dict, promo_results: dict[str, list[dict]]
     user_message = _build_llm_context(profile, promo_results)
 
     if GEMINI_API_KEY:
-        return _call_gemini(user_message)
+        try:
+            return _call_gemini(user_message)
+        except Exception as e:
+            logger.warning(f"Gemini failed ({e}), falling back to Anthropic...")
+            if ANTHROPIC_API_KEY:
+                return _call_anthropic(user_message)
+            raise
     elif ANTHROPIC_API_KEY:
         return _call_anthropic(user_message)
     else:
@@ -445,6 +588,13 @@ def _call_gemini(user_message: str) -> str:
             temperature=0.7,
         ),
     )
+    if response.text is None:
+        # Log debug info when Gemini returns no text (safety filter, empty candidates)
+        logger.warning(f"Gemini returned None text. Candidates: {response.candidates}")
+        if response.candidates:
+            for c in response.candidates:
+                logger.warning(f"  finish_reason={c.finish_reason}, safety={c.safety_ratings}")
+        raise ValueError("Gemini returned empty response — likely blocked by safety filters")
     return response.text
 
 
@@ -462,96 +612,132 @@ def _call_anthropic(user_message: str) -> str:
 
 
 def _build_llm_context(profile: dict, promo_results: dict[str, list[dict]]) -> str:
-    """Build the full context message for the LLM with profile + promotions."""
+    """Build structured context for the LLM with profile + promotions."""
+    habits = profile["shopping_habits"]
     parts = []
 
-    parts.append("## User Shopping Profile\n")
-    parts.append("### Shopping Habits")
-    parts.append(json.dumps(profile["shopping_habits"], indent=2, default=str))
+    # ── Section 1: Compact user profile ──
+    parts.append("## USER PROFILE")
+    parts.append(f"Receipts: {profile['receipts_analyzed']} ({profile['data_period_start']} to {profile['data_period_end']})")
+    parts.append(f"Total spend: €{habits.get('total_spend', 0):.2f} | Avg receipt: €{habits.get('avg_receipt_total', 0):.2f} | {habits.get('shopping_frequency_per_week', 0)}x/week")
 
-    parts.append("\n### Promo Interest Items (ranked by relevance)")
-    # Format interest items with clear structure including interest_reason
+    # Stores
+    stores = habits.get("preferred_stores", [])
+    if stores:
+        store_lines = [f"  {s['name']}: €{s['spend']:.2f} ({s['pct']}%, {s['visits']} visits)" for s in stores[:5]]
+        parts.append("Stores:\n" + "\n".join(store_lines))
+
+    # Health
+    if habits.get("avg_health_score") is not None:
+        parts.append(f"Health score: {habits['avg_health_score']}/5 | Premium ratio: {habits.get('premium_brand_ratio', 0):.0%}")
+
+    # Health trend (new)
+    ht = habits.get("health_trend")
+    if ht and ht.get("trend"):
+        parts.append(f"Health trend: {ht['trend']} (4w avg: {ht.get('current_4w_avg', '?')} vs prev: {ht.get('previous_4w_avg', '?')})")
+        parts.append(f"Fresh produce: {ht.get('fresh_produce_pct', 0)}% of food | Ready meals: {ht.get('ready_meals_pct', 0)}%")
+
+    # Savings (new)
+    ss = habits.get("savings_summary")
+    if ss:
+        parts.append(f"Current savings: €{ss['total_saved']:.2f} total ({ss['savings_rate_pct']}% rate, ~€{ss['monthly_savings_avg']:.2f}/mo)")
+
+    # Brand savings potential (new)
+    bsp = habits.get("brand_savings_potential")
+    if bsp:
+        parts.append(f"Brand split: €{bsp['premium_spend']:.2f} premium / €{bsp['house_brand_spend']:.2f} house brand / €{bsp['unbranded_spend']:.2f} unbranded")
+        if bsp['estimated_monthly_savings_if_switch'] > 0:
+            parts.append(f"Potential savings switching to house brands: €{bsp['estimated_monthly_savings_if_switch']:.2f}/mo")
+
+    # Indulgence (new)
+    ind = habits.get("indulgence_tracker")
+    if ind and ind.get("total_indulgence", 0) > 0:
+        parts.append(f"Indulgence: €{ind['total_indulgence']:.2f} ({ind['indulgence_pct']}%) — ~€{ind['estimated_yearly']:.0f}/yr")
+
+    # Store loyalty (new)
+    sl = habits.get("store_loyalty")
+    if sl:
+        parts.append(f"Store concentration: {sl['concentration_score']:.2f} HHI | {sl['stores_visited_count']} stores visited")
+
+    # Shopping efficiency (new)
+    se = habits.get("shopping_efficiency")
+    if se:
+        parts.append(f"Small trips (<5 items): {se['small_trips_count']} ({se['small_trips_pct']}%), avg €{se['small_trips_avg_cost']:.2f}")
+        if se.get("weekend_premium_pct", 0) != 0:
+            parts.append(f"Weekend premium: {se['weekend_premium_pct']:+.1f}% vs weekday")
+
+    # ── Section 2: Interest items with metrics ──
+    parts.append("\n## ITEMS TO FIND DEALS FOR")
+    parts.append("(Note: null metrics indicate insufficient data for that calculation)")
     for item in profile["promo_interest_items"]:
         name = item.get("normalized_name", "?")
-        category = item.get("granular_category", "N/A")
-        interest_cat = item.get("interest_category", "?")
-        reason = item.get("interest_reason", "")
-        context = item.get("context", "")
-        brands = item.get("brands", [])
+        brands = ", ".join(item.get("brands", [])) or "no brand"
         tags = item.get("tags", [])
+        reason = item.get("interest_reason", "")
+        metrics = item.get("metrics", {})
+        is_fallback = item.get("is_category_fallback", False)
 
-        parts.append(f"\n**{name}** ({category})")
-        parts.append(f"  - Type: {interest_cat}")
-        if reason:
-            parts.append(f"  - Why selected: {reason}")
-        if brands:
-            parts.append(f"  - Brands: {', '.join(brands)}")
-        if tags:
-            parts.append(f"  - Tags: {', '.join(tags)}")
-        if context:
-            parts.append(f"  - Context: {context}")
+        # Build metrics string
+        metrics_parts = []
+        if metrics.get("total_spend") is not None:
+            metrics_parts.append(f"€{metrics['total_spend']:.2f} spent")
+        if metrics.get("trip_count") is not None:
+            metrics_parts.append(f"{metrics['trip_count']} trips")
+        if metrics.get("avg_units_per_trip") is not None:
+            metrics_parts.append(f"~{metrics['avg_units_per_trip']} units/trip")
+        if metrics.get("avg_unit_price") is not None:
+            metrics_parts.append(f"€{metrics['avg_unit_price']:.2f}/unit")
+        if metrics.get("purchase_frequency_days") is not None:
+            metrics_parts.append(f"every ~{metrics['purchase_frequency_days']}d")
 
-    parts.append(f"\n### Data Period")
-    parts.append(
-        f"Based on {profile['receipts_analyzed']} receipts from "
-        f"{profile['data_period_start']} to {profile['data_period_end']}"
-    )
+        # Restock urgency indicator
+        restock_urgency = metrics.get("restock_urgency")
+        urgency_str = ""
+        if restock_urgency is not None:
+            if restock_urgency >= 1.5:
+                urgency_str = " | ⚠️ OVERDUE (urgency {:.1f})".format(restock_urgency)
+            elif restock_urgency >= 1.0:
+                urgency_str = " | ⏰ DUE NOW (urgency {:.1f})".format(restock_urgency)
+            elif restock_urgency >= 0.7:
+                urgency_str = " | 📅 due soon (urgency {:.1f})".format(restock_urgency)
 
-    parts.append("\n\n## Matching Current Promotions\n")
+        metrics_str = " | ".join(metrics_parts) if metrics_parts else "limited data"
+        fallback_str = " [CATEGORY FALLBACK]" if is_fallback else ""
 
+        parts.append(
+            f"- **{name}** [{item.get('granular_category', '?')}]{fallback_str}\n"
+            f"  brands={brands} | {reason}\n"
+            f"  {metrics_str}{urgency_str}"
+        )
+
+    # ── Section 3: Matched promotions ──
+    parts.append("\n## MATCHED PROMOTIONS")
     items_with_promos = 0
     total_promos = 0
 
     for item_name, promos in promo_results.items():
-        parts.append(f"### {item_name}")
-        if promos:
-            items_with_promos += 1
-            for p in promos:
-                total_promos += 1
-                price_info = ""
-                if p.get("original_price") and p.get("promo_price"):
-                    try:
-                        savings = float(p["original_price"]) - float(p["promo_price"])
-                        price_info = (
-                            f"EUR {p['original_price']} -> EUR {p['promo_price']} "
-                            f"(save EUR {savings:.2f})"
-                        )
-                    except (ValueError, TypeError):
-                        price_info = (
-                            f"EUR {p.get('original_price', '?')} -> "
-                            f"EUR {p.get('promo_price', '?')}"
-                        )
-                elif p.get("promo_price"):
-                    price_info = f"EUR {p['promo_price']}"
+        if not promos:
+            continue
+        items_with_promos += 1
+        parts.append(f"\n### {item_name}")
+        for p in promos:
+            total_promos += 1
+            savings_str = ""
+            if p.get("original_price") and p.get("promo_price"):
+                try:
+                    savings = float(p["original_price"]) - float(p["promo_price"])
+                    savings_str = f" (save €{savings:.2f})"
+                except (ValueError, TypeError):
+                    pass
 
-                parts.append(
-                    f"- **{p.get('original_description', p.get('normalized_name', '?'))}**"
-                )
-                if price_info:
-                    parts.append(f"  Price: {price_info}")
-                if p.get("promo_mechanism"):
-                    parts.append(f"  Promo: {p['promo_mechanism']}")
-                parts.append(
-                    f"  Store: {p.get('source_retailer', 'N/A')} | "
-                    f"Category: {p.get('granular_category', 'N/A')} | "
-                    f"Brand: {p.get('brand', 'N/A')} | "
-                    f"Size: {p.get('unit_info') or 'N/A'} | "
-                    f"Valid: {p.get('validity_start', '?')} to {p.get('validity_end', '?')}"
-                )
-                parts.append(f"  Relevance score: {p.get('relevance_score', 'N/A')}")
-        else:
-            parts.append("- No matching promotions found currently")
-        parts.append("")
+            parts.append(
+                f"- {p.get('brand', '?')} · {p.get('original_description', p.get('normalized_name', '?'))}\n"
+                f"  €{p.get('original_price', '?')} → €{p.get('promo_price', '?')}{savings_str} | {p.get('promo_mechanism', '?')}\n"
+                f"  {p.get('source_retailer', '?')} | {p.get('unit_info') or '?'} | {p.get('validity_start', '?')} to {p.get('validity_end', '?')}"
+            )
 
-    parts.append(
-        f"\n**Summary:** {total_promos} matching promos found across "
-        f"{items_with_promos}/{len(promo_results)} interest items."
-    )
-
-    parts.append(
-        "\n\nAnalyze this user's profile and the matching promotions above. "
-        "Provide personalized, actionable recommendations."
-    )
+    parts.append(f"\n**{total_promos} promos matched across {items_with_promos}/{len(promo_results)} items.**")
+    parts.append("\nGenerate the weekly promo briefing now.")
 
     return "\n".join(parts)
 

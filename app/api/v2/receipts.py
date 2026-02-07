@@ -156,6 +156,7 @@ async def list_receipts(
     directly with DELETE /api/v2/receipts/{receipt_id}.
     """
     transaction_repo = TransactionRepository(db)
+    receipt_repo = ReceiptRepository(db)
 
     # Fetch all matching transactions (without pagination - we paginate groups)
     transactions, _ = await transaction_repo.get_by_user(
@@ -173,6 +174,18 @@ async def list_receipts(
     for txn in transactions:
         if txn.receipt_id:
             groups[txn.receipt_id].append(txn)
+
+    # Fetch receipt objects for receipt-level fields
+    receipt_map = {}
+    if groups:
+        receipts, _ = await receipt_repo.get_by_user(
+            user_id=current_user.id,
+            start_date=start_date,
+            end_date=end_date,
+            page=1,
+            page_size=10000,
+        )
+        receipt_map = {r.id: r for r in receipts}
 
     # Build grouped receipts
     grouped_receipts = []
@@ -193,12 +206,19 @@ async def list_receipts(
             else None
         )
 
+        # Get receipt-level fields from the receipt object
+        receipt_obj = receipt_map.get(receipt_id)
+
         grouped_receipts.append(
             GroupedReceipt(
                 receipt_id=receipt_id,
                 store_name=store,
                 receipt_date=txn_date,
+                receipt_time=receipt_obj.receipt_time if receipt_obj else None,
                 total_amount=round(total_amount, 2),
+                payment_method=receipt_obj.payment_method if receipt_obj else None,
+                total_savings=receipt_obj.total_savings if receipt_obj else None,
+                store_branch=receipt_obj.store_branch if receipt_obj else None,
                 items_count=items_count,
                 average_health_score=average_health_score,
                 transactions=[
@@ -210,12 +230,14 @@ async def list_receipts(
                         unit_price=t.unit_price,
                         category=t.category,
                         health_score=t.health_score,
-                        # New fields for semantic search
                         original_description=t.original_description,
                         normalized_name=t.normalized_name,
                         is_discount=t.is_discount,
                         is_deposit=t.is_deposit,
                         granular_category=t.granular_category,
+                        unit_of_measure=t.unit_of_measure,
+                        weight_or_volume=t.weight_or_volume,
+                        price_per_unit_measure=t.price_per_unit_measure,
                     )
                     for t in txns
                 ],

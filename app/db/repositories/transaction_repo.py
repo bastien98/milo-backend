@@ -93,6 +93,10 @@ class TransactionRepository:
         is_discount: bool = False,
         is_deposit: bool = False,
         granular_category: Optional[str] = None,
+        # Unit measure fields
+        unit_of_measure: Optional[str] = None,
+        weight_or_volume: Optional[float] = None,
+        price_per_unit_measure: Optional[float] = None,
     ) -> Transaction:
         """Create a new transaction."""
         transaction = Transaction(
@@ -114,6 +118,10 @@ class TransactionRepository:
             is_discount=is_discount,
             is_deposit=is_deposit,
             granular_category=granular_category,
+            # Unit measure fields
+            unit_of_measure=unit_of_measure,
+            weight_or_volume=weight_or_volume,
+            price_per_unit_measure=price_per_unit_measure,
         )
         self.db.add(transaction)
         await self.db.flush()

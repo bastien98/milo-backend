@@ -2,6 +2,7 @@ import hashlib
 import logging
 import time
 from datetime import date, datetime, timezone
+from datetime import time as dt_time
 from typing import Optional
 
 from fastapi import UploadFile
@@ -159,6 +160,9 @@ class ReceiptProcessorV2:
                     is_discount=item.is_discount,
                     is_deposit=item.is_deposit,
                     granular_category=item.granular_category,
+                    unit_of_measure=item.unit_of_measure,
+                    weight_or_volume=item.weight_or_volume,
+                    price_per_unit_measure=item.price_per_unit_measure,
                 )
                 transactions.append(
                     ExtractedItem(
@@ -176,6 +180,9 @@ class ReceiptProcessorV2:
                         is_discount=item.is_discount,
                         is_deposit=item.is_deposit,
                         granular_category=item.granular_category,
+                        unit_of_measure=item.unit_of_measure,
+                        weight_or_volume=item.weight_or_volume,
+                        price_per_unit_measure=item.price_per_unit_measure,
                     )
                 )
             logger.info(f"⏱ create_transactions: {time.monotonic() - t0:.3f}s ({len(transactions)} items)")
@@ -186,6 +193,15 @@ class ReceiptProcessorV2:
             else:
                 final_total = sum(item.total_price for item in extraction_result.line_items)
 
+            # Parse receipt_time from HH:MM string to time object
+            parsed_receipt_time = None
+            if extraction_result.receipt_time:
+                try:
+                    parts = extraction_result.receipt_time.split(":")
+                    parsed_receipt_time = dt_time(int(parts[0]), int(parts[1]))
+                except (ValueError, IndexError):
+                    pass
+
             # Step 7: Update receipt
             t0 = time.monotonic()
             await self.receipt_repo.update(
@@ -195,6 +211,10 @@ class ReceiptProcessorV2:
                 receipt_date=final_date,
                 total_amount=final_total,
                 processed_at=datetime.now(timezone.utc),
+                receipt_time=parsed_receipt_time,
+                payment_method=extraction_result.payment_method,
+                total_savings=extraction_result.total_savings,
+                store_branch=extraction_result.store_branch,
             )
             logger.info(f"⏱ update_receipt: {time.monotonic() - t0:.3f}s")
 
@@ -204,7 +224,11 @@ class ReceiptProcessorV2:
                 status=ReceiptStatus.COMPLETED,
                 store_name=cleaned_store_name,
                 receipt_date=final_date,
+                receipt_time=parsed_receipt_time,
                 total_amount=final_total,
+                payment_method=extraction_result.payment_method,
+                total_savings=extraction_result.total_savings,
+                store_branch=extraction_result.store_branch,
                 items_count=len(transactions),
                 transactions=transactions,
                 warnings=warnings,

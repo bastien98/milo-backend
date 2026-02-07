@@ -49,6 +49,11 @@ class Transaction(Base):
         String(100), nullable=True, index=True
     )
 
+    # Unit measure fields
+    unit_of_measure: Mapped[Optional[str]] = mapped_column(String(10), nullable=True)
+    weight_or_volume: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    price_per_unit_measure: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+
     # Categorization
     category: Mapped[Category] = mapped_column(
         Enum(Category), nullable=False, index=True

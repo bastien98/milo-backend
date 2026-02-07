@@ -9,7 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.cache import invalidate_user
 from app.models.transaction import Transaction
 from app.models.receipt import Receipt
-from app.models.enums import ReceiptStatus
+from app.models.enums import ReceiptStatus, Category
 from app.db.repositories.enriched_profile_repo import EnrichedProfileRepository
 
 logger = logging.getLogger(__name__)
@@ -51,8 +51,20 @@ class EnrichedProfileService:
             )
             receipt_count = receipt_count_result.scalar() or 0
 
+            # Fetch receipts for receipt-level aggregations (time_of_day, payment_insights)
+            receipt_result = await db.execute(
+                select(Receipt).where(
+                    and_(
+                        Receipt.user_id == user_id,
+                        Receipt.receipt_date >= cutoff,
+                        Receipt.status == ReceiptStatus.COMPLETED,
+                    )
+                )
+            )
+            receipts = list(receipt_result.scalars().all())
+
             # Build aggregated data
-            shopping_habits = _build_shopping_habits(transactions, receipt_count, cutoff)
+            shopping_habits = _build_shopping_habits(transactions, receipt_count, cutoff, receipts)
             promo_items = _build_promo_interest_items(transactions, cutoff)
 
             # Determine actual date range from data
@@ -90,6 +102,7 @@ def _build_shopping_habits(
     transactions: list[Transaction],
     receipt_count: int,
     cutoff: date,
+    receipts: list | None = None,
 ) -> dict[str, Any]:
     """Aggregate transaction data into a shopping habits summary."""
     if not transactions:
@@ -104,6 +117,15 @@ def _build_shopping_habits(
             "premium_brand_ratio": 0,
             "top_granular_categories": [],
             "typical_basket_size": 0,
+            "savings_summary": None,
+            "health_trend": None,
+            "shopping_efficiency": None,
+            "brand_savings_potential": None,
+            "indulgence_tracker": None,
+            "store_loyalty": None,
+            "price_intelligence": None,
+            "time_of_day_patterns": None,
+            "payment_insights": None,
         }
 
     total_spend = sum(t.item_price for t in transactions)
@@ -139,6 +161,7 @@ def _build_shopping_habits(
         if t.health_score is not None:
             cat_data[cat_val]["health_scores"].append(t.health_score)
 
+    # Filter out "Other" category (contains discounts/deposits) and negative spend
     category_breakdown = sorted(
         [
             {
@@ -151,6 +174,7 @@ def _build_shopping_habits(
                 else None,
             }
             for cat, d in cat_data.items()
+            if cat != "Other" and d["spend"] > 0
         ],
         key=lambda c: c["spend"],
         reverse=True,
@@ -165,10 +189,10 @@ def _build_shopping_habits(
     premium_count = sum(1 for t in items_with_brand if t.is_premium)
     premium_ratio = round(premium_count / len(items_with_brand), 2) if items_with_brand else 0
 
-    # Granular categories (top 15, excluding "Discounts" which is not a product category)
+    # Granular categories (top 15, excluding "Discounts" and "Other" which are not product categories)
     gran_cat_counts: dict[str, int] = defaultdict(int)
     for t in transactions:
-        if t.granular_category and t.granular_category != "Discounts":
+        if t.granular_category and t.granular_category not in ("Discounts", "Other"):
             gran_cat_counts[t.granular_category] += 1
     top_granular = [
         cat for cat, _ in sorted(gran_cat_counts.items(), key=lambda x: x[1], reverse=True)[:15]
@@ -217,6 +241,253 @@ def _build_shopping_habits(
             "estimated_yearly": round(bag_total / max(weeks_in_period, 1) * 52, 2),
         }
 
+    # ── Aggregation 1: savings_summary ──
+    discount_txns = [t for t in transactions if t.is_discount]
+    savings_summary = None
+    if discount_txns:
+        total_saved = abs(sum(t.item_price for t in discount_txns))
+        total_spend_gross = total_spend + total_saved
+        savings_rate_pct = round(total_saved / total_spend_gross * 100, 1) if total_spend_gross > 0 else 0
+
+        # Per-store savings
+        store_savings: dict[str, float] = defaultdict(float)
+        store_net: dict[str, float] = defaultdict(float)
+        for t in transactions:
+            if t.is_discount:
+                store_savings[t.store_name] += abs(t.item_price)
+            store_net[t.store_name] += t.item_price
+
+        per_store_savings = []
+        for s_name in store_savings:
+            s_saved = store_savings[s_name]
+            s_gross = store_net[s_name] + s_saved
+            per_store_savings.append({
+                "store": s_name,
+                "saved": round(s_saved, 2),
+                "rate_pct": round(s_saved / s_gross * 100, 1) if s_gross > 0 else 0,
+            })
+        per_store_savings.sort(key=lambda x: x["saved"], reverse=True)
+
+        savings_summary = {
+            "total_saved": round(total_saved, 2),
+            "savings_rate_pct": savings_rate_pct,
+            "monthly_savings_avg": round(total_saved / weeks_in_period * 4.33, 2),
+            "per_store": per_store_savings[:10],
+        }
+
+    # ── Aggregation 2: health_trend ──
+    today = date.today()
+    recent_28d = [t for t in transactions if t.health_score is not None and (today - t.date).days <= 28]
+    prev_28d = [t for t in transactions if t.health_score is not None and 29 <= (today - t.date).days <= 56]
+
+    health_trend = None
+    current_4w_avg = sum(t.health_score for t in recent_28d) / len(recent_28d) if recent_28d else None
+    prev_4w_avg = sum(t.health_score for t in prev_28d) / len(prev_28d) if prev_28d else None
+
+    trend_direction = None
+    if current_4w_avg is not None and prev_4w_avg is not None:
+        diff = current_4w_avg - prev_4w_avg
+        if diff > 0.2:
+            trend_direction = "improving"
+        elif diff < -0.2:
+            trend_direction = "declining"
+        else:
+            trend_direction = "stable"
+
+    # Healthiest/least healthy store (min 5 scored items)
+    store_health: dict[str, list[int]] = defaultdict(list)
+    for t in transactions:
+        if t.health_score is not None:
+            store_health[t.store_name].append(t.health_score)
+    qualified_stores = {s: scores for s, scores in store_health.items() if len(scores) >= 5}
+    healthiest_store = None
+    least_healthy_store = None
+    if qualified_stores:
+        store_avgs = {s: sum(sc) / len(sc) for s, sc in qualified_stores.items()}
+        healthiest_store = max(store_avgs, key=store_avgs.get)  # type: ignore[arg-type]
+        least_healthy_store = min(store_avgs, key=store_avgs.get)  # type: ignore[arg-type]
+
+    # Fresh produce & ready meals % of food spend
+    FOOD_CATEGORIES = {
+        Category.MEAT_FISH, Category.FRESH_PRODUCE, Category.DAIRY_EGGS,
+        Category.READY_MEALS, Category.BAKERY, Category.PANTRY, Category.FROZEN,
+        Category.SNACKS_SWEETS, Category.DRINKS_SOFT_SODA, Category.DRINKS_WATER,
+        Category.ALCOHOL, Category.BABY_KIDS,
+    }
+    food_txns = [t for t in transactions if t.category in FOOD_CATEGORIES and not t.is_discount and not t.is_deposit]
+    total_food_spend = sum(t.item_price for t in food_txns)
+    fresh_produce_spend = sum(t.item_price for t in food_txns if t.category == Category.FRESH_PRODUCE)
+    ready_meals_spend = sum(t.item_price for t in food_txns if t.category == Category.READY_MEALS)
+
+    health_trend = {
+        "current_4w_avg": round(current_4w_avg, 2) if current_4w_avg is not None else None,
+        "previous_4w_avg": round(prev_4w_avg, 2) if prev_4w_avg is not None else None,
+        "trend": trend_direction,
+        "healthiest_store": healthiest_store,
+        "least_healthy_store": least_healthy_store,
+        "fresh_produce_pct": round(fresh_produce_spend / total_food_spend * 100, 1) if total_food_spend > 0 else 0,
+        "ready_meals_pct": round(ready_meals_spend / total_food_spend * 100, 1) if total_food_spend > 0 else 0,
+    }
+
+    # ── Aggregation 3: shopping_efficiency ──
+    receipt_groups: dict[str, list[Transaction]] = defaultdict(list)
+    for t in transactions:
+        if t.receipt_id:
+            receipt_groups[t.receipt_id].append(t)
+
+    shopping_efficiency = None
+    if receipt_groups:
+        small_trips = []
+        weekday_totals = []
+        weekend_totals = []
+        for rid, r_txns in receipt_groups.items():
+            non_discount_deposit_count = sum(1 for t in r_txns if not t.is_discount and not t.is_deposit)
+            receipt_total = sum(t.item_price for t in r_txns)
+            receipt_date_val = r_txns[0].date
+
+            if non_discount_deposit_count < 5:
+                small_trips.append(receipt_total)
+
+            if receipt_date_val.weekday() < 5:
+                weekday_totals.append(receipt_total)
+            else:
+                weekend_totals.append(receipt_total)
+
+        small_trips_count = len(small_trips)
+        total_receipt_groups = len(receipt_groups)
+        small_trips_pct = round(small_trips_count / total_receipt_groups * 100, 1) if total_receipt_groups > 0 else 0
+        small_trips_avg_cost = round(sum(small_trips) / small_trips_count, 2) if small_trips_count > 0 else 0
+        estimated_monthly = round(small_trips_avg_cost * (small_trips_count / weeks_in_period * 4.33), 2) if small_trips_count > 0 else 0
+
+        weekday_avg = sum(weekday_totals) / len(weekday_totals) if weekday_totals else 0
+        weekend_avg = sum(weekend_totals) / len(weekend_totals) if weekend_totals else 0
+        weekend_premium_pct = round((weekend_avg - weekday_avg) / weekday_avg * 100, 1) if weekday_avg > 0 else 0
+
+        shopping_efficiency = {
+            "small_trips_count": small_trips_count,
+            "small_trips_pct": small_trips_pct,
+            "small_trips_avg_cost": small_trips_avg_cost,
+            "small_trips_estimated_monthly": estimated_monthly,
+            "weekday_avg_spend": round(weekday_avg, 2),
+            "weekend_avg_spend": round(weekend_avg, 2),
+            "weekend_premium_pct": weekend_premium_pct,
+        }
+
+    # ── Aggregation 4: brand_savings_potential ──
+    real_txns = [t for t in transactions if not t.is_discount and not t.is_deposit]
+    premium_spend = sum(t.item_price for t in real_txns if t.is_premium)
+    house_brand_spend = sum(t.item_price for t in real_txns if not t.is_premium and t.normalized_brand)
+    unbranded_spend = sum(t.item_price for t in real_txns if not t.normalized_brand)
+    estimated_savings_full_switch = round(premium_spend * 0.25 / weeks_in_period * 4.33, 2) if premium_spend > 0 else 0
+
+    brand_savings_potential = {
+        "premium_spend": round(premium_spend, 2),
+        "house_brand_spend": round(house_brand_spend, 2),
+        "unbranded_spend": round(unbranded_spend, 2),
+        "estimated_monthly_savings_if_switch": estimated_savings_full_switch,
+    }
+
+    # ── Aggregation 5: indulgence_tracker ──
+    total_real_spend = sum(t.item_price for t in real_txns)
+    alcohol_spend = sum(t.item_price for t in real_txns if t.category == Category.ALCOHOL)
+    snacks_sweets_spend = sum(t.item_price for t in real_txns if t.category == Category.SNACKS_SWEETS)
+    tobacco_spend = sum(t.item_price for t in real_txns if t.category == Category.TOBACCO)
+    total_indulgence = alcohol_spend + snacks_sweets_spend + tobacco_spend
+
+    indulgence_tracker = {
+        "alcohol_spend": round(alcohol_spend, 2),
+        "snacks_sweets_spend": round(snacks_sweets_spend, 2),
+        "tobacco_spend": round(tobacco_spend, 2),
+        "total_indulgence": round(total_indulgence, 2),
+        "indulgence_pct": round(total_indulgence / total_real_spend * 100, 1) if total_real_spend > 0 else 0,
+        "estimated_yearly": round(total_indulgence / weeks_in_period * 52, 2),
+    }
+
+    # ── Aggregation 6: store_loyalty ──
+    store_loyalty = None
+    if store_data and total_spend != 0:
+        total_store_spend = sum(d["spend"] for d in store_data.values())
+        if total_store_spend > 0:
+            shares = [d["spend"] / total_store_spend for d in store_data.values()]
+            concentration_score = sum(s ** 2 for s in shares)
+        else:
+            concentration_score = 0
+
+        # Category-store map (top 5 categories by spend)
+        cat_store_spend: dict[str, dict[str, float]] = defaultdict(lambda: defaultdict(float))
+        for t in transactions:
+            if not t.is_discount and not t.is_deposit and t.category:
+                cat_store_spend[t.category.value][t.store_name] += t.item_price
+        cat_totals = {cat: sum(stores.values()) for cat, stores in cat_store_spend.items()}
+        top_5_cats = sorted(cat_totals, key=cat_totals.get, reverse=True)[:5]  # type: ignore[arg-type]
+        category_store_map = {}
+        for cat in top_5_cats:
+            stores_for_cat = cat_store_spend[cat]
+            category_store_map[cat] = max(stores_for_cat, key=stores_for_cat.get)  # type: ignore[arg-type]
+
+        store_loyalty = {
+            "concentration_score": round(concentration_score, 3),
+            "primary_store_pct": preferred_stores[0]["pct"] if preferred_stores else 0,
+            "stores_visited_count": len(store_data),
+            "category_store_map": category_store_map,
+        }
+
+    # ── Aggregation 7: time_of_day_patterns (uses new receipt_time field) ──
+    time_of_day_patterns = None
+    if receipts:
+        timed_receipts = [r for r in receipts if r.receipt_time is not None]
+        if len(timed_receipts) >= 3:
+            morning = [r for r in timed_receipts if r.receipt_time.hour < 12]
+            afternoon = [r for r in timed_receipts if 12 <= r.receipt_time.hour < 17]
+            evening = [r for r in timed_receipts if r.receipt_time.hour >= 17]
+            total_timed = len(timed_receipts)
+
+            def _slot_stats(slot_receipts, label):
+                if not slot_receipts:
+                    return {"slot": label, "count": 0, "pct": 0, "avg_spend": 0}
+                avg_spend = sum(r.total_amount or 0 for r in slot_receipts) / len(slot_receipts)
+                return {
+                    "slot": label,
+                    "count": len(slot_receipts),
+                    "pct": round(len(slot_receipts) / total_timed * 100, 1),
+                    "avg_spend": round(avg_spend, 2),
+                }
+
+            time_of_day_patterns = {
+                "morning": _slot_stats(morning, "morning"),
+                "afternoon": _slot_stats(afternoon, "afternoon"),
+                "evening": _slot_stats(evening, "evening"),
+            }
+
+    # ── Aggregation 9: payment_insights (uses new payment_method field) ──
+    payment_insights = None
+    if receipts:
+        payment_receipts = [r for r in receipts if r.payment_method is not None]
+        if len(payment_receipts) >= 3:
+            method_data: dict[str, dict] = defaultdict(lambda: {"count": 0, "total": 0.0})
+            for r in payment_receipts:
+                method_data[r.payment_method]["count"] += 1
+                method_data[r.payment_method]["total"] += r.total_amount or 0
+
+            total_payment_count = len(payment_receipts)
+            methods = []
+            for method, d in method_data.items():
+                methods.append({
+                    "method": method,
+                    "count": d["count"],
+                    "pct": round(d["count"] / total_payment_count * 100, 1),
+                    "total_spend": round(d["total"], 2),
+                })
+            methods.sort(key=lambda x: x["count"], reverse=True)
+
+            mv_total = method_data.get("meal_vouchers", {}).get("total", 0)
+            meal_voucher_monthly = round(mv_total / weeks_in_period * 4.33, 2) if mv_total else 0
+
+            payment_insights = {
+                "methods": methods,
+                "meal_voucher_monthly": meal_voucher_monthly,
+            }
+
     return {
         "total_spend": round(total_spend, 2),
         "receipt_count": receipt_count,
@@ -230,6 +501,14 @@ def _build_shopping_habits(
         "top_granular_categories": top_granular,
         "typical_basket_size": typical_basket,
         "disposable_bag_spending": bag_spending,
+        "savings_summary": savings_summary,
+        "health_trend": health_trend,
+        "shopping_efficiency": shopping_efficiency,
+        "brand_savings_potential": brand_savings_potential,
+        "indulgence_tracker": indulgence_tracker,
+        "store_loyalty": store_loyalty,
+        "time_of_day_patterns": time_of_day_patterns,
+        "payment_insights": payment_insights,
     }
 
 
@@ -251,6 +530,7 @@ def _build_promo_interest_items(
             "total_quantity": 0,
             "receipt_ids": set(),
             "brands": set(),
+            "store_names": Counter(),
             "is_premium_count": 0,
             "health_scores": [],
             "categories": set(),
@@ -279,6 +559,8 @@ def _build_promo_interest_items(
             item_data[name_lower]["receipt_ids"].add(t.receipt_id)
         if t.normalized_brand:
             item_data[name_lower]["brands"].add(t.normalized_brand)
+        if t.store_name:
+            item_data[name_lower]["store_names"][t.store_name] += 1
         if t.is_premium:
             item_data[name_lower]["is_premium_count"] += 1
         if t.health_score is not None:
@@ -378,29 +660,35 @@ def _build_promo_interest_items(
             if cnt / total_dow >= 0.25
         ][:2]
 
-        # Build context string with temporal info
-        context_parts = [
-            f"Bought on {trip_count} trips in 3mo "
-            f"({freq_per_week:.1f}/week), "
-            f"avg {chr(0x20AC)}{avg_price:.2f}, "
-            f"avg {avg_units_per_trip:.1f} units/trip",
-        ]
-        context_parts.append(f"Last bought {days_since} days ago")
-        if avg_gap is not None:
-            context_parts.append(f"typically every {avg_gap} days")
-        if preferred_days:
-            context_parts.append(f"mostly on {', '.join(d[:3] for d in preferred_days)}")
+        # Determine primary store_name (most frequent)
+        primary_store = data["store_names"].most_common(1)[0][0] if data["store_names"] else None
+
+        # Build metrics dictionary with raw values (safe division)
+        # Note for LLM: null values mean "insufficient data to calculate"
+        total_spend = data["total_spend"]
+        total_units = data["total_quantity"]
+        restock_urgency = round(days_since / avg_gap, 2) if avg_gap and avg_gap > 0 else None
+        metrics = {
+            "total_spend": round(total_spend, 2),
+            "trip_count": trip_count,
+            "total_units": total_units,
+            "avg_unit_price": round(total_spend / total_units, 2) if total_units > 0 else None,
+            "avg_units_per_trip": round(total_units / trip_count, 2) if trip_count > 0 else None,
+            "avg_spend_per_trip": round(total_spend / trip_count, 2) if trip_count > 0 else None,
+            "purchase_frequency_days": avg_gap,  # avg days between purchases, null if < 2 purchases
+            "days_since_last_purchase": days_since,
+            "restock_urgency": restock_urgency,  # >1.0 = overdue, <1.0 = not yet due, null = insufficient data
+        }
 
         entry = {
             "normalized_name": name,
             "brands": sorted(data["brands"]) if data["brands"] else [],
+            "store_name": primary_store,
             "granular_category": next(iter(data["granular_categories"]), None),
             "tags": tags,
+            "metrics": metrics,
             "last_purchased": last_purchased.isoformat(),
-            "days_since_last_purchase": days_since,
-            "avg_days_between_purchases": avg_gap,
             "preferred_days": preferred_days,
-            "context": ". ".join(context_parts),
         }
 
         # Classify — store metadata dict alongside entry for computing interest_reason
@@ -444,7 +732,7 @@ def _build_promo_interest_items(
     # Sort each bucket and deduplicate across categories
     def _recency_key(x):
         """Primary metric first, then prefer more recently purchased items."""
-        return (x[0], -x[1]["days_since_last_purchase"])
+        return (x[0], -x[1]["metrics"]["days_since_last_purchase"])
 
     staples.sort(key=_recency_key, reverse=True)
     high_spend.sort(key=_recency_key, reverse=True)
@@ -509,20 +797,34 @@ def _build_promo_interest_items(
     MAX_CATEGORY_ITEMS = 3
 
     if len(result) < MIN_ITEMS_BEFORE_CATEGORY_FALLBACK:
-        # Compute top spending granular categories (excluding Discounts and Other)
-        category_spend: dict[str, float] = defaultdict(float)
+        # Aggregate category-level data (excluding Discounts and Other)
+        category_data: dict[str, dict] = defaultdict(
+            lambda: {
+                "total_spend": 0.0,
+                "total_units": 0,
+                "receipt_ids": set(),
+                "dates": [],
+            }
+        )
         for t in transactions:
             if t.granular_category and t.granular_category not in ("Discounts", "Other"):
-                category_spend[t.granular_category] += t.item_price
+                if not t.is_deposit and not t.is_discount:
+                    category_data[t.granular_category]["total_spend"] += t.item_price
+                    category_data[t.granular_category]["total_units"] += t.quantity or 1
+                    if t.receipt_id:
+                        category_data[t.granular_category]["receipt_ids"].add(t.receipt_id)
+                    category_data[t.granular_category]["dates"].append(t.date)
 
         # Get categories already represented in results
         represented_categories = {item.get("granular_category") for item in result}
 
         # Sort by spend and add category-level items
-        sorted_categories = sorted(category_spend.items(), key=lambda x: x[1], reverse=True)
+        sorted_categories = sorted(
+            category_data.items(), key=lambda x: x[1]["total_spend"], reverse=True
+        )
         category_items_added = 0
 
-        for cat, spend in sorted_categories:
+        for cat, data in sorted_categories:
             if len(result) >= MAX_INTEREST_ITEMS:
                 break
             if category_items_added >= MAX_CATEGORY_ITEMS:
@@ -530,19 +832,46 @@ def _build_promo_interest_items(
             if cat in represented_categories:
                 continue
 
+            # Compute category-level metrics
+            cat_spend = data["total_spend"]
+            cat_units = data["total_units"]
+            cat_trip_count = len(data["receipt_ids"]) or len(data["dates"])
+            cat_dates = sorted(set(data["dates"])) if data["dates"] else []
+            cat_last_purchased = cat_dates[-1] if cat_dates else None
+            cat_days_since = (date.today() - cat_last_purchased).days if cat_last_purchased else None
+
+            # Compute avg days between purchases for category
+            cat_avg_gap: float | None = None
+            if len(cat_dates) >= 2:
+                gaps = [(cat_dates[i + 1] - cat_dates[i]).days for i in range(len(cat_dates) - 1)]
+                cat_avg_gap = round(sum(gaps) / len(gaps), 1)
+
+            # Compute restock urgency
+            cat_restock_urgency = round(cat_days_since / cat_avg_gap, 2) if cat_avg_gap and cat_avg_gap > 0 and cat_days_since else None
+
             # Add a category-level interest item (no specific product)
             result.append({
                 "normalized_name": cat.lower(),  # Use category name as search term
                 "brands": [],
+                "store_name": None,
                 "granular_category": cat,
                 "tags": ["category_level"],
-                "last_purchased": None,
-                "days_since_last_purchase": None,
-                "avg_days_between_purchases": None,
+                "is_category_fallback": True,  # Explicit flag for LLM
+                "metrics": {
+                    "total_spend": round(cat_spend, 2),
+                    "trip_count": cat_trip_count,
+                    "total_units": cat_units,
+                    "avg_unit_price": round(cat_spend / cat_units, 2) if cat_units > 0 else None,
+                    "avg_units_per_trip": round(cat_units / cat_trip_count, 2) if cat_trip_count > 0 else None,
+                    "avg_spend_per_trip": round(cat_spend / cat_trip_count, 2) if cat_trip_count > 0 else None,
+                    "purchase_frequency_days": cat_avg_gap,  # null if < 2 purchases
+                    "days_since_last_purchase": cat_days_since,
+                    "restock_urgency": cat_restock_urgency,  # >1.0 = overdue, null = insufficient data
+                },
+                "last_purchased": cat_last_purchased.isoformat() if cat_last_purchased else None,
                 "preferred_days": [],
-                "context": f"You spend €{spend:.2f} on {cat} but no single product stands out",
                 "interest_category": "category_fallback",
-                "interest_reason": f"High spend category (€{spend:.2f} total)",
+                "interest_reason": f"Category-level fallback: no single product stands out, but user spends €{cat_spend:.2f} on {cat}",
             })
             represented_categories.add(cat)
             category_items_added += 1

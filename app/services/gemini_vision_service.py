@@ -44,7 +44,10 @@ class ExtractedLineItem:
     is_deposit: bool
     granular_category: str  # Detailed category
     parent_category: Category  # Broad category
-    health_score: Optional[int]  # 0-5, None for non-food
+    health_score: Optional[int]  # 0-5, None for non-foobrandd
+    unit_of_measure: Optional[str]  # kg/g/l/ml/piece
+    weight_or_volume: Optional[float]  # actual weight/volume
+    price_per_unit_measure: Optional[float]  # price per kg/liter
 
 
 @dataclass
@@ -56,6 +59,10 @@ class GeminiExtractionResult:
     total: Optional[float]
     line_items: list[ExtractedLineItem]
     ocr_text: Optional[str]  # Full OCR for debugging
+    receipt_time: Optional[str]  # HH:MM format
+    payment_method: Optional[str]  # bancontact/visa/mastercard/cash/payconiq/meal_vouchers/mixed
+    total_savings: Optional[float]  # total discount amount (positive number)
+    store_branch: Optional[str]  # store location/branch
 
 
 class GeminiVisionService:
@@ -76,6 +83,29 @@ class GeminiVisionService:
 - Extract the date from the receipt in YYYY-MM-DD format
 - Look for "Datum:", "Date:", or date patterns like "02/02/2026" or "02-02-2026"
 - Convert DD/MM/YYYY to YYYY-MM-DD
+
+### Receipt Time
+- Extract the time of purchase in HH:MM format (24-hour)
+- Look for "Tijd:", "Heure:", time near the date, or patterns like "14:32"
+- Return null if no time is found
+
+### Payment Method
+- Identify the payment method and normalize to one of: bancontact, visa, mastercard, cash, payconiq, meal_vouchers, mixed
+- Look for "Bancontact", "VISA", "Mastercard", "Cash", "Payconiq", "Edenred", "Sodexo", "Monizze"
+- For Edenred/Sodexo/Monizze, use "meal_vouchers"
+- If multiple payment methods are used, use "mixed"
+- Return null if no payment method is found
+
+### Total Savings
+- Calculate the total discount amount as a POSITIVE number
+- Sum up all discount lines (lines where is_discount=true) and return the absolute value
+- Return null if there are no discounts
+
+### Store Branch
+- Extract the store location/branch (the city, street, or branch identifier)
+- This is the location part of the store name, NOT the store chain name
+- Examples: "Colruyt Leuven" → "Leuven", "Delhaize Etterbeek" → "Etterbeek"
+- Return null if no branch/location is found
 
 ### Line Items - Extract these fields:
 
@@ -152,6 +182,20 @@ class GeminiVisionService:
    - "Statiegeld"
    - These are bottle/can deposits, NOT the actual products
 
+10. **unit_of_measure**: The unit shown on the receipt for weighed/measured items:
+    - Use: "kg", "g", "l", "ml", or "piece"
+    - Look for per-kg/per-liter pricing lines (e.g., "1.234 kg x 5.99/kg")
+    - Return null for standard packaged items without weight/volume info
+
+11. **weight_or_volume**: The actual weight or volume purchased:
+    - Parse from lines like "0.547 kg", "1.5 l", "250 g"
+    - Return the numeric value only (use unit_of_measure for the unit)
+    - Return null if not shown on receipt
+
+12. **price_per_unit_measure**: The per-unit price (price per kg, per liter, etc.):
+    - Parse from lines like "5.99/kg", "1.29/l"
+    - Return null if not shown on receipt
+
 ### IMPORTANT RULES
 - INCLUDE discount/bonus lines with NEGATIVE total_price values (these reduce the receipt total)
 - Skip subtotals, totals, payment lines
@@ -175,6 +219,10 @@ Assign ONE category from this list for each item:
 Return a JSON object with this structure:
 - "vendor_name": string
 - "receipt_date": "YYYY-MM-DD"
+- "receipt_time": "HH:MM" or null
+- "payment_method": string or null (bancontact/visa/mastercard/cash/payconiq/meal_vouchers/mixed)
+- "total_savings": number or null (positive, sum of all discount amounts)
+- "store_branch": string or null (location/branch name)
 - "total": number (receipt total)
 - "line_items": array of objects, each with:
   - "original_description": string (raw OCR text)
@@ -187,7 +235,10 @@ Return a JSON object with this structure:
   - "is_discount": boolean
   - "is_deposit": boolean
   - "granular_category": string (from list above)
-  - "health_score": integer 0-5 or null'''
+  - "health_score": integer 0-5 or null
+  - "unit_of_measure": string or null (kg/g/l/ml/piece)
+  - "weight_or_volume": number or null
+  - "price_per_unit_measure": number or null'''
 
     # Image compression settings (for large images only)
     MAX_IMAGE_SIZE = (1600, 2400)  # Max dimensions for compressed image
@@ -367,6 +418,25 @@ Return a JSON object with this structure:
             if normalized_brand:
                 normalized_brand = normalized_brand.lower()
 
+            # Parse unit measure fields
+            unit_of_measure = item.get("unit_of_measure")
+            if unit_of_measure and unit_of_measure not in ("kg", "g", "l", "ml", "piece"):
+                unit_of_measure = None
+
+            weight_or_volume = item.get("weight_or_volume")
+            if weight_or_volume is not None:
+                try:
+                    weight_or_volume = float(weight_or_volume)
+                except (ValueError, TypeError):
+                    weight_or_volume = None
+
+            price_per_unit_measure = item.get("price_per_unit_measure")
+            if price_per_unit_measure is not None:
+                try:
+                    price_per_unit_measure = float(price_per_unit_measure)
+                except (ValueError, TypeError):
+                    price_per_unit_measure = None
+
             line_items.append(
                 ExtractedLineItem(
                     original_description=item.get("original_description", ""),
@@ -381,8 +451,44 @@ Return a JSON object with this structure:
                     granular_category=granular,
                     parent_category=parent,
                     health_score=health_score,
+                    unit_of_measure=unit_of_measure,
+                    weight_or_volume=weight_or_volume,
+                    price_per_unit_measure=price_per_unit_measure,
                 )
             )
+
+        # Parse receipt-level insights
+        receipt_time = data.get("receipt_time")
+        if receipt_time:
+            # Validate HH:MM format
+            try:
+                parts = receipt_time.split(":")
+                int(parts[0])
+                int(parts[1])
+            except (ValueError, IndexError):
+                receipt_time = None
+
+        payment_method = data.get("payment_method")
+        valid_methods = {"bancontact", "visa", "mastercard", "cash", "payconiq", "meal_vouchers", "mixed"}
+        if payment_method and payment_method.lower() not in valid_methods:
+            payment_method = None
+        elif payment_method:
+            payment_method = payment_method.lower()
+
+        total_savings = data.get("total_savings")
+        if total_savings is not None:
+            try:
+                total_savings = abs(float(total_savings))
+                if total_savings == 0:
+                    total_savings = None
+            except (ValueError, TypeError):
+                total_savings = None
+
+        store_branch = data.get("store_branch")
+        if store_branch:
+            store_branch = store_branch.strip()
+            if not store_branch:
+                store_branch = None
 
         return GeminiExtractionResult(
             vendor_name=data.get("vendor_name", "Unknown"),
@@ -390,4 +496,8 @@ Return a JSON object with this structure:
             total=data.get("total"),
             line_items=line_items,
             ocr_text=data.get("ocr_text"),
+            receipt_time=receipt_time,
+            payment_method=payment_method,
+            total_savings=total_savings,
+            store_branch=store_branch,
         )
