@@ -267,6 +267,41 @@ PRODUCTS = {
         ("Shampoo 250ml", "shampoo", "head & shoulders", 3.49, None, "Hair Care", "Personal Care"),
         ("Douchegel 250ml", "douchegel", "dove", 2.99, None, "Body Wash", "Personal Care"),
     ],
+    # Protein & Fitness products
+    "Protein Bars": [
+        ("Barebells Protein Bar Caramel Cashew 55g", "protein bar", "barebells", 2.99, 4, "Protein Bars", "Sports Nutrition"),
+        ("Barebells Protein Bar Cookies & Cream 55g", "protein bar", "barebells", 2.99, 4, "Protein Bars", "Sports Nutrition"),
+        ("Quest Bar Chocolate Chip 60g", "protein bar", "quest", 3.29, 4, "Protein Bars", "Sports Nutrition"),
+        ("Grenade Carb Killa Bar 60g", "protein bar", "grenade", 3.49, 4, "Protein Bars", "Sports Nutrition"),
+        ("PhD Smart Bar Chocolate Brownie 64g", "protein bar", "phd", 2.79, 4, "Protein Bars", "Sports Nutrition"),
+        ("Myprotein Layered Bar 60g", "protein bar", "myprotein", 2.49, 4, "Protein Bars", "Sports Nutrition"),
+    ],
+    "Protein Drinks": [
+        ("Barebells Milkshake Chocolate 330ml", "protein shake", "barebells", 2.99, 4, "Protein Drinks", "Sports Nutrition"),
+        ("Barebells Milkshake Vanilla 330ml", "protein shake", "barebells", 2.99, 4, "Protein Drinks", "Sports Nutrition"),
+        ("Multipower Protein Shake 330ml", "protein shake", "multipower", 2.49, 4, "Protein Drinks", "Sports Nutrition"),
+        ("Optimum Nutrition Protein Shake 330ml", "protein shake", "optimum nutrition", 3.49, 4, "Protein Drinks", "Sports Nutrition"),
+    ],
+    "High Protein Dairy": [
+        ("Skyr Naturel 450g", "skyr", "arla", 2.79, 5, "Yogurt Skyr", "Dairy & Eggs"),
+        ("Skyr Vanille 450g", "skyr vanille", "arla", 2.99, 4, "Yogurt Skyr", "Dairy & Eggs"),
+        ("Danio Vanille 180g", "danio", "danone", 1.79, 4, "Yogurt High Protein", "Dairy & Eggs"),
+        ("Hipro Pudding Chocolade 200g", "hipro", "danone", 1.99, 4, "Pudding High Protein", "Dairy & Eggs"),
+        ("Cottage Cheese 200g", "cottage cheese", "boni", 1.99, 5, "Cheese Cottage", "Dairy & Eggs"),
+    ],
+    "Energy Drinks": [
+        ("Red Bull 25cl", "red bull", "red bull", 1.99, 1, "Energy Drinks", "Drinks (Soft/Soda)"),
+        ("Monster Energy 50cl", "monster", "monster", 1.99, 1, "Energy Drinks", "Drinks (Soft/Soda)"),
+        ("Monster Zero Sugar 50cl", "monster zero", "monster", 1.99, 2, "Energy Drinks", "Drinks (Soft/Soda)"),
+        ("Red Bull Sugar Free 25cl", "red bull sugar free", "red bull", 1.99, 2, "Energy Drinks", "Drinks (Soft/Soda)"),
+    ],
+    "Savory Snacks": [
+        ("Borrelnootjes 300g", "borrelnootjes", "duyvis", 2.99, 2, "Nuts Snack", "Snacks & Sweets"),
+        ("Doritos Nacho Cheese 170g", "doritos", "doritos", 2.49, 1, "Chips Tortilla", "Snacks & Sweets"),
+        ("Bifi Original 5st", "bifi", "bifi", 3.49, 3, "Meat Snack", "Snacks & Sweets"),
+        ("Lookworst Sticks 100g", "lookworst", "boni", 2.29, 2, "Meat Snack", "Snacks & Sweets"),
+        ("Pinda's Gezouten 500g", "pinda's", "duyvis", 3.99, 3, "Nuts Peanuts", "Snacks & Sweets"),
+    ],
 }
 
 # ==========================================
@@ -407,6 +442,42 @@ PERSONAS = {
         },
         "avg_receipts_per_month": 10,  # Shop less frequently
         "avg_items_per_receipt": (5, 12),  # Smaller baskets
+    },
+    "belgian_party_fitness": {
+        "description": "27yo Belgian guy - weekend drinks, snacks, protein bars, active lifestyle",
+        "preferred_stores": ["colruyt", "delhaize", "carrefour", "albert heijn"],
+        "category_weights": {
+            # Weekend drinking - ~25% (goes out, also drinks at home)
+            "Beer Pils": 0.12,
+            "Beer Special": 0.08,
+            "Wine": 0.03,
+            "Energy Drinks": 0.02,
+            # Protein & Fitness - ~20% (gym lifestyle)
+            "Protein Bars": 0.10,
+            "Protein Drinks": 0.05,
+            "High Protein Dairy": 0.05,
+            # Snacks - ~20% (party snacks, munchies)
+            "Chips": 0.08,
+            "Savory Snacks": 0.07,
+            "Chocolate": 0.03,
+            "Salami & Sausage": 0.02,
+            # Quick meals - ~15% (bachelor cooking)
+            "Frozen Pizza": 0.06,
+            "Meals Fresh": 0.05,
+            "Chicken": 0.04,
+            # Basics - ~15%
+            "Eggs": 0.04,
+            "Bread": 0.03,
+            "Pasta & Rice": 0.03,
+            "Soft Drinks": 0.03,
+            "Water": 0.02,
+            # Occasional
+            "Fruit": 0.02,
+            "Vegetables": 0.02,
+            "Personal Care": 0.01,
+        },
+        "avg_receipts_per_month": 14,  # Frequent smaller trips
+        "avg_items_per_receipt": (4, 10),  # Smaller baskets
     },
 }
 
@@ -746,7 +817,12 @@ async def rebuild_enriched_profile(user_id: str):
         # Build shopping_habits
         sorted_stores = sorted(store_spend.items(), key=lambda x: x[1], reverse=True)
         preferred_stores = [
-            {"name": store, "total_spend": round(spend, 2), "visit_count": 1}
+            {
+                "name": store,
+                "spend": round(spend, 2),
+                "pct": round(spend / total_spend * 100, 1) if total_spend > 0 else 0,
+                "visits": 1,  # Placeholder - would need to count unique receipt days
+            }
             for store, spend in sorted_stores[:5]
         ]
 
