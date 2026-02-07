@@ -289,6 +289,15 @@ def _build_promo_interest_items(
             item_data[name_lower]["granular_categories"].add(t.granular_category)
         item_data[name_lower]["dates"].append(t.date)
 
+    # Precompute cross-item metrics for relative tags
+    all_receipt_ids = {t.receipt_id for t in transactions if t.receipt_id}
+    total_receipts_in_window = len(all_receipt_ids)
+    item_prices = sorted(
+        t.item_price for t in transactions
+        if not t.is_deposit and not t.is_discount and t.item_price > 0
+    )
+    median_item_price = item_prices[len(item_prices) // 2] if item_prices else 0
+
     # Classify items into interest categories
     staples = []       # bought frequently (weekly+)
     high_spend = []    # top spend items
@@ -296,6 +305,8 @@ def _build_promo_interest_items(
     health_picks = []  # healthy items bought regularly
     treats = []        # indulgence items bought periodically
     bulk_buys = []     # items bought in bulk (multiple units per trip)
+    price_switchers = []  # items bought across multiple brands — open to deals
+    tried_recently = []   # items tried 1-2 times in last 30 days
 
     for name, data in item_data.items():
         trip_count = len(data["receipt_ids"]) or data["count"]
@@ -321,6 +332,13 @@ def _build_promo_interest_items(
             tags.append("indulgence")
         if avg_units_per_trip >= 2:
             tags.append("bulk")
+        weekend_purchases = sum(1 for d in data["dates"] if d.weekday() >= 5)
+        if data["dates"] and weekend_purchases / len(data["dates"]) >= 0.6:
+            tags.append("weekend_buy")
+        if total_receipts_in_window and trip_count / total_receipts_in_window >= 0.7:
+            tags.append("basket_anchor")
+        if median_item_price > 0 and avg_price >= median_item_price * 2:
+            tags.append("splurge")
 
         # Temporal signals
         sorted_dates = sorted(set(data["dates"]))
@@ -334,6 +352,22 @@ def _build_promo_interest_items(
                 for i in range(len(sorted_dates) - 1)
             ]
             avg_gap = round(sum(gaps) / len(gaps), 1)
+
+        # Restock soon: approaching typical repurchase interval
+        if avg_gap is not None and days_since >= avg_gap * 0.8:
+            tags.append("restock_soon")
+
+        # Trend detection: compare recent purchase gaps to overall
+        if len(sorted_dates) >= 4 and avg_gap is not None and avg_gap > 0:
+            recent_gaps = [
+                (sorted_dates[i + 1] - sorted_dates[i]).days
+                for i in range(len(sorted_dates) - 3, len(sorted_dates) - 1)
+            ]
+            avg_recent_gap = sum(recent_gaps) / len(recent_gaps)
+            if avg_recent_gap > avg_gap * 1.5:
+                tags.append("declining")
+            elif avg_recent_gap < avg_gap * 0.6:
+                tags.append("increasing")
 
         # Day-of-week distribution — pick top 1-2 days (>= 25% of trips)
         dow_counts = Counter(d.strftime("%A") for d in data["dates"])
@@ -376,7 +410,7 @@ def _build_promo_interest_items(
         if trip_count >= 2:
             high_spend.append((data["total_spend"], entry, {}))  # rank computed after sorting
 
-        # Brand loyal: dominant brand accounts for >= 80% of purchases
+        # Brand analysis: loyal (>= 80% one brand) vs price switcher (no dominant brand)
         if data["brands"] and data["count"] >= 2 and trip_count >= 2:
             brand_counts: dict[str, int] = defaultdict(int)
             for bt in transactions:
@@ -389,6 +423,8 @@ def _build_promo_interest_items(
                 brand_ratio = top_brand_count / data["count"]
                 if brand_ratio >= 0.8:
                     brand_loyal.append((trip_count, entry, {"brand": top_brand}))
+                elif len(brand_counts) >= 2:
+                    price_switchers.append((trip_count, entry, {"brand_count": len(brand_counts)}))
 
         if avg_health is not None and avg_health >= 4 and trip_count >= 3:
             health_picks.append((avg_health, entry, {"score": avg_health}))
@@ -399,13 +435,25 @@ def _build_promo_interest_items(
         if avg_units_per_trip >= 2 and trip_count >= 2:
             bulk_buys.append((avg_units_per_trip, entry, {"units": avg_units_per_trip}))
 
+        # Tried recently: 1-2 purchases in the last 30 days, not frequent enough for staple
+        recent_cutoff = date.today() - timedelta(days=30)
+        recent_purchases = [d for d in sorted_dates if d >= recent_cutoff]
+        if len(recent_purchases) in (1, 2) and freq_per_week < 0.5:
+            tried_recently.append((-days_since, entry, {}))
+
     # Sort each bucket and deduplicate across categories
-    staples.sort(key=lambda x: x[0], reverse=True)
-    high_spend.sort(key=lambda x: x[0], reverse=True)
-    brand_loyal.sort(key=lambda x: x[0], reverse=True)
-    health_picks.sort(key=lambda x: x[0], reverse=True)
-    treats.sort(key=lambda x: x[0], reverse=True)
-    bulk_buys.sort(key=lambda x: x[0], reverse=True)
+    def _recency_key(x):
+        """Primary metric first, then prefer more recently purchased items."""
+        return (x[0], -x[1]["days_since_last_purchase"])
+
+    staples.sort(key=_recency_key, reverse=True)
+    high_spend.sort(key=_recency_key, reverse=True)
+    brand_loyal.sort(key=_recency_key, reverse=True)
+    health_picks.sort(key=_recency_key, reverse=True)
+    treats.sort(key=_recency_key, reverse=True)
+    bulk_buys.sort(key=_recency_key, reverse=True)
+    price_switchers.sort(key=_recency_key, reverse=True)
+    tried_recently.sort(key=lambda x: x[0], reverse=True)  # most recent first
 
     # Add rank metadata to high_spend items after sorting
     for i, (score, entry, meta) in enumerate(high_spend):
@@ -440,9 +488,11 @@ def _build_promo_interest_items(
         (staples, "staple", 8, "Bought frequently ({freq:.1f}x/week)"),
         (high_spend, "top_purchase", 6, "Top {rank} by total spend in your history"),
         (brand_loyal, "brand_loyal", 4, "Consistently buy same brand ({brand})"),
+        (price_switchers, "price_switcher", 4, "Bought across {brand_count} brands — open to deals"),
         (health_picks, "health_pick", 4, "Healthy choice (health score {score:.1f}/5)"),
         (treats, "occasional_treat", 3, "Indulgence item you enjoy periodically"),
         (bulk_buys, "bulk_buy", 3, "Often bought in bulk ({units:.1f} units/trip)"),
+        (tried_recently, "tried_recently", 2, "Recently tried — a promo could make it a habit"),
     ]
 
     # Pass 1: guarantee at least 1 item per non-empty bucket

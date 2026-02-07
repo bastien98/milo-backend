@@ -6,7 +6,7 @@ Generates a realistic Belgian shopper profile and ingests it directly into the d
 Supports different shopper personas for testing various promo recommendation scenarios.
 
 Usage:
-    SSL_CERT_FILE=$(python -c "import certifi; print(certifi.where())") python ai/testbench/create_test_user.py
+    SSL_CERT_FILE=$(python -c "import certifi; print(certifi.where())") python testbench/create_test_user_db.py
 """
 
 import asyncio
@@ -21,7 +21,7 @@ import os
 os.environ["SSL_CERT_FILE"] = certifi.where()
 os.environ["REQUESTS_CA_BUNDLE"] = certifi.where()
 
-BACKEND_ROOT = Path(__file__).resolve().parent.parent.parent
+BACKEND_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(BACKEND_ROOT))
 
 from dotenv import load_dotenv
@@ -850,7 +850,7 @@ async def main():
         await rebuild_enriched_profile(result["user_id"])
     else:
         print("\nTo rebuild enriched profile, run:")
-        print(f"  python ai/testbench/create_test_user.py --rebuild-profile")
+        print(f"  python testbench/create_test_user_db.py --rebuild-profile")
         print(f"  Or upload a receipt through the app with firebase_uid: {result['firebase_uid']}")
 
 

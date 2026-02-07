@@ -1,3 +1,25 @@
+# Testbench
+
+Unified test/development utilities for the Scandelicious backend.
+
+## Scripts
+
+| Script | Purpose |
+|--------|---------|
+| `promo_recommender.py` | Full promo recommendation pipeline (profile → search → LLM) |
+| `promo_quality_report.py` | Quality metrics for promo matching (outputs `quality_report.json`) |
+| `create_test_user_db.py` | Create synthetic Belgian shopper directly in prod DB |
+| `generate_test_user_csv.py` | Generate synthetic receipt/transaction CSVs |
+| `ingest_pdf_receipts.py` | Upload PDF receipts via Firebase ID token |
+| `ingest_with_uid.py` | Upload PDF receipts via Firebase Admin SDK |
+
+## Data
+
+- `data/sample_csvs/` — Example CSV output from `generate_test_user_csv.py`
+- `data/sample_pdfs/` — Test PDF receipts for ingestion scripts
+
+---
+
 # Promo Recommender Pipeline
 
 ## Overview
@@ -91,7 +113,7 @@ All matched promos + the user's shopping habits are sent to an LLM (Gemini 3 Pro
 ## Running the testbench
 
 ```bash
-SSL_CERT_FILE=$(python -c "import certifi; print(certifi.where())") python ai/testbench/promo_recommender.py
+SSL_CERT_FILE=$(python -c "import certifi; print(certifi.where())") python testbench/promo_recommender.py
 ```
 
 This connects to the production database to fetch the enriched profile and searches the live Pinecone index.

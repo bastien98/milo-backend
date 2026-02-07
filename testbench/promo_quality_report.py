@@ -10,7 +10,7 @@ Generates a quality report for investors showing:
 5. Personalization quality - brand/preference alignment
 
 Usage:
-    SSL_CERT_FILE=$(python -c "import certifi; print(certifi.where())") python ai/testbench/promo_quality_report.py
+    SSL_CERT_FILE=$(python -c "import certifi; print(certifi.where())") python testbench/promo_quality_report.py
 """
 
 import asyncio
@@ -24,7 +24,7 @@ import certifi
 os.environ["SSL_CERT_FILE"] = certifi.where()
 os.environ["REQUESTS_CA_BUNDLE"] = certifi.where()
 
-BACKEND_ROOT = Path(__file__).resolve().parent.parent.parent
+BACKEND_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(BACKEND_ROOT))
 
 from dotenv import load_dotenv
@@ -280,7 +280,7 @@ async def main():
     print_aggregate_report(reports)
 
     # Export JSON for further analysis
-    output_path = BACKEND_ROOT / "ai/testbench/quality_report.json"
+    output_path = BACKEND_ROOT / "testbench/quality_report.json"
     with open(output_path, "w") as f:
         json.dump(reports, f, indent=2, default=str)
     print(f"\n📄 Full report exported to: {output_path}")

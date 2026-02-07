@@ -4,6 +4,10 @@ import uuid
 import random
 import os
 from datetime import datetime, timedelta
+from pathlib import Path
+
+# Output goes to testbench/data/sample_csvs/<USER_ID>/
+SCRIPT_DIR = Path(__file__).resolve().parent
 
 # ==========================================
 # CONFIGURATION
@@ -36,7 +40,7 @@ STORES = [
 ]
 
 # 5. Output Configuration
-OUTPUT_FOLDER = USER_ID  # Folder name will be the USER_ID
+OUTPUT_FOLDER = str(SCRIPT_DIR / "data" / "sample_csvs" / USER_ID)
 
 # ==========================================
 # PRODUCT CATALOG
