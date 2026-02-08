@@ -210,6 +210,13 @@ GRANULAR_CATEGORIES: dict[str, Category] = {
     "Marshmallows": Category.SNACKS_SWEETS,
 
     # ===================
+    # SPORTS NUTRITION
+    # ===================
+    "Protein Bars": Category.SNACKS_SWEETS,
+    "Protein Shakes": Category.DAIRY_EGGS,
+    "Protein Desserts": Category.DAIRY_EGGS,
+
+    # ===================
     # FROZEN
     # ===================
     "Frozen Fries": Category.FROZEN,
@@ -311,6 +318,11 @@ GRANULAR_CATEGORIES: dict[str, Category] = {
     # TOBACCO
     # ===================
     "Tobacco": Category.TOBACCO,
+
+    # ===================
+    # DISCOUNTS
+    # ===================
+    "Discounts": Category.OTHER,
 
     # ===================
     # OTHER

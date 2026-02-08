@@ -1,8 +1,8 @@
 import uuid
-from datetime import datetime, date
+from datetime import datetime, date, time
 from typing import TYPE_CHECKING, Optional, List
 
-from sqlalchemy import String, DateTime, Integer, Float, ForeignKey, Text, Enum, Date
+from sqlalchemy import String, DateTime, Integer, Float, ForeignKey, Text, Enum, Date, Time, func
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db.base import Base
@@ -45,9 +45,15 @@ class Receipt(Base):
     receipt_date: Mapped[Optional[date]] = mapped_column(Date, nullable=True)
     total_amount: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
 
+    # New insights fields
+    receipt_time: Mapped[Optional[time]] = mapped_column(Time, nullable=True)
+    payment_method: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)
+    total_savings: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    store_branch: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+
     # Timestamps
     created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), server_default="now()"
+        DateTime(timezone=True), server_default=func.now()
     )
     processed_at: Mapped[Optional[datetime]] = mapped_column(
         DateTime(timezone=True), nullable=True

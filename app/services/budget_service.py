@@ -6,6 +6,7 @@ from collections import defaultdict
 from sqlalchemy import select, func, and_
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.cache import cached
 from app.models.transaction import Transaction
 from app.models.budget import Budget
 from app.schemas.budget import (
@@ -31,6 +32,7 @@ class BudgetService:
         self.db = db
         self.split_calc = SplitAwareCalculation(db)
 
+    @cached(include_month=True)
     async def get_current_month_spend(self, user_id: str) -> float:
         """Get total spending for the current month (split-adjusted).
 
@@ -58,6 +60,7 @@ class BudgetService:
         # Calculate split-adjusted total
         return await self.split_calc.calculate_split_adjusted_spend(user_id, transactions)
 
+    @cached(include_month=True)
     async def get_current_month_spend_by_category(
         self, user_id: str
     ) -> dict[str, float]:
@@ -87,6 +90,7 @@ class BudgetService:
         # Calculate split-adjusted totals by category
         return await self.split_calc.calculate_split_adjusted_spend_by_category(user_id, transactions)
 
+    @cached()
     async def get_historical_category_percentages(
         self, user_id: str, months: int = 3
     ) -> dict[str, float]:
@@ -273,6 +277,7 @@ class BudgetService:
             category_progress=category_progress,
         )
 
+    @cached()
     async def get_budget_suggestion(
         self, user_id: str, months: int = 3
     ) -> Optional[BudgetSuggestionResponse]:

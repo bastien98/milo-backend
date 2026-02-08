@@ -1,4 +1,4 @@
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Optional, Any
 
 from sqlalchemy import select, delete, and_
@@ -22,7 +22,7 @@ class BudgetAIInsightRepository:
 
     async def get_valid_suggestion(self, user_id: str) -> Optional[BudgetAIInsight]:
         """Get cached suggestion if it's less than 24 hours old."""
-        cutoff_time = datetime.utcnow() - timedelta(hours=24)
+        cutoff_time = datetime.now(timezone.utc) - timedelta(hours=24)
 
         result = await self.db.execute(
             select(BudgetAIInsight)
@@ -55,7 +55,7 @@ class BudgetAIInsightRepository:
 
     async def get_todays_checkin(self, user_id: str) -> Optional[BudgetAIInsight]:
         """Get today's checkin if it exists (for rate limiting)."""
-        today_start = datetime.utcnow().replace(hour=0, minute=0, second=0, microsecond=0)
+        today_start = datetime.now(timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0)
 
         result = await self.db.execute(
             select(BudgetAIInsight)

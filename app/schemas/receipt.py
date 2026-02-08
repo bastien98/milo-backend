@@ -1,4 +1,4 @@
-from datetime import date, datetime
+from datetime import date, datetime, time
 from typing import Optional, List
 
 from pydantic import BaseModel
@@ -19,8 +19,12 @@ class ExtractedItem(BaseModel):
     normalized_name: Optional[str] = None  # Cleaned name for semantic search
     normalized_brand: Optional[str] = None  # Brand name only for semantic search
     is_premium: bool = False  # True if premium brand, False if store/house brand
+    is_discount: bool = False  # True for discount/bonus lines (negative amounts)
     is_deposit: bool = False  # True for Leeggoed/Vidange items
     granular_category: Optional[str] = None  # Detailed category (~200 options)
+    unit_of_measure: Optional[str] = None  # kg/g/l/ml/piece
+    weight_or_volume: Optional[float] = None
+    price_per_unit_measure: Optional[float] = None
 
 
 class ReceiptUploadResponse(BaseModel):
@@ -28,7 +32,11 @@ class ReceiptUploadResponse(BaseModel):
     status: ReceiptStatus
     store_name: Optional[str] = None
     receipt_date: Optional[date] = None
+    receipt_time: Optional[time] = None
     total_amount: Optional[float] = None
+    payment_method: Optional[str] = None
+    total_savings: Optional[float] = None
+    store_branch: Optional[str] = None
     items_count: int = 0
     transactions: List[ExtractedItem] = []
     warnings: List[str] = []
@@ -44,7 +52,11 @@ class ReceiptResponse(BaseModel):
     status: ReceiptStatus
     store_name: Optional[str] = None
     receipt_date: Optional[date] = None
+    receipt_time: Optional[time] = None
     total_amount: Optional[float] = None
+    payment_method: Optional[str] = None
+    total_savings: Optional[float] = None
+    store_branch: Optional[str] = None
     error_message: Optional[str] = None
     created_at: datetime
     processed_at: Optional[datetime] = None
@@ -91,8 +103,12 @@ class GroupedReceiptTransaction(BaseModel):
     normalized_name: Optional[str] = None  # Cleaned name for semantic search
     normalized_brand: Optional[str] = None  # Brand name only for semantic search
     is_premium: bool = False  # True if premium brand, False if store/house brand
+    is_discount: bool = False  # True for discount/bonus lines (negative amounts)
     is_deposit: bool = False  # True for Leeggoed/Vidange items
     granular_category: Optional[str] = None  # Detailed category (~200 options)
+    unit_of_measure: Optional[str] = None
+    weight_or_volume: Optional[float] = None
+    price_per_unit_measure: Optional[float] = None
 
 
 class GroupedReceipt(BaseModel):
@@ -105,7 +121,11 @@ class GroupedReceipt(BaseModel):
     receipt_id: str  # UUID from the receipts table
     store_name: str
     receipt_date: date
+    receipt_time: Optional[time] = None
     total_amount: float
+    payment_method: Optional[str] = None
+    total_savings: Optional[float] = None
+    store_branch: Optional[str] = None
     items_count: int
     average_health_score: Optional[float]
     source: ReceiptSource  # receipt_upload or bank_import

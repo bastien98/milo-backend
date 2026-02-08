@@ -1,0 +1,92 @@
+[
+  {
+    "user_id": "c9b6bc31-d05a-4ab4-97fc-f40ff5fe6f67",
+    "profile_summary": {
+      "receipts_analyzed": 8,
+      "data_period": "2025-10-14 to 2026-02-04",
+      "total_spend": 225.72,
+      "preferred_stores": [
+        "albert heijn",
+        "aldi",
+        "colruyt"
+      ]
+    },
+    "interest_items": {
+      "total": 5,
+      "specific_items": 2,
+      "category_fallbacks": 3
+    },
+    "match_quality": {
+      "items_with_matches": 4,
+      "match_rate": 0.8,
+      "total_promos_found": 10,
+      "avg_promos_per_item": 2.0
+    },
+    "relevance_scores": {
+      "avg_score": 0.7369399999999999,
+      "max_score": 0.885,
+      "min_score": 0.5946,
+      "scores_above_0.7": 6
+    },
+    "savings_potential": {
+      "total_savings_eur": 9.16,
+      "avg_savings_per_promo": 0.92
+    },
+    "personalization": {
+      "brand_alignment_rate": 0.5,
+      "store_alignment_rate": 0.5
+    },
+    "promo_breakdown": {
+      "salami ministicks": {
+        "count": 3,
+        "scores": [
+          0.885,
+          0.7614,
+          0.5949
+        ],
+        "retailers": [
+          "Carrefour Hypermarkt",
+          "colruyt"
+        ]
+      },
+      "chips": {
+        "count": 4,
+        "scores": [
+          0.7347,
+          0.6774,
+          0.665,
+          0.5946
+        ],
+        "retailers": [
+          "Carrefour Hypermarkt",
+          "colruyt"
+        ]
+      },
+      "beer pils": {
+        "count": 1,
+        "scores": [
+          0.7626
+        ],
+        "retailers": [
+          "colruyt"
+        ]
+      },
+      "frozen pizza": {
+        "count": 2,
+        "scores": [
+          0.8591,
+          0.8347
+        ],
+        "retailers": [
+          "Carrefour Hypermarkt",
+          "colruyt"
+        ]
+      },
+      "meals fresh": {
+        "count": 0,
+        "scores": [],
+        "retailers": []
+      }
+    }
+  }
+]
