@@ -485,16 +485,19 @@ class BudgetService:
                 )
         else:
             # No data - provide default Belgian household breakdown
+            # Names must match sub-categories in categories.csv exactly
             default_categories = [
-                ("Groceries", 35.0),
-                ("Beverages", 12.0),
-                ("Household", 10.0),
-                ("Snacks & Treats", 10.0),
-                ("Personal Care", 8.0),
-                ("Meat & Fish", 8.0),
-                ("Dairy", 7.0),
-                ("Fresh Produce", 5.0),
-                ("Other", 5.0),
+                ("Pantry Staples (Pasta/Rice/Oil)", 14.0),
+                ("Meat Poultry & Seafood", 13.0),
+                ("Beverages (Non-Alcoholic)", 12.0),
+                ("Fresh Produce (Fruit & Veg)", 11.0),
+                ("Dairy Cheese & Eggs", 10.0),
+                ("Snacks & Candy", 10.0),
+                ("Household Consumables (Paper/Cleaning)", 9.0),
+                ("Bakery & Bread", 8.0),
+                ("Personal Hygiene (Soap/Shampoo)", 5.0),
+                ("Frozen Foods", 4.0),
+                ("Other", 4.0),
             ]
             for category_name, pct in default_categories:
                 amount = (pct / 100) * recommended_amount

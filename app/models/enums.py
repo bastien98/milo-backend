@@ -5,7 +5,7 @@ from enum import Enum
 # New transactions use string-based categories from CategoryRegistry.
 LEGACY_CATEGORY_MIGRATION_MAP = {
     "MEAT_FISH": "Meat Poultry & Seafood",
-    "ALCOHOL": "Beer & Wine (Retail)",
+    "ALCOHOL": "Alcohol",
     "DRINKS_SOFT_SODA": "Beverages (Non-Alcoholic)",
     "DRINKS_WATER": "Beverages (Non-Alcoholic)",
     "HOUSEHOLD": "Household Consumables (Paper/Cleaning)",

@@ -81,7 +81,7 @@ For each UNIQUE item (after deduplication), provide:
    SNACKS & BEVERAGES:
    - "Snacks & Candy" (chips, chocolate, candy, cookies, biscuits, nuts as snacks)
    - "Beverages (Non-Alcoholic)" (sodas, juices, energy drinks, water, coffee, tea)
-   - "Beer & Wine (Retail)" (beer, wine, spirits, cider, including deposit/leeggoed)
+   - "Alcohol" (beer, wine, spirits, vodka, whisky, cider, including deposit/leeggoed)
 
    HOUSEHOLD & CARE:
    - "Household Consumables (Paper/Cleaning)" (cleaning products, paper towels, bags, detergent, sponges)
@@ -108,7 +108,7 @@ For each UNIQUE item (after deduplication), provide:
 
 IMPORTANT:
 - Belgian receipts may have Dutch/French product names - keep in the original language but clean up the text
-- Deposit items (leeggoed/vidange) should be categorized with the related product (usually "Beer & Wine (Retail)" or "Beverages (Non-Alcoholic)")
+- Deposit items (leeggoed/vidange) should be categorized with the related product (usually "Alcohol" or "Beverages (Non-Alcoholic)")
 - Use the item type hint if provided (e.g., "food", "alcohol", "product")
 - The number of items in output should be LESS than or EQUAL to input if duplicates were found
 - You MUST use the EXACT sub-category string from the list above (e.g., "Fresh Produce (Fruit & Veg)" not "Fresh Produce")
