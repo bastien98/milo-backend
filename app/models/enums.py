@@ -4,13 +4,13 @@ from enum import Enum
 # Legacy Category enum mapping for database migration.
 # New transactions use string-based categories from CategoryRegistry.
 LEGACY_CATEGORY_MIGRATION_MAP = {
-    "MEAT_FISH": "Meat & Seafood",
+    "MEAT_FISH": "Meat",
     "ALCOHOL": "Alcohol",
     "DRINKS_SOFT_SODA": "Drinks",
     "DRINKS_WATER": "Drinks",
     "HOUSEHOLD": "Household",
     "SNACKS_SWEETS": "Snacks",
-    "FRESH_PRODUCE": "Fresh Produce",
+    "FRESH_PRODUCE": "Vegetables",
     "DAIRY_EGGS": "Dairy & Eggs",
     "READY_MEALS": "Ready Meals",
     "BAKERY": "Bakery",

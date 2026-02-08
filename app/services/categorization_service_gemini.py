@@ -68,8 +68,10 @@ For each UNIQUE item (after deduplication), provide:
 2. category: Classify into EXACTLY one of these grocery sub-categories (use the exact string):
 
    FRESH FOOD:
-   - "Fresh Produce" (fruits, vegetables, herbs, salads)
-   - "Meat & Seafood" (meat, poultry, fish, seafood, charcuterie)
+   - "Fruits" (fresh fruits, berries, citrus, bananas, apples, grapes)
+   - "Vegetables" (fresh vegetables, herbs, salads, mushrooms, onions, potatoes)
+   - "Meat" (beef, pork, chicken, poultry, lamb, charcuterie, sausages)
+   - "Seafood" (fish, shrimp, mussels, salmon, tuna, crab, shellfish)
    - "Dairy & Eggs" (milk, cheese, yogurt, eggs, butter, cream)
    - "Bakery" (bread, pastries, croissants, baguettes)
 
@@ -79,7 +81,8 @@ For each UNIQUE item (after deduplication), provide:
    - "Ready Meals" (prepared foods, salads, soups, pizza, lasagna, deli items)
 
    SNACKS & BEVERAGES:
-   - "Snacks" (chips, chocolate, candy, cookies, biscuits, nuts as snacks)
+   - "Snacks" (chips, cookies, biscuits, nuts as snacks, crackers, popcorn)
+   - "Candy" (chocolate, candy, sweets, gummy bears, lollipops, confectionery)
    - "Drinks" (sodas, juices, energy drinks, water, coffee, tea)
    - "Alcohol" (beer, wine, spirits, vodka, whisky, cider, including deposit/leeggoed)
 
@@ -111,7 +114,7 @@ IMPORTANT:
 - Deposit items (leeggoed/vidange) should be categorized with the related product (usually "Alcohol" or "Drinks")
 - Use the item type hint if provided (e.g., "food", "alcohol", "product")
 - The number of items in output should be LESS than or EQUAL to input if duplicates were found
-- You MUST use the EXACT sub-category string from the list above (e.g., "Fresh Produce" not "Fresh Produce (Fruit & Veg)")
+- You MUST use the EXACT sub-category string from the list above (e.g., "Fruits" not "Fresh Produce")
 
 Return ONLY valid JSON with this exact format:
 {
@@ -120,7 +123,7 @@ Return ONLY valid JSON with this exact format:
     {
       "original_indices": [0],
       "item_name": "Clean Product Name",
-      "category": "Fresh Produce",
+      "category": "Fruits",
       "health_score": 5
     },
     {

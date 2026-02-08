@@ -1,12 +1,15 @@
 Group,Category,Sub-Category
-Fresh Food,Fruits & Vegetables,Fresh Produce
-Fresh Food,Meat & Seafood,Meat & Seafood
+Fresh Food,Fruits,Fruits
+Fresh Food,Vegetables,Vegetables
+Fresh Food,Meat,Meat
+Fresh Food,Seafood,Seafood
 Fresh Food,Dairy & Eggs,Dairy & Eggs
 Fresh Food,Bakery,Bakery
 Pantry & Frozen,Pantry,Pantry
 Pantry & Frozen,Frozen,Frozen
 Pantry & Frozen,Ready Meals,Ready Meals
 Snacks & Beverages,Snacks,Snacks
+Snacks & Beverages,Candy,Candy
 Snacks & Beverages,Non-Alcoholic Drinks,Drinks
 Snacks & Beverages,Alcohol,Alcohol
 Household & Care,Household,Household
