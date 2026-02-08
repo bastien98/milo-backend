@@ -21,6 +21,9 @@ class Settings(BaseSettings):
     # Gemini
     GEMINI_API_KEY: str = ""
 
+    # Pinecone
+    PINECONE_API_KEY: str = ""
+
     # Veryfi
     VERYFI_CLIENT_ID: str = ""
     VERYFI_CLIENT_SECRET: str = ""

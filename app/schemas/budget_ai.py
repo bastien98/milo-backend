@@ -200,8 +200,8 @@ class CategoryGrade(BaseModel):
     """Grade for a spending category."""
 
     category: str = Field(..., description="Category name")
-    grade: Literal["A+", "A", "B", "C", "D", "F"] = Field(
-        ..., description="Letter grade"
+    grade: Literal["A+", "A", "B", "C", "D", "F", "N/A"] = Field(
+        ..., description="Letter grade (N/A if insufficient data)"
     )
     spent: float = Field(..., description="Amount spent")
     budget: Optional[float] = Field(None, description="Budget amount (if set)")
