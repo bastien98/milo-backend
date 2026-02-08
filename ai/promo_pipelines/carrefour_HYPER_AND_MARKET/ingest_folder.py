@@ -83,6 +83,8 @@ class PromoItem:
     validity_end: Optional[str]
     source_retailer: str
     source_type: str
+    page_number: Optional[int] = None
+    promo_folder_url: Optional[str] = None
 
 
 # ---------------------------------------------------------------------------
@@ -172,6 +174,10 @@ Carrefour Belgium has multiple house brand tiers — always set brand to the hou
    - Examples: "500g", "1L", "6x33cl", "per kg", "per stuk", "24x25cl", "40 lavages"
    - null if not specified
 
+9. **page_number**: The page number within the current batch where this item appears.
+   - Pages are numbered starting from 1 within the batch provided
+   - If an item spans multiple pages, use the first page where it appears
+
 ### IMPORTANT RULES
 - Extract EVERY product, including small secondary items and non-food (household, personal care, pet)
 - Each unique product appears ONCE — deduplicate across Dutch/French sections
@@ -194,7 +200,8 @@ Return ONLY valid JSON:
       "original_price": 1.29,
       "promo_price": 0.99,
       "promo_mechanism": "Bonus Card",
-      "unit_info": "1L"
+      "unit_info": "1L",
+      "page_number": 1
     }}
   ]
 }}
@@ -204,8 +211,11 @@ Return ONLY valid JSON:
 # ---------------------------------------------------------------------------
 # PDF splitting
 # ---------------------------------------------------------------------------
-def split_pdf_into_batches(pdf_path: Path, pages_per_batch: int) -> list[bytes]:
-    """Split a PDF into smaller PDFs of pages_per_batch pages each."""
+def split_pdf_into_batches(pdf_path: Path, pages_per_batch: int) -> list[tuple[bytes, int]]:
+    """Split a PDF into smaller PDFs of pages_per_batch pages each.
+
+    Returns a list of (batch_bytes, start_page) tuples where start_page is 1-indexed.
+    """
     doc = fitz.open(pdf_path)
     total_pages = len(doc)
     logger.info(f"PDF has {total_pages} pages, splitting into batches of {pages_per_batch}")
@@ -215,7 +225,8 @@ def split_pdf_into_batches(pdf_path: Path, pages_per_batch: int) -> list[bytes]:
         end = min(start + pages_per_batch, total_pages)
         batch_doc = fitz.open()
         batch_doc.insert_pdf(doc, from_page=start, to_page=end - 1)
-        batches.append(batch_doc.tobytes())
+        # start_page is 1-indexed for user-friendly page numbers
+        batches.append((batch_doc.tobytes(), start + 1))
         batch_doc.close()
         logger.info(f"  Batch {len(batches)}: pages {start + 1}-{end}")
 
@@ -231,8 +242,16 @@ def _build_system_prompt() -> str:
     return SYSTEM_PROMPT.format(categories=CATEGORIES_PROMPT_LIST)
 
 
-def extract_batch(client: genai.Client, batch_pdf: bytes, batch_num: int, system_prompt: str) -> dict:
-    """Extract promo items from a single PDF batch via Gemini with exponential backoff."""
+def extract_batch(client: genai.Client, batch_pdf: bytes, batch_num: int, start_page: int, system_prompt: str) -> dict:
+    """Extract promo items from a single PDF batch via Gemini with exponential backoff.
+
+    Args:
+        client: Gemini client
+        batch_pdf: PDF bytes for this batch
+        batch_num: Batch number (1-indexed)
+        start_page: The 1-indexed page number in the original PDF where this batch starts
+        system_prompt: The system prompt for Gemini
+    """
     for attempt in range(1, MAX_RETRIES + 1):
         delay = RETRY_BASE_DELAY * (2 ** (attempt - 1))
         label = f"[Batch {batch_num}]"
@@ -274,7 +293,22 @@ def extract_batch(client: genai.Client, batch_pdf: bytes, batch_num: int, system
             continue
 
         json_str = _extract_json(response_text)
-        data = json.loads(json_str)
+        try:
+            data = json.loads(json_str)
+        except json.JSONDecodeError as e:
+            logger.warning(f"{label} JSON parse error after {elapsed:.1f}s: {e}")
+            if attempt == MAX_RETRIES:
+                raise RuntimeError(f"Batch {batch_num} returned invalid JSON after {MAX_RETRIES} retries")
+            continue
+
+        # Adjust page numbers: Gemini returns 1-indexed page within batch,
+        # we need to convert to actual PDF page number
+        for item in data.get("items", []):
+            batch_page = item.get("page_number")
+            if batch_page is not None:
+                # Convert batch-relative page (1-indexed) to actual PDF page
+                item["page_number"] = start_page + batch_page - 1
+
         item_count = len(data.get("items", []))
         logger.info(f"{label} Done in {elapsed:.1f}s — {item_count} items extracted")
         return data
@@ -295,8 +329,8 @@ def extract_promos_from_pdf(pdf_path: Path) -> dict:
     validity_start = None
     validity_end = None
 
-    for i, batch_pdf in enumerate(batches):
-        data = extract_batch(client, batch_pdf, i + 1, system_prompt)
+    for i, (batch_pdf, start_page) in enumerate(batches):
+        data = extract_batch(client, batch_pdf, i + 1, start_page, system_prompt)
         if data.get("validity_start") and not validity_start:
             validity_start = data["validity_start"]
             validity_end = data.get("validity_end")
@@ -338,11 +372,24 @@ def _extract_json(text: str) -> str:
 # ---------------------------------------------------------------------------
 # Parsing & validation
 # ---------------------------------------------------------------------------
+def load_metadata() -> dict:
+    """Load metadata.json from the folder directory."""
+    metadata_path = FOLDER_DIR / "metadata.json"
+    if metadata_path.exists():
+        with open(metadata_path) as f:
+            return json.load(f)
+    return {}
+
+
 def parse_promo_items(data: dict) -> list[PromoItem]:
     """Parse Gemini response into validated PromoItem list."""
     validity_start = data.get("validity_start")
     validity_end = data.get("validity_end")
     items = []
+
+    # Load promo_folder_url from metadata
+    metadata = load_metadata()
+    promo_folder_url = metadata.get("promo_folder_url")
 
     for raw in data.get("items", []):
         granular = raw.get("granular_category", "Other")
@@ -389,6 +436,8 @@ def parse_promo_items(data: dict) -> list[PromoItem]:
                 validity_end=validity_end,
                 source_retailer=RETAILER_NAME,
                 source_type="folder",
+                page_number=raw.get("page_number"),
+                promo_folder_url=promo_folder_url,
             )
         )
 
@@ -502,6 +551,8 @@ def upsert_to_pinecone(items: list[PromoItem], batch_size: int = 50) -> int:
             "validity_end": item.validity_end or "",
             "source_retailer": item.source_retailer,
             "source_type": item.source_type,
+            "page_number": item.page_number if item.page_number is not None else 0,
+            "promo_folder_url": item.promo_folder_url or "",
         }
         records.append(record)
 
@@ -602,6 +653,8 @@ def main():
                         "unit_info": i.unit_info,
                         "validity_start": i.validity_start,
                         "validity_end": i.validity_end,
+                        "page_number": i.page_number,
+                        "promo_folder_url": i.promo_folder_url,
                     }
                     for i in items
                 ],
