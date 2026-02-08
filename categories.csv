@@ -1,17 +1,17 @@
 Group,Category,Sub-Category
-Fresh Food,Fruits & Vegetables,Fresh Produce (Fruit & Veg)
-Fresh Food,Meat & Seafood,Meat Poultry & Seafood
-Fresh Food,Dairy & Eggs,Dairy Cheese & Eggs
-Fresh Food,Bakery,Bakery & Bread
-Pantry & Frozen,Pantry,Pantry Staples (Pasta/Rice/Oil)
-Pantry & Frozen,Frozen,Frozen Foods
-Pantry & Frozen,Ready Meals,Ready Meals & Prepared Food
-Snacks & Beverages,Snacks,Snacks & Candy
-Snacks & Beverages,Non-Alcoholic Drinks,Beverages (Non-Alcoholic)
+Fresh Food,Fruits & Vegetables,Fresh Produce
+Fresh Food,Meat & Seafood,Meat & Seafood
+Fresh Food,Dairy & Eggs,Dairy & Eggs
+Fresh Food,Bakery,Bakery
+Pantry & Frozen,Pantry,Pantry
+Pantry & Frozen,Frozen,Frozen
+Pantry & Frozen,Ready Meals,Ready Meals
+Snacks & Beverages,Snacks,Snacks
+Snacks & Beverages,Non-Alcoholic Drinks,Drinks
 Snacks & Beverages,Alcohol,Alcohol
-Household & Care,Household,Household Consumables (Paper/Cleaning)
-Household & Care,Personal Care,Personal Hygiene (Soap/Shampoo)
-Other,Baby & Kids,Baby Food & Formula
-Other,Pet Supplies,Pet Food & Supplies
-Other,Tobacco,Tobacco Products
+Household & Care,Household,Household
+Household & Care,Personal Care,Personal Care
+Other,Baby & Kids,Baby & Kids
+Other,Pet Supplies,Pet Supplies
+Other,Tobacco,Tobacco
 Other,Uncategorized,Other

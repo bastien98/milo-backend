@@ -68,29 +68,29 @@ For each UNIQUE item (after deduplication), provide:
 2. category: Classify into EXACTLY one of these grocery sub-categories (use the exact string):
 
    FRESH FOOD:
-   - "Fresh Produce (Fruit & Veg)" (fruits, vegetables, herbs, salads)
-   - "Meat Poultry & Seafood" (meat, poultry, fish, seafood, charcuterie)
-   - "Dairy Cheese & Eggs" (milk, cheese, yogurt, eggs, butter, cream)
-   - "Bakery & Bread" (bread, pastries, croissants, baguettes)
+   - "Fresh Produce" (fruits, vegetables, herbs, salads)
+   - "Meat & Seafood" (meat, poultry, fish, seafood, charcuterie)
+   - "Dairy & Eggs" (milk, cheese, yogurt, eggs, butter, cream)
+   - "Bakery" (bread, pastries, croissants, baguettes)
 
    PANTRY & FROZEN:
-   - "Pantry Staples (Pasta/Rice/Oil)" (pasta, rice, oil, canned goods, spices, sugar, flour, sauces, condiments)
-   - "Frozen Foods" (frozen vegetables, frozen meals, ice cream, frozen pizza)
-   - "Ready Meals & Prepared Food" (prepared foods, salads, soups, pizza, lasagna, deli items)
+   - "Pantry" (pasta, rice, oil, canned goods, spices, sugar, flour, sauces, condiments)
+   - "Frozen" (frozen vegetables, frozen meals, ice cream, frozen pizza)
+   - "Ready Meals" (prepared foods, salads, soups, pizza, lasagna, deli items)
 
    SNACKS & BEVERAGES:
-   - "Snacks & Candy" (chips, chocolate, candy, cookies, biscuits, nuts as snacks)
-   - "Beverages (Non-Alcoholic)" (sodas, juices, energy drinks, water, coffee, tea)
+   - "Snacks" (chips, chocolate, candy, cookies, biscuits, nuts as snacks)
+   - "Drinks" (sodas, juices, energy drinks, water, coffee, tea)
    - "Alcohol" (beer, wine, spirits, vodka, whisky, cider, including deposit/leeggoed)
 
    HOUSEHOLD & CARE:
-   - "Household Consumables (Paper/Cleaning)" (cleaning products, paper towels, bags, detergent, sponges)
-   - "Personal Hygiene (Soap/Shampoo)" (shampoo, soap, dental care, deodorant, razors)
+   - "Household" (cleaning products, paper towels, bags, detergent, sponges)
+   - "Personal Care" (shampoo, soap, dental care, deodorant, razors)
 
    OTHER:
-   - "Baby Food & Formula" (baby food, formula, baby snacks)
-   - "Pet Food & Supplies" (pet food, pet treats, pet accessories)
-   - "Tobacco Products" (cigarettes, rolling tobacco, lighters, rolling papers, filters, e-cigarettes, vapes)
+   - "Baby & Kids" (baby food, formula, baby snacks)
+   - "Pet Supplies" (pet food, pet treats, pet accessories)
+   - "Tobacco" (cigarettes, rolling tobacco, lighters, rolling papers, filters, e-cigarettes, vapes)
    - "Other" (anything that doesn't fit the above categories)
 
 3. health_score: Rate healthiness from 0 to 5 for ALL food items:
@@ -108,10 +108,10 @@ For each UNIQUE item (after deduplication), provide:
 
 IMPORTANT:
 - Belgian receipts may have Dutch/French product names - keep in the original language but clean up the text
-- Deposit items (leeggoed/vidange) should be categorized with the related product (usually "Alcohol" or "Beverages (Non-Alcoholic)")
+- Deposit items (leeggoed/vidange) should be categorized with the related product (usually "Alcohol" or "Drinks")
 - Use the item type hint if provided (e.g., "food", "alcohol", "product")
 - The number of items in output should be LESS than or EQUAL to input if duplicates were found
-- You MUST use the EXACT sub-category string from the list above (e.g., "Fresh Produce (Fruit & Veg)" not "Fresh Produce")
+- You MUST use the EXACT sub-category string from the list above (e.g., "Fresh Produce" not "Fresh Produce (Fruit & Veg)")
 
 Return ONLY valid JSON with this exact format:
 {
@@ -120,13 +120,13 @@ Return ONLY valid JSON with this exact format:
     {
       "original_indices": [0],
       "item_name": "Clean Product Name",
-      "category": "Fresh Produce (Fruit & Veg)",
+      "category": "Fresh Produce",
       "health_score": 5
     },
     {
       "original_indices": [1, 5, 9],
       "item_name": "Merged Duplicate Product",
-      "category": "Dairy Cheese & Eggs",
+      "category": "Dairy & Eggs",
       "health_score": 4
     }
   ]
