@@ -811,7 +811,6 @@ async def rebuild_enriched_profile(user_id: str):
                 "preferred_days": [],
                 "context": f"Bought {data['count']}x, spent €{data['total_spend']:.2f}",
                 "interest_category": "top_purchase",
-                "interest_reason": f"Top spend item (€{data['total_spend']:.2f})",
             })
 
         # Build shopping_habits

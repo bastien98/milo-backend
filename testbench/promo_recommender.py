@@ -673,7 +673,6 @@ def _build_llm_context(profile: dict, promo_results: dict[str, list[dict]]) -> s
         name = item.get("normalized_name", "?")
         brands = ", ".join(item.get("brands", [])) or "no brand"
         tags = item.get("tags", [])
-        reason = item.get("interest_reason", "")
         metrics = item.get("metrics", {})
         is_fallback = item.get("is_category_fallback", False)
 
@@ -704,9 +703,11 @@ def _build_llm_context(profile: dict, promo_results: dict[str, list[dict]]) -> s
         metrics_str = " | ".join(metrics_parts) if metrics_parts else "limited data"
         fallback_str = " [CATEGORY FALLBACK]" if is_fallback else ""
 
+        category = item.get("interest_category", "?")
+        tags_str = ", ".join(tags) if tags else "none"
         parts.append(
             f"- **{name}** [{item.get('granular_category', '?')}]{fallback_str}\n"
-            f"  brands={brands} | {reason}\n"
+            f"  brands={brands} | category={category} | tags={tags_str}\n"
             f"  {metrics_str}{urgency_str}"
         )
 

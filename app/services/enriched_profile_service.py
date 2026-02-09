@@ -691,12 +691,12 @@ def _build_promo_interest_items(
             "preferred_days": preferred_days,
         }
 
-        # Classify — store metadata dict alongside entry for computing interest_reason
-        if freq_per_week >= 0.5 and trip_count >= 3:
-            staples.append((trip_count, entry, {"freq": freq_per_week}))
+        # Classify into interest buckets (copy entry so each bucket owns its dict)
+        if freq_per_week >= 0.35 and trip_count >= 3:
+            staples.append((trip_count, entry.copy()))
 
         if trip_count >= 2:
-            high_spend.append((data["total_spend"], entry, {}))  # rank computed after sorting
+            high_spend.append((data["total_spend"], entry.copy()))
 
         # Brand analysis: loyal (>= 80% one brand) vs price switcher (no dominant brand)
         if data["brands"] and data["count"] >= 2 and trip_count >= 2:
@@ -710,24 +710,24 @@ def _build_promo_interest_items(
                 top_brand_count = brand_counts[top_brand]
                 brand_ratio = top_brand_count / data["count"]
                 if brand_ratio >= 0.8:
-                    brand_loyal.append((trip_count, entry, {"brand": top_brand}))
+                    brand_loyal.append((trip_count, entry.copy()))
                 elif len(brand_counts) >= 2:
-                    price_switchers.append((trip_count, entry, {"brand_count": len(brand_counts)}))
+                    price_switchers.append((trip_count, entry.copy()))
 
         if avg_health is not None and avg_health >= 4 and trip_count >= 3:
-            health_picks.append((avg_health, entry, {"score": avg_health}))
+            health_picks.append((avg_health, entry.copy()))
 
         if avg_health is not None and avg_health <= 2 and trip_count >= 2:
-            treats.append((trip_count, entry, {}))
+            treats.append((trip_count, entry.copy()))
 
         if avg_units_per_trip >= 2 and trip_count >= 2:
-            bulk_buys.append((avg_units_per_trip, entry, {"units": avg_units_per_trip}))
+            bulk_buys.append((avg_units_per_trip, entry.copy()))
 
         # Tried recently: 1-2 purchases in the last 30 days, not frequent enough for staple
         recent_cutoff = date.today() - timedelta(days=30)
         recent_purchases = [d for d in sorted_dates if d >= recent_cutoff]
         if len(recent_purchases) in (1, 2) and freq_per_week < 0.5:
-            tried_recently.append((-days_since, entry, {}))
+            tried_recently.append((-days_since, entry.copy()))
 
     # Sort each bucket and deduplicate across categories
     def _recency_key(x):
@@ -743,53 +743,46 @@ def _build_promo_interest_items(
     price_switchers.sort(key=_recency_key, reverse=True)
     tried_recently.sort(key=lambda x: x[0], reverse=True)  # most recent first
 
-    # Add rank metadata to high_spend items after sorting
-    for i, (score, entry, meta) in enumerate(high_spend):
-        meta["rank"] = i + 1
-
     # Allocate slots with guaranteed minimum of 1 per non-empty bucket
     result = []
     seen_names: set[str] = set()
+    category_counts: dict[str, int] = defaultdict(int)  # track per-category totals across passes
 
-    def _add_items(bucket: list, category: str, max_count: int, reason_template: str) -> int:
+    def _add_items(bucket: list, category: str, max_count: int) -> int:
         added = 0
-        for _, entry, meta in bucket:
+        for _, entry in bucket:
             if len(result) >= MAX_INTEREST_ITEMS:
                 break
-            if added >= max_count:
+            if category_counts[category] >= max_count:
                 break
             if entry["normalized_name"] in seen_names:
                 continue
             seen_names.add(entry["normalized_name"])
             entry["interest_category"] = category
-            # Format the reason template with available metadata
-            try:
-                entry["interest_reason"] = reason_template.format(**meta)
-            except KeyError:
-                entry["interest_reason"] = reason_template
             result.append(entry)
             added += 1
+            category_counts[category] += 1
         return added
 
-    # Bucket definitions: (list, category_name, max_slots, reason_template)
+    # Bucket definitions: (list, category_name, max_slots)
     buckets = [
-        (staples, "staple", 8, "Bought frequently ({freq:.1f}x/week)"),
-        (high_spend, "top_purchase", 6, "Top {rank} by total spend in your history"),
-        (brand_loyal, "brand_loyal", 4, "Consistently buy same brand ({brand})"),
-        (price_switchers, "price_switcher", 4, "Bought across {brand_count} brands — open to deals"),
-        (health_picks, "health_pick", 4, "Healthy choice (health score {score:.1f}/5)"),
-        (treats, "occasional_treat", 3, "Indulgence item you enjoy periodically"),
-        (bulk_buys, "bulk_buy", 3, "Often bought in bulk ({units:.1f} units/trip)"),
-        (tried_recently, "tried_recently", 2, "Recently tried — a promo could make it a habit"),
+        (staples, "staple", 8),
+        (high_spend, "top_purchase", 6),
+        (brand_loyal, "brand_loyal", 4),
+        (price_switchers, "price_switcher", 4),
+        (health_picks, "health_pick", 4),
+        (treats, "occasional_treat", 3),
+        (bulk_buys, "bulk_buy", 3),
+        (tried_recently, "tried_recently", 2),
     ]
 
     # Pass 1: guarantee at least 1 item per non-empty bucket
-    for bucket, category, _, reason_template in buckets:
-        _add_items(bucket, category, 1, reason_template)
+    for bucket, category, _ in buckets:
+        _add_items(bucket, category, 1)
 
     # Pass 2: fill remaining slots up to each bucket's max
-    for bucket, category, max_count, reason_template in buckets:
-        _add_items(bucket, category, max_count, reason_template)
+    for bucket, category, max_count in buckets:
+        _add_items(bucket, category, max_count)
 
     # Pass 3: Add category-level interests if we have sparse item-level data
     # This helps users with few receipts still get relevant promo recommendations
@@ -871,7 +864,6 @@ def _build_promo_interest_items(
                 "last_purchased": cat_last_purchased.isoformat() if cat_last_purchased else None,
                 "preferred_days": [],
                 "interest_category": "category_fallback",
-                "interest_reason": f"Category-level fallback: no single product stands out, but user spends €{cat_spend:.2f} on {cat}",
             })
             represented_categories.add(cat)
             category_items_added += 1
