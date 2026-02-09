@@ -1,7 +1,7 @@
 """Cleanup all remaining old/variant category names
 
-Revision ID: 012_cleanup_categories
-Revises: 011_split_categories
+Revision ID: 013_cleanup_categories
+Revises: 012_merge_branches
 Create Date: 2026-02-09
 
 Catches all remaining old category values in the database that were
@@ -14,8 +14,8 @@ from alembic import op
 
 
 # revision identifiers, used by Alembic.
-revision: str = "012_cleanup_categories"
-down_revision: Union[str, None] = "011_split_categories"
+revision: str = "013_cleanup_categories"
+down_revision: Union[str, None] = "012_merge_branches"
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 
