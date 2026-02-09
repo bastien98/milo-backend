@@ -1,7 +1,7 @@
 """
 Granular category definitions for semantic categorization.
 
-Maps ~200 granular categories to the 15 parent categories.
+Maps ~200 granular categories to the 19 parent categories.
 Used by GeminiVisionService for detailed product classification.
 
 Category names are kept flat (no parentheses) to optimize for semantic search
@@ -17,7 +17,7 @@ GRANULAR_CATEGORIES: dict[str, str] = {
     "Beer Abbey Trappist": "Alcohol",
     "Beer Special": "Alcohol",
     "Beer White Fruit": "Alcohol",
-    "Beer Non-Alcoholic": "Drinks (Soft/Soda)",  # Non-alcoholic
+    "Beer Non-Alcoholic": "Drinks",  # Non-alcoholic
     "Cider": "Alcohol",
     "Wine Red": "Alcohol",
     "Wine White": "Alcohol",
@@ -31,23 +31,19 @@ GRANULAR_CATEGORIES: dict[str, str] = {
     "Aperitif": "Alcohol",
 
     # ===================
-    # DRINKS (SOFT/SODA)
+    # DRINKS
     # ===================
-    "Cola": "Drinks (Soft/Soda)",
-    "Lemonade & Soda": "Drinks (Soft/Soda)",
-    "Energy Drinks": "Drinks (Soft/Soda)",
-    "Ice Tea": "Drinks (Soft/Soda)",
-    "Fruit Juice": "Drinks (Soft/Soda)",
-    "Vegetable Juice": "Drinks (Soft/Soda)",
-    "Smoothies": "Drinks (Soft/Soda)",
-    "Syrup": "Drinks (Soft/Soda)",
-
-    # ===================
-    # DRINKS (WATER)
-    # ===================
-    "Water Still": "Drinks (Water)",
-    "Water Sparkling": "Drinks (Water)",
-    "Water Flavored": "Drinks (Water)",
+    "Cola": "Drinks",
+    "Lemonade & Soda": "Drinks",
+    "Energy Drinks": "Drinks",
+    "Ice Tea": "Drinks",
+    "Fruit Juice": "Drinks",
+    "Vegetable Juice": "Drinks",
+    "Smoothies": "Drinks",
+    "Syrup": "Drinks",
+    "Water Still": "Drinks",
+    "Water Sparkling": "Drinks",
+    "Water Flavored": "Drinks",
 
     # ===================
     # HOT BEVERAGES (mapped to PANTRY)
@@ -84,56 +80,64 @@ GRANULAR_CATEGORIES: dict[str, str] = {
     "Eggs": "Dairy & Eggs",
 
     # ===================
-    # MEAT & FISH
+    # MEAT
     # ===================
-    "Beef": "Meat & Fish",
-    "Pork": "Meat & Fish",
-    "Chicken": "Meat & Fish",
-    "Turkey": "Meat & Fish",
-    "Lamb": "Meat & Fish",
-    "Minced Meat": "Meat & Fish",
-    "Meat Preparations": "Meat & Fish",
-    "Offal": "Meat & Fish",
-    "Ham Cooked": "Meat & Fish",
-    "Ham Dry": "Meat & Fish",
-    "Salami & Sausage": "Meat & Fish",
-    "Pâté & Terrine": "Meat & Fish",
-    "Bacon & Lardons": "Meat & Fish",
-    "Chicken Turkey Deli": "Meat & Fish",
-    "Vegetarian Deli": "Meat & Fish",
-    "Fish Fresh": "Meat & Fish",
-    "Fish Smoked": "Meat & Fish",
-    "Fish Frozen": "Meat & Fish",
-    "Shellfish": "Meat & Fish",
-    "Canned Fish": "Meat & Fish",
-    "Surimi": "Meat & Fish",
+    "Beef": "Meat",
+    "Pork": "Meat",
+    "Chicken": "Meat",
+    "Turkey": "Meat",
+    "Lamb": "Meat",
+    "Minced Meat": "Meat",
+    "Meat Preparations": "Meat",
+    "Offal": "Meat",
+    "Ham Cooked": "Meat",
+    "Ham Dry": "Meat",
+    "Salami & Sausage": "Meat",
+    "Pâté & Terrine": "Meat",
+    "Bacon & Lardons": "Meat",
+    "Chicken Turkey Deli": "Meat",
+    "Vegetarian Deli": "Meat",
 
     # ===================
-    # FRESH PRODUCE
+    # SEAFOOD
     # ===================
-    "Fruit Apples Pears": "Fresh Produce",
-    "Fruit Citrus": "Fresh Produce",
-    "Fruit Bananas": "Fresh Produce",
-    "Fruit Berries": "Fresh Produce",
-    "Fruit Stone": "Fresh Produce",
-    "Fruit Grapes": "Fresh Produce",
-    "Fruit Melons": "Fresh Produce",
-    "Fruit Tropical": "Fresh Produce",
-    "Fruit Dried": "Fresh Produce",
-    "Nuts": "Fresh Produce",
-    "Tomatoes": "Fresh Produce",
-    "Salad & Leafy Greens": "Fresh Produce",
-    "Cucumber & Peppers": "Fresh Produce",
-    "Onions & Garlic": "Fresh Produce",
-    "Carrots & Root Veg": "Fresh Produce",
-    "Potatoes": "Fresh Produce",
-    "Cabbage & Broccoli": "Fresh Produce",
-    "Beans & Peas": "Fresh Produce",
-    "Mushrooms": "Fresh Produce",
-    "Zucchini & Eggplant": "Fresh Produce",
-    "Corn": "Fresh Produce",
-    "Fresh Herbs": "Fresh Produce",
-    "Prepared Vegetables": "Fresh Produce",
+    "Fish Fresh": "Seafood",
+    "Fish Smoked": "Seafood",
+    "Fish Frozen": "Seafood",
+    "Shellfish": "Seafood",
+    "Canned Fish": "Seafood",
+    "Surimi": "Seafood",
+
+    # ===================
+    # FRUITS
+    # ===================
+    "Fruit Apples Pears": "Fruits",
+    "Fruit Citrus": "Fruits",
+    "Fruit Bananas": "Fruits",
+    "Fruit Berries": "Fruits",
+    "Fruit Stone": "Fruits",
+    "Fruit Grapes": "Fruits",
+    "Fruit Melons": "Fruits",
+    "Fruit Tropical": "Fruits",
+    "Fruit Dried": "Fruits",
+    "Nuts": "Fruits",
+
+    # ===================
+    # VEGETABLES
+    # ===================
+    "Tomatoes": "Vegetables",
+    "Salad & Leafy Greens": "Vegetables",
+    "Cucumber & Peppers": "Vegetables",
+    "Onions & Garlic": "Vegetables",
+    "Carrots & Root Veg": "Vegetables",
+    "Potatoes": "Vegetables",
+    "Cabbage & Broccoli": "Vegetables",
+    "Beans & Peas": "Vegetables",
+    "Mushrooms": "Vegetables",
+    "Zucchini & Eggplant": "Vegetables",
+    "Corn": "Vegetables",
+    "Fresh Herbs": "Vegetables",
+    "Prepared Vegetables": "Vegetables",
 
     # ===================
     # BAKERY
@@ -144,7 +148,7 @@ GRANULAR_CATEGORIES: dict[str, str] = {
     "Wraps & Pita": "Bakery",
     "Croissants & Pastries": "Bakery",
     "Cakes & Tarts": "Bakery",
-    "Cookies & Biscuits": "Snacks & Sweets",  # Cookies are sweets
+    "Cookies & Biscuits": "Snacks",  # Cookies are snacks
     "Waffles": "Bakery",
     "Crackers": "Bakery",
 
@@ -192,25 +196,29 @@ GRANULAR_CATEGORIES: dict[str, str] = {
     "Baking Decorations": "Pantry",
 
     # ===================
-    # SNACKS & SWEETS
+    # SNACKS
     # ===================
-    "Chips": "Snacks & Sweets",
-    "Nuts Snack": "Snacks & Sweets",
-    "Crackers Snack": "Snacks & Sweets",
-    "Popcorn": "Snacks & Sweets",
-    "Dried Meat Snack": "Snacks & Sweets",
-    "Chocolate Bars": "Snacks & Sweets",
-    "Chocolate Pralines": "Snacks & Sweets",
+    "Chips": "Snacks",
+    "Nuts Snack": "Snacks",
+    "Crackers Snack": "Snacks",
+    "Popcorn": "Snacks",
+    "Dried Meat Snack": "Snacks",
+
+    # ===================
+    # CANDY
+    # ===================
+    "Chocolate Bars": "Candy",
+    "Chocolate Pralines": "Candy",
     "Chocolate Baking": "Pantry",  # Baking ingredient
-    "Candy": "Snacks & Sweets",
-    "Licorice": "Snacks & Sweets",
-    "Gum & Mints": "Snacks & Sweets",
-    "Marshmallows": "Snacks & Sweets",
+    "Candy": "Candy",
+    "Licorice": "Candy",
+    "Gum & Mints": "Candy",
+    "Marshmallows": "Candy",
 
     # ===================
     # SPORTS NUTRITION
     # ===================
-    "Protein Bars": "Snacks & Sweets",
+    "Protein Bars": "Snacks",
     "Protein Shakes": "Dairy & Eggs",
     "Protein Desserts": "Dairy & Eggs",
 
