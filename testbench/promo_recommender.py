@@ -313,6 +313,8 @@ def _build_promo_dict(fields: dict, score: float) -> dict:
         "validity_start": fields.get("validity_start", ""),
         "validity_end": fields.get("validity_end", ""),
         "source_retailer": fields.get("source_retailer", ""),
+        "page_number": fields.get("page_number"),
+        "promo_folder_url": fields.get("promo_folder_url"),
     }
 
 
@@ -434,7 +436,9 @@ Items marked [CATEGORY FALLBACK] represent broader category interests — person
       "savings": <number>,
       "mechanism": "<string: e.g. '1+1 Gratis', '-30%'>",
       "validity_end": "<string: DD/MM>",
-      "reason": "<string: one sentence linking deal to user's buying pattern with concrete numbers>"
+      "reason": "<string: one sentence linking deal to user's buying pattern with concrete numbers>",
+      "page_number": "<number or null: pass through EXACTLY from promo data>",
+      "promo_folder_url": "<string or null: pass through EXACTLY from promo data>"
     }
   ],
 
@@ -453,7 +457,9 @@ Items marked [CATEGORY FALLBACK] represent broader category interests — person
           "original_price": <number>,
           "promo_price": <number>,
           "savings": <number>,
-          "mechanism": "<string>"
+          "mechanism": "<string>",
+          "page_number": "<number or null: pass through EXACTLY from promo data>",
+          "promo_folder_url": "<string or null: pass through EXACTLY from promo data>"
         }
       ],
       "tip": "<string: one personalized tip for this store trip, referencing user's habits>"
@@ -493,6 +499,7 @@ Items marked [CATEGORY FALLBACK] represent broader category interests — person
 - All numeric values must be actual numbers (not strings).
 - weekly_savings must equal the sum of all individual deal savings.
 - summary.total_savings must equal weekly_savings.
+- page_number and promo_folder_url: copy these VERBATIM from the promo data. Never modify, invent, or omit them. Use null if not present in the source data.
 - Respond with ONLY valid JSON. No markdown, no code blocks, no extra text."""
 
 
@@ -624,6 +631,8 @@ def _parse_llm_response(raw_response: str) -> dict:
         pick.setdefault("mechanism", "")
         pick.setdefault("validity_end", "")
         pick.setdefault("reason", "")
+        pick.setdefault("page_number", None)
+        pick.setdefault("promo_folder_url", None)
 
     # Validate each store object
     for store in data["stores"]:
@@ -641,6 +650,8 @@ def _parse_llm_response(raw_response: str) -> dict:
             item.setdefault("promo_price", 0)
             item.setdefault("savings", 0)
             item.setdefault("mechanism", "")
+            item.setdefault("page_number", None)
+            item.setdefault("promo_folder_url", None)
 
     # Validate summary
     summary = data["summary"]
@@ -775,10 +786,14 @@ def _build_llm_context(profile: dict, promo_results: dict[str, list[dict]]) -> s
                 except (ValueError, TypeError):
                     pass
 
+            # Include page_number and promo_folder_url for passthrough
+            page_str = f" | page={p['page_number']}" if p.get("page_number") else ""
+            folder_str = f" | folder_url={p['promo_folder_url']}" if p.get("promo_folder_url") else ""
+
             parts.append(
                 f"- {p.get('brand', '?')} · {p.get('original_description', p.get('normalized_name', '?'))}\n"
                 f"  €{p.get('original_price', '?')} → €{p.get('promo_price', '?')}{savings_str} | {p.get('promo_mechanism', '?')}\n"
-                f"  {p.get('source_retailer', '?')} | {p.get('unit_info') or '?'} | {p.get('validity_start', '?')} to {p.get('validity_end', '?')}"
+                f"  {p.get('source_retailer', '?')} | {p.get('unit_info') or '?'} | {p.get('validity_start', '?')} to {p.get('validity_end', '?')}{page_str}{folder_str}"
             )
 
     parts.append(f"\n**{total_promos} promos matched across {items_with_promos}/{len(promo_results)} items.**")
