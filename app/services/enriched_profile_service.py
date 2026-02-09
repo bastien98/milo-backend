@@ -155,7 +155,7 @@ def _build_shopping_habits(
     # Category aggregation
     cat_data: dict[str, dict] = defaultdict(lambda: {"spend": 0.0, "health_scores": [], "count": 0})
     for t in transactions:
-        cat_val = t.category.value if t.category else "Other"
+        cat_val = t.category if t.category else "Other"
         cat_data[cat_val]["spend"] += t.item_price
         cat_data[cat_val]["count"] += 1
         if t.health_score is not None:
@@ -417,7 +417,7 @@ def _build_shopping_habits(
         cat_store_spend: dict[str, dict[str, float]] = defaultdict(lambda: defaultdict(float))
         for t in transactions:
             if not t.is_discount and not t.is_deposit and t.category:
-                cat_store_spend[t.category.value][t.store_name] += t.item_price
+                cat_store_spend[t.category][t.store_name] += t.item_price
         cat_totals = {cat: sum(stores.values()) for cat, stores in cat_store_spend.items()}
         top_5_cats = sorted(cat_totals, key=cat_totals.get, reverse=True)[:5]  # type: ignore[arg-type]
         category_store_map = {}
@@ -566,7 +566,7 @@ def _build_promo_interest_items(
         if t.health_score is not None:
             item_data[name_lower]["health_scores"].append(t.health_score)
         if t.category:
-            item_data[name_lower]["categories"].add(t.category.value)
+            item_data[name_lower]["categories"].add(t.category)
         if t.granular_category:
             item_data[name_lower]["granular_categories"].add(t.granular_category)
         item_data[name_lower]["dates"].append(t.date)
