@@ -9,7 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.cache import invalidate_user
 from app.models.transaction import Transaction
 from app.models.receipt import Receipt
-from app.models.enums import ReceiptStatus, Category
+from app.models.enums import ReceiptStatus
 from app.db.repositories.enriched_profile_repo import EnrichedProfileRepository
 
 logger = logging.getLogger(__name__)
@@ -309,15 +309,15 @@ def _build_shopping_habits(
 
     # Fresh produce & ready meals % of food spend
     FOOD_CATEGORIES = {
-        Category.MEAT_FISH, Category.FRESH_PRODUCE, Category.DAIRY_EGGS,
-        Category.READY_MEALS, Category.BAKERY, Category.PANTRY, Category.FROZEN,
-        Category.SNACKS_SWEETS, Category.DRINKS_SOFT_SODA, Category.DRINKS_WATER,
-        Category.ALCOHOL, Category.BABY_KIDS,
+        "Meat & Fish", "Fresh Produce", "Dairy & Eggs",
+        "Ready Meals", "Bakery", "Pantry", "Frozen",
+        "Snacks & Sweets", "Drinks (Soft/Soda)", "Drinks (Water)",
+        "Alcohol", "Baby & Kids",
     }
     food_txns = [t for t in transactions if t.category in FOOD_CATEGORIES and not t.is_discount and not t.is_deposit]
     total_food_spend = sum(t.item_price for t in food_txns)
-    fresh_produce_spend = sum(t.item_price for t in food_txns if t.category == Category.FRESH_PRODUCE)
-    ready_meals_spend = sum(t.item_price for t in food_txns if t.category == Category.READY_MEALS)
+    fresh_produce_spend = sum(t.item_price for t in food_txns if t.category == "Fresh Produce")
+    ready_meals_spend = sum(t.item_price for t in food_txns if t.category == "Ready Meals")
 
     health_trend = {
         "current_4w_avg": round(current_4w_avg, 2) if current_4w_avg is not None else None,
@@ -389,9 +389,9 @@ def _build_shopping_habits(
 
     # ── Aggregation 5: indulgence_tracker ──
     total_real_spend = sum(t.item_price for t in real_txns)
-    alcohol_spend = sum(t.item_price for t in real_txns if t.category == Category.ALCOHOL)
-    snacks_sweets_spend = sum(t.item_price for t in real_txns if t.category == Category.SNACKS_SWEETS)
-    tobacco_spend = sum(t.item_price for t in real_txns if t.category == Category.TOBACCO)
+    alcohol_spend = sum(t.item_price for t in real_txns if t.category == "Alcohol")
+    snacks_sweets_spend = sum(t.item_price for t in real_txns if t.category == "Snacks & Sweets")
+    tobacco_spend = sum(t.item_price for t in real_txns if t.category == "Tobacco")
     total_indulgence = alcohol_spend + snacks_sweets_spend + tobacco_spend
 
     indulgence_tracker = {

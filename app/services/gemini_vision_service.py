@@ -22,7 +22,6 @@ from PIL import Image
 
 from app.core.exceptions import GeminiAPIError
 from app.config import get_settings
-from app.models.enums import Category
 from app.services.categories import CATEGORIES_PROMPT_LIST, GRANULAR_CATEGORIES, get_parent_category
 
 settings = get_settings()
@@ -43,7 +42,7 @@ class ExtractedLineItem:
     is_discount: bool  # True for discount/bonus lines (negative amounts)
     is_deposit: bool
     granular_category: str  # Detailed category
-    parent_category: Category  # Broad category
+    parent_category: str  # Broad category
     health_score: Optional[int]  # 0-5, None for non-foobrandd
     unit_of_measure: Optional[str]  # kg/g/l/ml/piece
     weight_or_volume: Optional[float]  # actual weight/volume
