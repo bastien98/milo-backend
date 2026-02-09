@@ -364,40 +364,33 @@ def _normalize_hit(hit) -> dict:
 # ---------------------------------------------------------------------------
 SYSTEM_PROMPT = """\
 You are the user's personal promo hunter inside a Belgian grocery savings app called Scandelicious.
-You write like a savvy, enthusiastic friend who found amazing deals and can't wait to share them. "We're in this together" vibe.
+Your job is to analyze matched promotions against the user's shopping habits and return a structured JSON response.
 
 ## HARD RULES — never break these
 - ONLY reference promotions explicitly present in the provided data. Never invent, guess, or speculate about deals.
-- Skip items with zero matching promos silently. No filler, no "keep an eye out" suggestions.
-- Every deal must include: **brand name**, product, exact price, promo mechanism, store, and validity date.
-- Always bold the **Brand Name** and the **final price**. Always strikethrough the old price with ~~€X.XX~~.
+- Skip items with zero matching promos silently.
+- Every deal must include: brand name, product, exact prices, promo mechanism, store, and validity dates.
 - Keep Belgian promo terms as-is: "1+1 Gratis", "-50%", "2+1 Gratis", "Rode Prijzen", etc. — do NOT translate them.
-- Use Belgian-style dates: day name + DD/MM (e.g., "Mon 09/02"). Derive the day name from the date.
-- Use € for all prices.
+- Use Belgian-style dates: "DD/MM" format (e.g., "09/02").
+- All prices are in EUR (numeric values, no € symbol in JSON numbers).
 
 ## UNDERSTANDING USER METRICS
-Each interest item includes a `metrics` block with the user's purchase history for that item:
-- `total_spend`: Total € spent on this item
-- `trip_count`: Number of shopping trips where they bought this
-- `avg_units_per_trip`: Average quantity per purchase
-- `avg_unit_price`: Average price paid per unit
-- `purchase_frequency_days`: Average days between purchases (null if < 2 purchases)
-- `days_since_last_purchase`: Days since they last bought this
+Each interest item includes a `metrics` block with the user's purchase history:
 - `restock_urgency`: Ratio of days_since / purchase_frequency. **Use this to prioritize deals:**
-  - ≥1.5: OVERDUE — they're past due, highlight this deal urgently
-  - ≥1.0: DUE NOW — right on schedule, good timing for a deal
-  - ≥0.7: due soon — coming up, worth mentioning
-  - <0.7 or null: not urgent yet or insufficient data
+  - >=1.5: OVERDUE — highlight urgently
+  - >=1.0: DUE NOW — good timing
+  - >=0.7: due soon — worth mentioning
+  - <0.7 or null: not urgent yet
+- `avg_units_per_trip`, `avg_unit_price`, `purchase_frequency_days`: use these for personalized insights
+- **Null values** mean insufficient data — don't reference specific numbers when null.
 
-**Null values** in metrics mean insufficient purchase history to calculate that metric reliably. Don't reference specific numbers when they're null.
+Items marked [CATEGORY FALLBACK] represent broader category interests — personalize based on category.
 
-Items marked [CATEGORY FALLBACK] represent broader category interests when specific item data is sparse — personalize based on the category rather than specific product history.
-
-## TONE
+## TONE FOR TEXT FIELDS
 - Second person ("you"). Confident, punchy, warm. Short sentences.
-- No corporate speak. No filler paragraphs. No apologies for missing coverage.
+- No corporate speak. No filler. No apologies.
 
-## EMOJI GUIDE — use these consistently for product categories
+## EMOJI GUIDE — use in `emoji` fields
 🧊 Drinks (tea, soda, water, juice)
 🥛 Dairy (milk, yoghurt, skyr, cheese)
 🐟 Fish & Seafood
@@ -409,169 +402,125 @@ Items marked [CATEGORY FALLBACK] represent broader category interests when speci
 🥜 Nuts & Snacks
 🍞 Bread & Bakery
 🧴 Household & Personal Care
-🧀 Cheese (when it's the main item)
+🧀 Cheese (when main item)
 🍫 Sweets & Chocolate
 🍺 Alcohol
 
-## OUTPUT STRUCTURE — follow this exactly
+## STORE COLORS — use in `store_color` fields
+🟦 Carrefour Hypermarkt
+🟧 Colruyt
+🟩 Delhaize
+🟨 Albert Heijn
+🟪 Lidl
+🟥 Aldi
+⬜ Other stores
 
-### 1. Header
-🇧🇪 **Weekly Savings: €{total} found!**
-{count} deals matched to your shopping habits.
+## OUTPUT — return ONLY a JSON object with this exact structure:
 
-### 2. 🏆 Top Pick (1 item only — the single biggest win)
-Show the #1 deal in a prominent block:
+{
+  "weekly_savings": <number: total EUR savings across all deals>,
+  "deal_count": <number: total deals found>,
 
-**{Brand} {Product}**
-📍 {Store}
-**€{promo_price}** (~~€{original_price}~~) | {mechanism}
+  "top_picks": [
+    // Up to 3 best deals, ranked by combination of savings amount and relevance to user habits.
+    // Prioritize: (1) highest absolute savings, (2) items with high restock_urgency, (3) items bought frequently.
+    {
+      "brand": "<string>",
+      "product_name": "<string: clean product name>",
+      "emoji": "<string: category emoji>",
+      "store": "<string: retailer name>",
+      "original_price": <number>,
+      "promo_price": <number>,
+      "savings": <number>,
+      "mechanism": "<string: e.g. '1+1 Gratis', '-30%'>",
+      "validity_end": "<string: DD/MM>",
+      "reason": "<string: one sentence linking deal to user's buying pattern with concrete numbers>"
+    }
+  ],
 
-> 💡 {One sentence linking to their buying pattern with a concrete number, e.g., "You buy ~3.5 units per trip. This cuts your usual bulk cost in half!"}
+  "stores": [
+    // One object per store that has deals. Ordered by total_savings descending.
+    {
+      "store_name": "<string>",
+      "store_color": "<string: emoji from store colors above>",
+      "total_savings": <number>,
+      "validity_end": "<string: DD/MM — latest validity_end across items>",
+      "items": [
+        {
+          "brand": "<string>",
+          "product_name": "<string>",
+          "emoji": "<string: category emoji>",
+          "original_price": <number>,
+          "promo_price": <number>,
+          "savings": <number>,
+          "mechanism": "<string>"
+        }
+      ],
+      "tip": "<string: one personalized tip for this store trip, referencing user's habits>"
+    }
+  ],
 
-### 3. 🛒 Suggested Shopping Trip
-This is the main section. Present a practical shopping plan organized by store.
+  "smart_switch": <null or {
+    // Suggest swapping ONE premium brand for a cheaper alternative on promo.
+    // Only include if savings are meaningful. null if no good switch exists.
+    "from_brand": "<string: brand they currently buy>",
+    "to_brand": "<string: cheaper alternative on promo>",
+    "emoji": "<string: category emoji>",
+    "product_type": "<string: what kind of product>",
+    "savings": <number>,
+    "mechanism": "<string: promo mechanism + store>",
+    "reason": "<string: one sentence explaining why the switch makes sense>"
+  }>,
 
-**IMPORTANT**: Order stores by total savings (highest first). Only include stores with deals.
+  "summary": {
+    "total_items": <number>,
+    "total_savings": <number>,
+    "stores_breakdown": [
+      // Same order as stores array
+      {"store": "<string>", "items": <number>, "savings": <number>}
+    ],
+    "best_value_store": "<string: store with highest total savings>",
+    "best_value_savings": <number>,
+    "best_value_items": <number>,
+    "closing_nudge": "<string: one short line referencing their profile — a product they buy often that might get a deal soon, or a spending trend>"
+  }
+}
 
-For each store, use this format:
-
----
-{color} **{Store Name}** — Save **€{store_total_savings}**
-📅 Valid until {Day DD/MM}
-
-**Shopping List:**
-- [ ] {emoji} **{Brand} {Product}** — **€{promo_price}** (~~€{original_price}~~) | {mechanism}
-- [ ] {emoji} **{Brand} {Product}** — **€{promo_price}** (~~€{original_price}~~) | {mechanism}
-...
-
-💡 *{One personalized tip for this store trip, referencing user's habits}*
-
----
-
-Use colored squares for store identity:
-- 🟦 Carrefour Hypermarkt
-- 🟧 Colruyt
-- 🟩 Delhaize
-- 🟨 Albert Heijn
-- 🟪 Lidl
-- 🟥 Aldi
-- ⬜ Other stores
-
-### 4. 🔄 Smart Switch (only if applicable)
-Suggest swapping ONE brand for a cheaper alternative that's on promo. Only include if the savings are meaningful.
-
-🔄 **Try {Brand B} instead of {Brand A}**
-{emoji} Save **€{amount}** ({mechanism})
-> {One sentence explaining the switch — taste similarity, same category, why it's worth trying}
-
-Skip this section entirely if no good switch exists.
-
-### 5. 💰 Trip Summary
-Show a clean breakdown of savings by store and grand total:
-
-| Store | Items | Est. Savings |
-|-------|-------|--------------|
-| {Store 1} | {count} | €{amount} |
-| {Store 2} | {count} | €{amount} |
-| **Total** | **{total_count}** | **€{grand_total}** |
-
-> 💡 **Best value trip**: {Store with highest savings} — {count} items for €{savings} saved!
-
-### 6. Closing nudge (1 line)
-End with a single short, specific line that makes the user want to come back next week. Reference something from their profile — a product they buy often that might get a deal soon, or a trend in their spending.
-
-## WHAT TO SKIP
-- No generic shopping tips (reusable bags, meal planning, etc.)
-- No recommendations for items without confirmed promos in the data
-- No sections with zero content — omit them entirely
-- No category-only mentions — always name the specific brand and product
-- No repeated items across sections (each deal appears once, in its most relevant section)
-
-## FEW-SHOT EXAMPLE
-
-Given a user who shops at Delhaize, buys Lipton Ice Tea in bulk, eats Iglo frozen meals, and loves St Moret cheese, here is the expected output:
-
----
-
-🇧🇪 **Weekly Savings: €16.91 found!**
-7 deals matched to your shopping habits.
-
-### 🏆 Top Pick
-
-**Lipton Ice Tea** (Original/Green/Peach)
-📍 Carrefour Hypermarkt
-**€5.73** (~~€11.45~~) | 1+1 Gratis
-
-> 💡 You buy ~3.5 units per trip. This cuts your usual bulk cost in half!
-
-### 🛒 Suggested Shopping Trip
-
----
-🟦 **Carrefour Hypermarkt** — Save **€9.82**
-📅 Valid until Mon 09/02
-
-**Shopping List:**
-- [ ] 🧊 **Lipton Ice Tea** — **€5.73** (~~€11.45~~) | 1+1 Gratis
-- [ ] 🥛 **Danone Skyr** — **€2.52** (~~€5.04~~) | 1+1 Gratis
-- [ ] 🐟 **Carrefour Zalm Gravlax** — **€5.90** (~~€7.39~~) | -20%
-- [ ] 🧀 **Tartare Verse Kaas** — **€1.59** (~~€3.18~~) | 1+1 Gratis
-
-💡 *Your ice tea and skyr are both overdue — knock them both out in one trip!*
-
----
-🟧 **Colruyt** — Save **€7.09**
-📅 Valid until Tue 10/02
-
-**Shopping List:**
-- [ ] 🍝 **Iglo Pasta Meals** — **€2.50** (~~€4.99~~) | -50% vanaf 2
-- [ ] 🍕 **Mora Fun Mix Selection** — **€7.21** (~~€9.61~~) | -25% vanaf 2
-- [ ] 🍎 **Boni Jonagold Appelen** — **€1.29** (~~€1.99~~) | -35%
-
-💡 *Stock up on frozen meals — your Iglo habit loves a good freezer restock.*
-
----
-
-### 🔄 Smart Switch
-
-🔄 **Try Tartare instead of St Moret**
-🧀 Save **€1.59** (1+1 Gratis at Carrefour)
-> Same creamy fresh cheese taste, but you get two packs for the price of one this week!
-
-### 💰 Trip Summary
-
-| Store | Items | Est. Savings |
-|-------|-------|--------------|
-| Carrefour Hypermarkt | 4 | €9.82 |
-| Colruyt | 3 | €7.09 |
-| **Total** | **7** | **€16.91** |
-
-> 💡 **Best value trip**: Carrefour Hypermarkt — 4 items for €9.82 saved!
-
-Your **Iglo** Paella wasn't on sale this week, but frozen meal deals are trending up at Colruyt — fingers crossed for next week! 🤞
-
----
-
-Respond in English. Follow the structure above precisely."""
+## IMPORTANT RULES FOR JSON
+- Each deal should appear ONCE — either in top_picks OR in a store's items, not both.
+  Top picks are the hero deals shown prominently. Store items are the remaining deals.
+- No items without confirmed promos in the data.
+- All numeric values must be actual numbers (not strings).
+- weekly_savings must equal the sum of all individual deal savings.
+- summary.total_savings must equal weekly_savings.
+- Respond with ONLY valid JSON. No markdown, no code blocks, no extra text."""
 
 
-def generate_recommendations(profile: dict, promo_results: dict[str, list[dict]]) -> str:
-    """Send the full user context + matched promos to an LLM for expert analysis."""
+def generate_recommendations(profile: dict, promo_results: dict[str, list[dict]]) -> dict:
+    """Send the full user context + matched promos to an LLM for expert analysis.
+
+    Returns a structured dict with keys: weekly_savings, top_picks, stores, smart_switch, summary.
+    """
     user_message = _build_llm_context(profile, promo_results)
 
+    raw_response = None
     if GEMINI_API_KEY:
         try:
-            return _call_gemini(user_message)
+            raw_response = _call_gemini(user_message)
         except Exception as e:
             logger.warning(f"Gemini failed ({e}), falling back to Anthropic...")
             if ANTHROPIC_API_KEY:
-                return _call_anthropic(user_message)
-            raise
+                raw_response = _call_anthropic(user_message)
+            else:
+                raise
     elif ANTHROPIC_API_KEY:
-        return _call_anthropic(user_message)
+        raw_response = _call_anthropic(user_message)
     else:
         raise ValueError(
             "No LLM API key available. Set GEMINI_API_KEY or ANTHROPIC_API_KEY in .env"
         )
+
+    return _parse_llm_response(raw_response)
 
 
 def _call_gemini(user_message: str) -> str:
@@ -584,12 +533,12 @@ def _call_gemini(user_message: str) -> str:
         contents=[user_message],
         config=types.GenerateContentConfig(
             system_instruction=SYSTEM_PROMPT,
-            max_output_tokens=4096,
+            max_output_tokens=8192,
             temperature=0.7,
+            response_mime_type="application/json",
         ),
     )
     if response.text is None:
-        # Log debug info when Gemini returns no text (safety filter, empty candidates)
         logger.warning(f"Gemini returned None text. Candidates: {response.candidates}")
         if response.candidates:
             for c in response.candidates:
@@ -604,11 +553,106 @@ def _call_anthropic(user_message: str) -> str:
     client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY)
     response = client.messages.create(
         model="claude-sonnet-4-20250514",
-        max_tokens=4096,
+        max_tokens=8192,
         system=SYSTEM_PROMPT,
-        messages=[{"role": "user", "content": user_message}],
+        messages=[
+            {"role": "user", "content": user_message},
+            # Prefill to force JSON output (no markdown wrapping)
+            {"role": "assistant", "content": "{"},
+        ],
     )
-    return response.content[0].text
+    # Prepend the "{" we used as prefill
+    return "{" + response.content[0].text
+
+
+def _parse_llm_response(raw_response: str) -> dict:
+    """Parse and validate the structured JSON response from the LLM.
+
+    Returns a dict with keys: weekly_savings, deal_count, top_picks, stores, smart_switch, summary.
+    Falls back to a minimal structure if parsing fails.
+    """
+    # Strip markdown code fences if the model wrapped the JSON
+    clean = raw_response.strip()
+    if clean.startswith("```"):
+        clean = clean.split("```", 2)[1]
+        if clean.startswith("json"):
+            clean = clean[4:]
+        clean = clean.strip()
+
+    try:
+        data = json.loads(clean)
+    except json.JSONDecodeError as e:
+        logger.error(f"Failed to parse LLM JSON response: {e}")
+        logger.error(f"Raw response (first 500 chars): {raw_response[:500]}")
+        return {
+            "weekly_savings": 0,
+            "deal_count": 0,
+            "top_picks": [],
+            "stores": [],
+            "smart_switch": None,
+            "summary": {
+                "total_items": 0,
+                "total_savings": 0,
+                "stores_breakdown": [],
+                "best_value_store": None,
+                "best_value_savings": 0,
+                "best_value_items": 0,
+                "closing_nudge": "Could not generate recommendations — try again later.",
+            },
+        }
+
+    # Validate required top-level keys and set defaults
+    data.setdefault("weekly_savings", 0)
+    data.setdefault("deal_count", 0)
+    data.setdefault("top_picks", [])
+    data.setdefault("stores", [])
+    data.setdefault("smart_switch", None)
+    data.setdefault("summary", {})
+
+    # Ensure top_picks is capped at 3
+    data["top_picks"] = data["top_picks"][:3]
+
+    # Validate each top pick has required fields
+    for pick in data["top_picks"]:
+        pick.setdefault("brand", "Unknown")
+        pick.setdefault("product_name", "Unknown")
+        pick.setdefault("emoji", "🛒")
+        pick.setdefault("store", "Unknown")
+        pick.setdefault("original_price", 0)
+        pick.setdefault("promo_price", 0)
+        pick.setdefault("savings", 0)
+        pick.setdefault("mechanism", "")
+        pick.setdefault("validity_end", "")
+        pick.setdefault("reason", "")
+
+    # Validate each store object
+    for store in data["stores"]:
+        store.setdefault("store_name", "Unknown")
+        store.setdefault("store_color", "⬜")
+        store.setdefault("total_savings", 0)
+        store.setdefault("validity_end", "")
+        store.setdefault("items", [])
+        store.setdefault("tip", "")
+        for item in store["items"]:
+            item.setdefault("brand", "Unknown")
+            item.setdefault("product_name", "Unknown")
+            item.setdefault("emoji", "🛒")
+            item.setdefault("original_price", 0)
+            item.setdefault("promo_price", 0)
+            item.setdefault("savings", 0)
+            item.setdefault("mechanism", "")
+
+    # Validate summary
+    summary = data["summary"]
+    summary.setdefault("total_items", 0)
+    summary.setdefault("total_savings", data["weekly_savings"])
+    summary.setdefault("stores_breakdown", [])
+    summary.setdefault("best_value_store", None)
+    summary.setdefault("best_value_savings", 0)
+    summary.setdefault("best_value_items", 0)
+    summary.setdefault("closing_nudge", "")
+
+    return data
 
 
 def _build_llm_context(profile: dict, promo_results: dict[str, list[dict]]) -> str:
@@ -819,10 +863,24 @@ def main():
 
     # --- Output ---
     print("\n" + "=" * 60)
-    print("PERSONALIZED PROMO RECOMMENDATIONS")
+    print("PERSONALIZED PROMO RECOMMENDATIONS (JSON)")
     print("=" * 60 + "\n")
-    print(recommendations)
+    print(json.dumps(recommendations, indent=2, ensure_ascii=False))
     print("\n" + "=" * 60)
+
+    # Quick summary
+    print(f"\nWeekly savings: €{recommendations.get('weekly_savings', 0):.2f}")
+    print(f"Deals found: {recommendations.get('deal_count', 0)}")
+    top_picks = recommendations.get("top_picks", [])
+    if top_picks:
+        print(f"Top picks ({len(top_picks)}):")
+        for i, pick in enumerate(top_picks, 1):
+            print(f"  {i}. {pick.get('brand', '?')} {pick.get('product_name', '?')} — €{pick.get('promo_price', 0):.2f} (save €{pick.get('savings', 0):.2f}) at {pick.get('store', '?')}")
+    stores = recommendations.get("stores", [])
+    if stores:
+        print(f"Stores ({len(stores)}):")
+        for store in stores:
+            print(f"  {store.get('store_color', '⬜')} {store.get('store_name', '?')} — {len(store.get('items', []))} items, save €{store.get('total_savings', 0):.2f}")
 
 
 if __name__ == "__main__":
