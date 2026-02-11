@@ -9,7 +9,6 @@ from fastapi import APIRouter, Depends, UploadFile, File, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_db, get_current_db_user
-from app.core.security import get_current_user, FirebaseUser
 from app.models.user import User
 
 logger = logging.getLogger(__name__)
@@ -22,11 +21,10 @@ from app.schemas.receipt import (
     LineItemDeleteResponse,
 )
 from app.services.receipt_processor_v2 import ReceiptProcessorV2
-from app.services.rate_limit_service import RateLimitService
 from app.db.repositories.receipt_repo import ReceiptRepository
 from app.db.repositories.transaction_repo import TransactionRepository
 from app.db.repositories.budget_ai_insight_repo import BudgetAIInsightRepository
-from app.core.exceptions import ResourceNotFoundError, RateLimitExceededError
+from app.core.exceptions import ResourceNotFoundError
 from app.services.enriched_profile_service import EnrichedProfileService
 
 router = APIRouter()
@@ -38,7 +36,6 @@ async def upload_receipt(
     receipt_date: Optional[date] = Query(None, description="Override receipt date"),
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_db_user),
-    firebase_user: FirebaseUser = Depends(get_current_user),
 ):
     """
     Upload and process a receipt.
@@ -53,35 +50,12 @@ async def upload_receipt(
     - Deposit detection (Leeggoed/Vidange items)
     - Health scoring (0-5 scale)
 
-    Rate limited to 15 uploads per month.
-
     Returns the extracted data synchronously.
 
     **Duplicate Detection**: If a receipt with the same content hash was previously
     uploaded, returns `is_duplicate: true` with empty `receipt_id` and no transactions saved.
     """
     t_total = time.monotonic()
-
-    # Check receipt upload rate limit
-    t0 = time.monotonic()
-    rate_limit_service = RateLimitService(db)
-    rate_limit_status = await rate_limit_service.check_receipt_rate_limit(firebase_user.uid)
-    logger.info(f"⏱ rate_limit_check: {time.monotonic() - t0:.3f}s")
-
-    if not rate_limit_status.allowed:
-        logger.warning(
-            f"Receipt upload rate limited: user_id={current_user.id}, "
-            f"used={rate_limit_status.receipts_used}/{rate_limit_status.receipts_limit}"
-        )
-        raise RateLimitExceededError(
-            message=f"Receipt upload limit exceeded. You have used {rate_limit_status.receipts_used}/{rate_limit_status.receipts_limit} uploads this month.",
-            details={
-                "receipts_used": rate_limit_status.receipts_used,
-                "receipts_limit": rate_limit_status.receipts_limit,
-                "period_end_date": rate_limit_status.period_end_date.isoformat(),
-                "retry_after_seconds": rate_limit_status.retry_after_seconds,
-            },
-        )
 
     # Log upload start
     logger.info(
@@ -115,11 +89,6 @@ async def upload_receipt(
             f"receipt_id={result.receipt_id}, store={result.store_name}, "
             f"items={result.items_count}, total={result.total_amount}"
         )
-
-    # Increment the rate limit counter after successful upload
-    t0 = time.monotonic()
-    await rate_limit_status.increment_on_success()
-    logger.info(f"⏱ rate_limit_increment: {time.monotonic() - t0:.3f}s")
 
     # Invalidate cached AI budget suggestions (new receipt = new data)
     if not result.is_duplicate:
