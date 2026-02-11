@@ -10,7 +10,7 @@ from alembic import context
 # Import all models so they're registered with Base.metadata
 from app.db.base import Base
 from app.models import user, receipt, transaction, user_rate_limit, user_profile  # noqa
-from app.models import budget, budget_ai_insight, budget_history  # noqa
+from app.models import budget, budget_history  # noqa
 from app.models import user_enriched_profile  # noqa
 from app.config import get_settings
 

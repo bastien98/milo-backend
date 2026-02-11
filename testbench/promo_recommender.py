@@ -26,7 +26,7 @@ import os
 import ssl
 import sys
 import time
-from datetime import date
+from datetime import date, datetime
 from pathlib import Path
 
 # ---------------------------------------------------------------------------
@@ -130,6 +130,23 @@ async def fetch_enriched_profile(user_id: str) -> dict:
 # ---------------------------------------------------------------------------
 # Step 2: Pinecone search + rerank
 # ---------------------------------------------------------------------------
+def _today_epoch() -> int:
+    """Return today's date as YYYYMMDD integer for Pinecone filtering."""
+    return int(date.today().strftime("%Y%m%d"))
+
+
+def _is_expired(promo: dict) -> bool:
+    """Check if a promo is expired based on its validity_end string (YYYY-MM-DD)."""
+    validity_end = promo.get("validity_end", "")
+    if not validity_end:
+        return False
+    try:
+        end_date = datetime.strptime(validity_end, "%Y-%m-%d").date()
+        return end_date < date.today()
+    except (ValueError, TypeError):
+        return False
+
+
 def search_promos_for_item(pc: Pinecone, index, item: dict) -> list[dict]:
     """Search Pinecone for promotions matching a single promo interest item.
 
@@ -148,13 +165,13 @@ def search_promos_for_item(pc: Pinecone, index, item: dict) -> list[dict]:
     interest_category = item.get("interest_category")
     brands = item.get("brands", [])
 
-    # Metadata filter
-    # NOTE: validity_end is stored as a string in Pinecone, so $gte won't work
-    # (Pinecone requires numeric operands for $gte). Skip date filtering for now.
+    # Expiration filter: only return promos that haven't expired yet
+    expiry_filter = {"validity_end_epoch": {"$gte": _today_epoch()}}
+
     if granular_category:
-        filter_dict = {"granular_category": {"$eq": granular_category}}
+        filter_dict = {"$and": [{"granular_category": {"$eq": granular_category}}, expiry_filter]}
     else:
-        filter_dict = None
+        filter_dict = expiry_filter
 
     # Build category suffix for query text
     cat_suffix = ""
@@ -174,10 +191,10 @@ def search_promos_for_item(pc: Pinecone, index, item: dict) -> list[dict]:
     for query_text in query_texts:
         hits = _pinecone_search_and_rerank(index, query_text, filter_dict)
 
-        # Fallback without category filter
+        # Fallback without category filter (still enforce expiry)
         if not hits and granular_category:
             logger.info(f"    No results with category filter for '{query_text}', retrying without category...")
-            hits = _pinecone_search_and_rerank(index, query_text, filter_dict=None)
+            hits = _pinecone_search_and_rerank(index, query_text, filter_dict=expiry_filter)
 
         # Deduplicate across brand queries
         for hit in hits:
@@ -188,14 +205,14 @@ def search_promos_for_item(pc: Pinecone, index, item: dict) -> list[dict]:
                 seen_ids.add(hit_id)
             all_results.append(hit)
 
-    # Filter by rerank score threshold and build promo dicts
+    # Filter by rerank score threshold + expiration safety net
     relevant = []
     for hit in all_results:
         score = hit.get("_score", 0)
         if score >= RERANK_SCORE_THRESHOLD:
             promo = _build_promo_dict(hit.get("fields", {}), score)
-            # Filter out promos with bad pricing data
-            if _is_valid_promo(promo):
+            # Filter out promos with bad pricing data or expired
+            if _is_valid_promo(promo) and not _is_expired(promo):
                 relevant.append(promo)
 
     # --- Fallback: if no results above threshold, try broader category search ---
@@ -209,7 +226,7 @@ def search_promos_for_item(pc: Pinecone, index, item: dict) -> list[dict]:
                 score = hit.get("_score", 0)
                 if score >= RERANK_SCORE_THRESHOLD:
                     promo = _build_promo_dict(hit.get("fields", {}), score)
-                    if _is_valid_promo(promo):
+                    if _is_valid_promo(promo) and not _is_expired(promo):
                         relevant.append(promo)
             relevant = relevant[:RERANK_TOP_N]
 

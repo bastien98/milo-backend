@@ -509,6 +509,16 @@ def delete_retailer_promos(index, retailer: str, validity_start: str, validity_e
     return len(ids_to_delete)
 
 
+def _date_to_epoch(date_str: Optional[str]) -> int:
+    """Convert YYYY-MM-DD date string to YYYYMMDD integer for Pinecone numeric filtering."""
+    if not date_str:
+        return 0
+    try:
+        return int(date_str.replace("-", ""))
+    except (ValueError, AttributeError):
+        return 0
+
+
 def upsert_to_pinecone(items: list[PromoItem], batch_size: int = 50) -> int:
     """Upsert promo items to Pinecone with integrated embedding."""
     before = len(items)
@@ -546,6 +556,7 @@ def upsert_to_pinecone(items: list[PromoItem], batch_size: int = 50) -> int:
             "unit_info": item.unit_info or "",
             "validity_start": item.validity_start or "",
             "validity_end": item.validity_end or "",
+            "validity_end_epoch": _date_to_epoch(item.validity_end),
             "source_retailer": item.source_retailer,
             "source_type": item.source_type,
             "page_number": item.page_number if item.page_number is not None else 0,

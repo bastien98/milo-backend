@@ -10,6 +10,7 @@ Handles promo search chat interactions:
 import json
 import logging
 import os
+from datetime import date, datetime
 from typing import Optional
 
 from pinecone import Pinecone
@@ -284,6 +285,16 @@ class PromoChatService:
         all_promos = []
         seen_ids = set()
 
+        # Expiration filter: only return promos that haven't expired yet
+        today_epoch = int(date.today().strftime("%Y%m%d"))
+        expiry_filter = {"validity_end_epoch": {"$gte": today_epoch}}
+
+        # Inject expiry into base_filter
+        if base_filter:
+            base_filter = {"$and": [base_filter, expiry_filter]}
+        else:
+            base_filter = expiry_filter
+
         # Run 3 searches with granular_category filters (if available)
         granular_categories = search_query.granular_categories[:3] if search_query.granular_categories else []
 
@@ -293,11 +304,7 @@ class PromoChatService:
             for category in granular_categories:
                 # Build filter with category
                 category_filter = {"granular_category": {"$eq": category}}
-                if base_filter:
-                    # Combine retailer filter with category filter
-                    combined_filter = {"$and": [base_filter, category_filter]}
-                else:
-                    combined_filter = category_filter
+                combined_filter = {"$and": [base_filter, category_filter]}
 
                 # Search with category filter
                 hits = self._pinecone_search_and_rerank(search_query.search_text, combined_filter)
@@ -313,7 +320,7 @@ class PromoChatService:
                     # Threshold for category-filtered searches
                     if score >= 0.55:
                         promo = self._build_promo_result(hit.get("fields", {}), score)
-                        if promo and self._is_valid_promo(promo):
+                        if promo and self._is_valid_promo(promo) and not self._is_expired_promo(promo):
                             # Boost score if brand matches exactly
                             if search_query.brands and promo.brand:
                                 if promo.brand.lower() in [b.lower() for b in search_query.brands]:
@@ -334,7 +341,7 @@ class PromoChatService:
             score = hit.get("_score", 0)
             if score >= RERANK_SCORE_THRESHOLD:
                 promo = self._build_promo_result(hit.get("fields", {}), score)
-                if promo and self._is_valid_promo(promo):
+                if promo and self._is_valid_promo(promo) and not self._is_expired_promo(promo):
                     if search_query.brands and promo.brand:
                         if promo.brand.lower() in [b.lower() for b in search_query.brands]:
                             promo.relevance_score = min(1.0, promo.relevance_score + 0.2)
@@ -461,6 +468,17 @@ class PromoChatService:
             if promo.promo_price > promo.original_price:
                 return False
         return True
+
+    @staticmethod
+    def _is_expired_promo(promo: PromoResult) -> bool:
+        """Safety net: check if promo is expired based on validity_end string."""
+        if not promo.validity_end:
+            return False
+        try:
+            end_date = datetime.strptime(promo.validity_end, "%Y-%m-%d").date()
+            return end_date < date.today()
+        except (ValueError, TypeError):
+            return False
 
     def _build_success_response(self, search_query: SearchQuery, promos: list[PromoResult]) -> str:
         """Build a friendly response message for successful search."""

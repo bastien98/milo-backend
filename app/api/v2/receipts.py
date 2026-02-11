@@ -23,7 +23,6 @@ from app.schemas.receipt import (
 from app.services.receipt_processor_v2 import ReceiptProcessorV2
 from app.db.repositories.receipt_repo import ReceiptRepository
 from app.db.repositories.transaction_repo import TransactionRepository
-from app.db.repositories.budget_ai_insight_repo import BudgetAIInsightRepository
 from app.core.exceptions import ResourceNotFoundError
 from app.services.enriched_profile_service import EnrichedProfileService
 
@@ -90,13 +89,7 @@ async def upload_receipt(
             f"items={result.items_count}, total={result.total_amount}"
         )
 
-    # Invalidate cached AI budget suggestions (new receipt = new data)
     if not result.is_duplicate:
-        t0 = time.monotonic()
-        insight_repo = BudgetAIInsightRepository(db)
-        await insight_repo.invalidate_suggestions(current_user.id)
-        logger.info(f"⏱ invalidate_insights: {time.monotonic() - t0:.3f}s")
-
         t0 = time.monotonic()
         await EnrichedProfileService.rebuild_profile(current_user.id, db)
         logger.info(f"⏱ rebuild_enriched_profile: {time.monotonic() - t0:.3f}s")

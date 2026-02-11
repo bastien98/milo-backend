@@ -31,7 +31,7 @@ async def init_db():
         - Uses create_all() for convenience (creates tables if they don't exist)
     """
     # Import all models to ensure they're registered with SQLAlchemy
-    from app.models import user, receipt, transaction, user_rate_limit, user_profile, budget, budget_ai_insight, budget_history  # noqa
+    from app.models import user, receipt, transaction, user_rate_limit, user_profile, budget, budget_history  # noqa
     from app.models import user_enriched_profile  # noqa
 
     if not settings.USE_ALEMBIC:

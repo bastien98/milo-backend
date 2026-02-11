@@ -14,7 +14,6 @@ if TYPE_CHECKING:
     from app.models.user_profile import UserProfile
     from app.models.user_enriched_profile import UserEnrichedProfile
     from app.models.budget import Budget
-    from app.models.budget_ai_insight import BudgetAIInsight
     from app.models.budget_history import BudgetHistory
     from app.models.expense_split import ExpenseSplit
 
@@ -50,9 +49,6 @@ class User(Base):
     )
     budget: Mapped[Optional["Budget"]] = relationship(
         "Budget", back_populates="user", cascade="all, delete-orphan", uselist=False
-    )
-    ai_insights: Mapped[List["BudgetAIInsight"]] = relationship(
-        "BudgetAIInsight", back_populates="user", cascade="all, delete-orphan"
     )
     budget_history: Mapped[List["BudgetHistory"]] = relationship(
         "BudgetHistory", back_populates="user", cascade="all, delete-orphan"

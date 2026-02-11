@@ -9,7 +9,7 @@ import asyncio
 import json
 import logging
 import time
-from datetime import date, timedelta
+from datetime import date, timedelta, datetime
 from typing import Any, Optional
 
 from pinecone import Pinecone
@@ -306,6 +306,26 @@ class GeminiPromoError(Exception):
 # Pinecone helpers (synchronous — called via asyncio.to_thread)
 # ---------------------------------------------------------------------------
 
+def _today_epoch() -> int:
+    """Return today's date as YYYYMMDD integer for Pinecone filtering."""
+    return int(date.today().strftime("%Y%m%d"))
+
+
+def _is_expired(promo: dict) -> bool:
+    """Check if a promo is expired based on its validity_end string (YYYY-MM-DD).
+
+    Safety net for records ingested before validity_end_epoch was added.
+    """
+    validity_end = promo.get("validity_end", "")
+    if not validity_end:
+        return False  # No date = keep it (can't determine)
+    try:
+        end_date = datetime.strptime(validity_end, "%Y-%m-%d").date()
+        return end_date < date.today()
+    except (ValueError, TypeError):
+        return False
+
+
 def _search_promos_for_item(pc: Pinecone, index, item: dict) -> list[dict]:
     """Search Pinecone for promotions matching a single promo interest item."""
     normalized_name = item["normalized_name"]
@@ -313,10 +333,13 @@ def _search_promos_for_item(pc: Pinecone, index, item: dict) -> list[dict]:
     interest_category = item.get("interest_category")
     brands = item.get("brands", [])
 
+    # Expiration filter: only return promos that haven't expired yet
+    expiry_filter = {"validity_end_epoch": {"$gte": _today_epoch()}}
+
     if granular_category:
-        filter_dict = {"granular_category": {"$eq": granular_category}}
+        filter_dict = {"$and": [{"granular_category": {"$eq": granular_category}}, expiry_filter]}
     else:
-        filter_dict = None
+        filter_dict = expiry_filter
 
     cat_suffix = ""
     if granular_category and granular_category != "Other":
@@ -335,9 +358,9 @@ def _search_promos_for_item(pc: Pinecone, index, item: dict) -> list[dict]:
     for query_text in query_texts:
         hits = _pinecone_search_and_rerank(index, query_text, filter_dict)
 
-        # Fallback without category filter
+        # Fallback without category filter (still enforce expiry)
         if not hits and granular_category:
-            hits = _pinecone_search_and_rerank(index, query_text, filter_dict=None)
+            hits = _pinecone_search_and_rerank(index, query_text, filter_dict=expiry_filter)
 
         for hit in hits:
             hit_id = hit.get("_id", "")
@@ -347,13 +370,13 @@ def _search_promos_for_item(pc: Pinecone, index, item: dict) -> list[dict]:
                 seen_ids.add(hit_id)
             all_results.append(hit)
 
-    # Filter by rerank score threshold
+    # Filter by rerank score threshold + expiration safety net
     relevant = []
     for hit in all_results:
         score = hit.get("_score", 0)
         if score >= RERANK_SCORE_THRESHOLD:
             promo = _build_promo_dict(hit.get("fields", {}), score)
-            if _is_valid_promo(promo):
+            if _is_valid_promo(promo) and not _is_expired(promo):
                 relevant.append(promo)
 
     # Fallback: broader category search
@@ -367,7 +390,7 @@ def _search_promos_for_item(pc: Pinecone, index, item: dict) -> list[dict]:
                 score = hit.get("_score", 0)
                 if score >= RERANK_SCORE_THRESHOLD:
                     promo = _build_promo_dict(hit.get("fields", {}), score)
-                    if _is_valid_promo(promo):
+                    if _is_valid_promo(promo) and not _is_expired(promo):
                         relevant.append(promo)
             relevant = relevant[:RERANK_TOP_N]
 

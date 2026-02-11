@@ -1,37 +1,51 @@
 from datetime import datetime
 from typing import Optional, List
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 
 class CategoryAllocation(BaseModel):
-    """Category allocation within a budget."""
+    """A category target (guardrail) within a budget."""
     category: str
     amount: float = Field(..., gt=0)
-    is_locked: bool = False
+
+
+def _filter_zero_allocations(data):
+    """Remove category allocations with zero/negative amounts (e.g. from rounding)."""
+    if isinstance(data, dict):
+        allocs = data.get('category_allocations')
+        if allocs is not None:
+            filtered = [a for a in allocs if isinstance(a, dict) and a.get('amount', 0) > 0]
+            data['category_allocations'] = filtered if filtered else None
+    return data
 
 
 class BudgetBase(BaseModel):
     """Base budget schema with common fields."""
     monthly_amount: float = Field(..., gt=0)
     category_allocations: Optional[List[CategoryAllocation]] = None
-    notifications_enabled: bool = True
-    alert_thresholds: Optional[List[float]] = Field(default=[0.5, 0.75, 0.9])
     is_smart_budget: bool = True  # When true, budget auto-rolls to next month
 
 
 class BudgetCreate(BudgetBase):
     """Schema for creating a new budget."""
-    pass
+
+    @model_validator(mode='before')
+    @classmethod
+    def filter_zero_allocations(cls, data):
+        return _filter_zero_allocations(data)
 
 
 class BudgetUpdate(BaseModel):
     """Schema for updating a budget. All fields are optional."""
     monthly_amount: Optional[float] = Field(None, gt=0)
     category_allocations: Optional[List[CategoryAllocation]] = None
-    notifications_enabled: Optional[bool] = None
-    alert_thresholds: Optional[List[float]] = None
     is_smart_budget: Optional[bool] = None  # Allows toggling smart budget
+
+    @model_validator(mode='before')
+    @classmethod
+    def filter_zero_allocations(cls, data):
+        return _filter_zero_allocations(data)
 
 
 class BudgetResponse(BudgetBase):
@@ -52,14 +66,13 @@ class BudgetNotFoundResponse(BaseModel):
 
 
 class CategoryProgress(BaseModel):
-    """Progress for a single category (Activity Rings data)."""
+    """Progress for a single watched category (guardrail)."""
     category_id: str  # Enum name, e.g., "MEAT_FISH"
     name: str  # Display name, e.g., "Meat & Fish"
-    limit_amount: float  # The budget allocation for this category
+    limit_amount: float  # The category target
     spent_amount: float  # Actual spending in this category
     is_over_budget: bool  # True if spent_amount > limit_amount
     over_budget_amount: Optional[float] = None  # Amount over budget (only if over)
-    is_locked: bool  # Whether this category allocation is locked
 
 
 class BudgetProgressResponse(BaseModel):
@@ -69,30 +82,6 @@ class BudgetProgressResponse(BaseModel):
     days_elapsed: int
     days_in_month: int
     category_progress: List[CategoryProgress]
-
-
-class CategoryBreakdown(BaseModel):
-    """Category breakdown in budget suggestion."""
-    category: str
-    average_spend: float
-    suggested_budget: float
-    percentage: float
-
-
-class SavingsOption(BaseModel):
-    """Savings option in budget suggestion."""
-    label: str
-    amount: float
-    savings_percentage: int
-
-
-class BudgetSuggestionResponse(BaseModel):
-    """Schema for budget suggestion response."""
-    suggested_amount: float
-    based_on_months: int
-    average_monthly_spend: float
-    category_breakdown: List[CategoryBreakdown]
-    savings_options: List[SavingsOption]
 
 
 # =============================================================================
