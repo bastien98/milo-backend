@@ -1,6 +1,5 @@
 # Makefile for Railway deployment
-# Uses `railway login` session auth (no tokens needed).
-# Run `make login` once, then `make link` to connect to the project.
+# Uses token-based auth — no `railway login` or `railway link` needed.
 
 # Default environment (can be overridden: make deploy ENV=production)
 ENV ?= non-prod
@@ -8,42 +7,30 @@ ENV ?= non-prod
 # Railway service name
 SERVICE = scandalicious-api
 
-# Railway environment names (must match what's in the Railway dashboard)
+# Railway tokens and environment names per environment
 ifeq ($(ENV),production)
   RAILWAY_ENV = production
+  RAILWAY_TOKEN = a5fd4542-cbf4-405d-9df2-9a1abf680ad3
 else
   RAILWAY_ENV = non-prod
+  RAILWAY_TOKEN = 2f4b2fe6-4d49-4588-a77f-e679f78861ca
 endif
+
+export RAILWAY_TOKEN
 
 .PHONY: help
 help:
 	@echo "Railway Deployment Commands:"
-	@echo "  make login                               - Authenticate with Railway (browser OAuth)"
-	@echo "  make link                                - Link to the Railway project (interactive, one-time)"
 	@echo "  make deploy [ENV=production|non-prod]     - Deploy to specified environment (default: non-prod)"
 	@echo "  make logs [ENV=production|non-prod]       - View logs for specified environment"
-	@echo "  make status                               - Show project status"
+	@echo "  make status [ENV=production|non-prod]     - Show project status"
 	@echo "  make variables [ENV=production|non-prod]  - List variables for specified environment"
 	@echo "  make domain [ENV=production|non-prod]     - Get domain for specified environment"
-	@echo ""
-	@echo "First-time setup:"
-	@echo "  make login   # Authenticate via browser"
-	@echo "  make link    # Select project (one-time)"
 	@echo ""
 	@echo "Deploy examples:"
 	@echo "  make deploy                # Deploy to non-prod"
 	@echo "  make deploy ENV=production # Deploy to production"
 	@echo "  make logs ENV=production   # View production logs"
-
-.PHONY: login
-login:
-	@echo "Authenticating with Railway..."
-	@railway login
-
-.PHONY: link
-link:
-	@echo "Linking to Railway project..."
-	@railway link
 
 .PHONY: deploy
 deploy:
