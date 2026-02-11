@@ -51,5 +51,10 @@ firebase-service-account.json
 # Claude Code local settings (personal, not shared)
 .claude/settings.local.json
 
+# Local scripts and env files with secrets
+scripts/db-query.sh
+scripts/railway-logs.sh
+.env.railway
+
 BACKEND_CONTEXT.txt
 WalletCerts/

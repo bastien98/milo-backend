@@ -6,14 +6,13 @@ from fastapi import APIRouter, Depends, UploadFile, File, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_db, get_current_db_user
-from app.core.security import get_current_user, FirebaseUser
 from app.models.user import User
 from app.schemas.receipt import ReceiptUploadResponse, ReceiptResponse, ReceiptListResponse
 from app.services.receipt_processor_v2 import ReceiptProcessorV2
-from app.services.rate_limit_service import RateLimitService
 from app.db.repositories.receipt_repo import ReceiptRepository
 from app.db.repositories.transaction_repo import TransactionRepository
-from app.core.exceptions import ResourceNotFoundError, RateLimitExceededError
+from app.core.exceptions import ResourceNotFoundError
+from app.services.enriched_profile_service import EnrichedProfileService
 
 logger = logging.getLogger(__name__)
 
@@ -93,6 +92,9 @@ async def delete_receipt(
 
     await receipt_repo.delete(receipt_id)
 
+    # Rebuild enriched profile after deletion
+    await EnrichedProfileService.rebuild_profile(current_user.id, db)
+
     return {"message": "Receipt deleted successfully"}
 
 
@@ -102,7 +104,6 @@ async def upload_receipt(
     receipt_date: Optional[date] = Query(None, description="Override receipt date"),
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_db_user),
-    firebase_user: FirebaseUser = Depends(get_current_user),
 ):
     """
     Upload and process a receipt using Veryfi OCR and Gemini categorization.
@@ -111,31 +112,14 @@ async def upload_receipt(
     - Veryfi API for OCR extraction (item names, prices, quantities)
     - Gemini API for categorization and health scoring
 
-    Rate limited to 15 uploads per month.
-
     Accepts PDF, JPG, or PNG files.
     Returns the extracted data synchronously.
 
     **Duplicate Detection**: If Veryfi detects this receipt was previously processed,
     returns `is_duplicate: true` with empty `receipt_id` and no transactions saved.
     """
-    # Check receipt upload rate limit
-    rate_limit_service = RateLimitService(db)
-    rate_limit_status = await rate_limit_service.check_receipt_rate_limit(firebase_user.uid)
-
-    if not rate_limit_status.allowed:
-        raise RateLimitExceededError(
-            message=f"Receipt upload limit exceeded. You have used {rate_limit_status.receipts_used}/{rate_limit_status.receipts_limit} uploads this month.",
-            details={
-                "receipts_used": rate_limit_status.receipts_used,
-                "receipts_limit": rate_limit_status.receipts_limit,
-                "period_end_date": rate_limit_status.period_end_date.isoformat(),
-                "retry_after_seconds": rate_limit_status.retry_after_seconds,
-            },
-        )
-
     logger.info(
-        f"Receipt upload: user_id={current_user.id}, firebase_uid={firebase_user.uid}, "
+        f"Receipt upload: user_id={current_user.id}, "
         f"receipt_date_override={receipt_date}"
     )
 
@@ -158,7 +142,8 @@ async def upload_receipt(
         f"items_count={result.items_count}"
     )
 
-    # Increment the rate limit counter after successful upload
-    await rate_limit_status.increment_on_success()
+    # Rebuild enriched profile with updated transaction data (also invalidates cache)
+    if not result.is_duplicate:
+        await EnrichedProfileService.rebuild_profile(current_user.id, db)
 
     return result

@@ -5,6 +5,7 @@ from collections import defaultdict
 from sqlalchemy import select, and_, func, case, cast, Date
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.cache import cached
 from app.models.transaction import Transaction
 from app.schemas.analytics import (
     PeriodSummary,
@@ -45,6 +46,7 @@ class AnalyticsService:
         self.db = db
         self.split_calc = SplitAwareCalculation(db)
 
+    @cached()
     async def get_period_summary(
         self,
         user_id: str,
@@ -152,6 +154,7 @@ class AnalyticsService:
             average_health_score=average_health_score,
         )
 
+    @cached()
     async def get_pie_chart_summary(
         self,
         user_id: str,
@@ -271,6 +274,7 @@ class AnalyticsService:
             stores=stores,
         )
 
+    @cached()
     async def get_category_breakdown(
         self,
         user_id: str,
@@ -371,6 +375,7 @@ class AnalyticsService:
             average_health_score=overall_avg_health,
         )
 
+    @cached()
     async def get_store_breakdown(
         self,
         user_id: str,
@@ -503,6 +508,7 @@ class AnalyticsService:
             average_item_price=average_item_price,
         )
 
+    @cached()
     async def get_spending_trends(
         self,
         user_id: str,
@@ -615,6 +621,7 @@ class AnalyticsService:
             period_type=period_type,
         )
 
+    @cached()
     async def get_store_spending_trends(
         self,
         user_id: str,
@@ -729,6 +736,7 @@ class AnalyticsService:
             period_type=period_type,
         )
 
+    @cached()
     async def get_periods_metadata(
         self,
         user_id: str,
@@ -899,6 +907,7 @@ class AnalyticsService:
 
         return start, end
 
+    @cached()
     async def get_aggregate_stats(
         self,
         user_id: str,
@@ -1513,6 +1522,7 @@ class AnalyticsService:
 
         return HealthScoreDistribution(**distribution)
 
+    @cached()
     async def get_all_time_stats(
         self,
         user_id: str,
@@ -1664,6 +1674,7 @@ class AnalyticsService:
             last_receipt_date=last_receipt_date,
         )
 
+    @cached()
     async def get_year_summary(
         self,
         user_id: str,

@@ -21,6 +21,10 @@ class Settings(BaseSettings):
     # Gemini
     GEMINI_API_KEY: str = ""
 
+    # Pinecone
+    PINECONE_API_KEY: str = ""
+    PINECONE_INDEX_HOST: str = "promos-k16b2f4.svc.aped-4627-b74a.pinecone.io"
+
     # Veryfi
     VERYFI_CLIENT_ID: str = ""
     VERYFI_CLIENT_SECRET: str = ""

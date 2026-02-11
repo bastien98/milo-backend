@@ -1,3 +1,5 @@
+import logging
+import time
 from collections import defaultdict
 from datetime import date
 from math import ceil
@@ -7,8 +9,9 @@ from fastapi import APIRouter, Depends, UploadFile, File, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_db, get_current_db_user
-from app.core.security import get_current_user, FirebaseUser
 from app.models.user import User
+
+logger = logging.getLogger(__name__)
 from app.schemas.receipt import (
     ReceiptUploadResponse,
     ReceiptResponse,
@@ -18,11 +21,11 @@ from app.schemas.receipt import (
     LineItemDeleteResponse,
 )
 from app.services.receipt_processor_v2 import ReceiptProcessorV2
-from app.services.rate_limit_service import RateLimitService
 from app.db.repositories.receipt_repo import ReceiptRepository
 from app.db.repositories.transaction_repo import TransactionRepository
 from app.db.repositories.budget_ai_insight_repo import BudgetAIInsightRepository
-from app.core.exceptions import ResourceNotFoundError, RateLimitExceededError
+from app.core.exceptions import ResourceNotFoundError
+from app.services.enriched_profile_service import EnrichedProfileService
 
 router = APIRouter()
 
@@ -33,35 +36,33 @@ async def upload_receipt(
     receipt_date: Optional[date] = Query(None, description="Override receipt date"),
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_db_user),
-    firebase_user: FirebaseUser = Depends(get_current_user),
 ):
     """
     Upload and process a receipt.
 
     Accepts PDF, JPG, or PNG files. The receipt will be analyzed using
-    Veryfi for OCR and Google Gemini for categorization.
+    Google Gemini Vision for OCR, semantic normalization, and categorization.
 
-    Rate limited to 15 uploads per month.
+    Features:
+    - Line item extraction with original and normalized names
+    - Granular categorization (~200 categories) plus parent categories
+    - Belgian pricing conventions (comma→dot, Hoeveelheidsvoordeel)
+    - Deposit detection (Leeggoed/Vidange items)
+    - Health scoring (0-5 scale)
 
     Returns the extracted data synchronously.
 
-    **Duplicate Detection**: If Veryfi detects this receipt was previously processed,
-    returns `is_duplicate: true` with empty `receipt_id` and no transactions saved.
+    **Duplicate Detection**: If a receipt with the same content hash was previously
+    uploaded, returns `is_duplicate: true` with empty `receipt_id` and no transactions saved.
     """
-    # Check receipt upload rate limit
-    rate_limit_service = RateLimitService(db)
-    rate_limit_status = await rate_limit_service.check_receipt_rate_limit(firebase_user.uid)
+    t_total = time.monotonic()
 
-    if not rate_limit_status.allowed:
-        raise RateLimitExceededError(
-            message=f"Receipt upload limit exceeded. You have used {rate_limit_status.receipts_used}/{rate_limit_status.receipts_limit} uploads this month.",
-            details={
-                "receipts_used": rate_limit_status.receipts_used,
-                "receipts_limit": rate_limit_status.receipts_limit,
-                "period_end_date": rate_limit_status.period_end_date.isoformat(),
-                "retry_after_seconds": rate_limit_status.retry_after_seconds,
-            },
-        )
+    # Log upload start
+    logger.info(
+        f"Receipt upload started: user_id={current_user.id}, "
+        f"filename={file.filename}, content_type={file.content_type}, "
+        f"date_override={receipt_date}"
+    )
 
     receipt_repo = ReceiptRepository(db)
     transaction_repo = TransactionRepository(db)
@@ -71,20 +72,36 @@ async def upload_receipt(
         transaction_repo=transaction_repo,
     )
 
+    t0 = time.monotonic()
     result = await processor.process_receipt(
         user_id=current_user.id,
         file=file,
         receipt_date_override=receipt_date,
     )
+    logger.info(f"⏱ process_receipt_total: {time.monotonic() - t0:.3f}s")
 
-    # Increment the rate limit counter after successful upload
-    await rate_limit_status.increment_on_success()
+    # Log result
+    if result.is_duplicate:
+        logger.info(f"Receipt upload duplicate: user_id={current_user.id}, filename={file.filename}")
+    else:
+        logger.info(
+            f"Receipt upload complete: user_id={current_user.id}, "
+            f"receipt_id={result.receipt_id}, store={result.store_name}, "
+            f"items={result.items_count}, total={result.total_amount}"
+        )
 
     # Invalidate cached AI budget suggestions (new receipt = new data)
     if not result.is_duplicate:
+        t0 = time.monotonic()
         insight_repo = BudgetAIInsightRepository(db)
         await insight_repo.invalidate_suggestions(current_user.id)
+        logger.info(f"⏱ invalidate_insights: {time.monotonic() - t0:.3f}s")
 
+        t0 = time.monotonic()
+        await EnrichedProfileService.rebuild_profile(current_user.id, db)
+        logger.info(f"⏱ rebuild_enriched_profile: {time.monotonic() - t0:.3f}s")
+
+    logger.info(f"⏱ UPLOAD_TOTAL: {time.monotonic() - t_total:.3f}s")
     return result
 
 
@@ -130,12 +147,17 @@ async def list_receipts(
         if txn.receipt_id:
             groups[txn.receipt_id].append(txn)
 
-    # Fetch receipt sources for all receipts in one batch
-    receipt_sources = {}
-    for receipt_id in groups.keys():
-        receipt = await receipt_repo.get_by_id(receipt_id)
-        if receipt:
-            receipt_sources[receipt_id] = receipt.source
+    # Fetch receipt objects for receipt-level fields
+    receipt_map = {}
+    if groups:
+        receipts, _ = await receipt_repo.get_by_user(
+            user_id=current_user.id,
+            start_date=start_date,
+            end_date=end_date,
+            page=1,
+            page_size=10000,
+        )
+        receipt_map = {r.id: r for r in receipts}
 
     # Build grouped receipts
     grouped_receipts = []
@@ -156,16 +178,23 @@ async def list_receipts(
             else None
         )
 
+        # Get receipt-level fields from the receipt object
+        receipt_obj = receipt_map.get(receipt_id)
+
         # Get source from the receipt (default to receipt_upload for backwards compatibility)
         from app.models.enums import ReceiptSource
-        source = receipt_sources.get(receipt_id, ReceiptSource.RECEIPT_UPLOAD)
+        source = receipt_obj.source if receipt_obj else ReceiptSource.RECEIPT_UPLOAD
 
         grouped_receipts.append(
             GroupedReceipt(
                 receipt_id=receipt_id,
                 store_name=store,
                 receipt_date=txn_date,
+                receipt_time=receipt_obj.receipt_time if receipt_obj else None,
                 total_amount=round(total_amount, 2),
+                payment_method=receipt_obj.payment_method if receipt_obj else None,
+                total_savings=receipt_obj.total_savings if receipt_obj else None,
+                store_branch=receipt_obj.store_branch if receipt_obj else None,
                 items_count=items_count,
                 average_health_score=average_health_score,
                 source=source,
@@ -178,6 +207,14 @@ async def list_receipts(
                         unit_price=t.unit_price,
                         category=t.category,
                         health_score=t.health_score,
+                        original_description=t.original_description,
+                        normalized_name=t.normalized_name,
+                        is_discount=t.is_discount,
+                        is_deposit=t.is_deposit,
+                        granular_category=t.granular_category,
+                        unit_of_measure=t.unit_of_measure,
+                        weight_or_volume=t.weight_or_volume,
+                        price_per_unit_measure=t.price_per_unit_measure,
                     )
                     for t in txns
                 ],
@@ -242,6 +279,9 @@ async def delete_receipt(
 
     await receipt_repo.delete(receipt_id)
 
+    # Rebuild enriched profile after deletion
+    await EnrichedProfileService.rebuild_profile(current_user.id, db)
+
     return {"message": "Receipt deleted successfully"}
 
 
@@ -294,6 +334,9 @@ async def delete_line_item(
         # Delete the entire receipt (cascade will delete the transaction)
         await receipt_repo.delete(receipt_id)
 
+        # Rebuild enriched profile after deletion
+        await EnrichedProfileService.rebuild_profile(current_user.id, db)
+
         return LineItemDeleteResponse(
             success=True,
             message="Last item deleted - receipt removed",
@@ -325,6 +368,9 @@ async def delete_line_item(
         receipt_id=receipt_id,
         total_amount=round(new_total_amount, 2),
     )
+
+    # Rebuild enriched profile after line item deletion
+    await EnrichedProfileService.rebuild_profile(current_user.id, db)
 
     return LineItemDeleteResponse(
         success=True,

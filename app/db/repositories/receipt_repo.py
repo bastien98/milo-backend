@@ -1,4 +1,4 @@
-from datetime import date, datetime
+from datetime import date, datetime, time
 from typing import Optional, List
 
 from sqlalchemy import select, func, and_
@@ -101,6 +101,10 @@ class ReceiptRepository:
         total_amount: Optional[float] = None,
         error_message: Optional[str] = None,
         processed_at: Optional[datetime] = None,
+        receipt_time: Optional[time] = None,
+        payment_method: Optional[str] = None,
+        total_savings: Optional[float] = None,
+        store_branch: Optional[str] = None,
     ) -> Optional[Receipt]:
         """Update a receipt."""
         receipt = await self.get_by_id(receipt_id)
@@ -119,6 +123,14 @@ class ReceiptRepository:
             receipt.error_message = error_message
         if processed_at is not None:
             receipt.processed_at = processed_at
+        if receipt_time is not None:
+            receipt.receipt_time = receipt_time
+        if payment_method is not None:
+            receipt.payment_method = payment_method
+        if total_savings is not None:
+            receipt.total_savings = total_savings
+        if store_branch is not None:
+            receipt.store_branch = store_branch
 
         await self.db.flush()
         await self.db.refresh(receipt)

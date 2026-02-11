@@ -12,6 +12,7 @@ if TYPE_CHECKING:
     from app.models.transaction import Transaction
     from app.models.receipt import Receipt
     from app.models.user_profile import UserProfile
+    from app.models.user_enriched_profile import UserEnrichedProfile
     from app.models.budget import Budget
     from app.models.budget_ai_insight import BudgetAIInsight
     from app.models.budget_history import BudgetHistory
@@ -58,4 +59,7 @@ class User(Base):
     )
     expense_splits: Mapped[List["ExpenseSplit"]] = relationship(
         "ExpenseSplit", back_populates="user", cascade="all, delete-orphan"
+    )
+    enriched_profile: Mapped[Optional["UserEnrichedProfile"]] = relationship(
+        "UserEnrichedProfile", back_populates="user", cascade="all, delete-orphan", uselist=False
     )
