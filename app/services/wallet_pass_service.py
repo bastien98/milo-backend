@@ -55,13 +55,7 @@ class WalletPassService:
             "logoText": request.store_name,
             "storeCard": {
                 "headerFields": [],
-                "primaryFields": [
-                    {
-                        "key": "member",
-                        "label": "MEMBER",
-                        "value": request.member_number if request.member_number else request.store_name
-                    }
-                ],
+                "primaryFields": [],
                 "secondaryFields": [],
                 "auxiliaryFields": [],
                 "backFields": [

@@ -9,7 +9,7 @@ import asyncio
 import json
 import logging
 import time
-from datetime import date, timedelta, datetime
+from datetime import date, timedelta
 from typing import Any, Optional
 
 from pinecone import Pinecone
@@ -245,7 +245,7 @@ class PromoService:
         )
         return _parse_llm_response(raw_response)
 
-    def _call_gemini(self, user_message: str) -> str:
+    def _call_gemini(self, user_message: str, attempt: int = 1) -> str:
         from google import genai
         from google.genai import types
         from app.schemas.promo import GeminiPromoOutput
@@ -256,7 +256,7 @@ class PromoService:
             contents=[user_message],
             config=types.GenerateContentConfig(
                 system_instruction=SYSTEM_PROMPT,
-                max_output_tokens=8192,
+                max_output_tokens=16384,
                 temperature=0.7,
                 response_mime_type="application/json",
                 response_schema=GeminiPromoOutput,
@@ -265,6 +265,18 @@ class PromoService:
         if response.text is None:
             logger.warning(f"Gemini returned None text. Candidates: {response.candidates}")
             raise GeminiPromoError("Gemini returned empty response — likely blocked by safety filters")
+
+        # Verify JSON is parseable; retry once if truncated
+        raw = response.text.strip()
+        try:
+            json.loads(raw)
+        except json.JSONDecodeError:
+            if attempt < 2:
+                logger.warning(f"Gemini returned truncated JSON (attempt {attempt}), retrying...")
+                time.sleep(1)
+                return self._call_gemini(user_message, attempt + 1)
+            logger.warning(f"Gemini returned truncated JSON on final attempt")
+
         return response.text
 
     @staticmethod
@@ -306,26 +318,6 @@ class GeminiPromoError(Exception):
 # Pinecone helpers (synchronous — called via asyncio.to_thread)
 # ---------------------------------------------------------------------------
 
-def _today_epoch() -> int:
-    """Return today's date as YYYYMMDD integer for Pinecone filtering."""
-    return int(date.today().strftime("%Y%m%d"))
-
-
-def _is_expired(promo: dict) -> bool:
-    """Check if a promo is expired based on its validity_end string (YYYY-MM-DD).
-
-    Safety net for records ingested before validity_end_epoch was added.
-    """
-    validity_end = promo.get("validity_end", "")
-    if not validity_end:
-        return False  # No date = keep it (can't determine)
-    try:
-        end_date = datetime.strptime(validity_end, "%Y-%m-%d").date()
-        return end_date < date.today()
-    except (ValueError, TypeError):
-        return False
-
-
 def _search_promos_for_item(pc: Pinecone, index, item: dict) -> list[dict]:
     """Search Pinecone for promotions matching a single promo interest item."""
     normalized_name = item["normalized_name"]
@@ -333,13 +325,10 @@ def _search_promos_for_item(pc: Pinecone, index, item: dict) -> list[dict]:
     interest_category = item.get("interest_category")
     brands = item.get("brands", [])
 
-    # Expiration filter: only return promos that haven't expired yet
-    expiry_filter = {"validity_end_epoch": {"$gte": _today_epoch()}}
-
     if granular_category:
-        filter_dict = {"$and": [{"granular_category": {"$eq": granular_category}}, expiry_filter]}
+        filter_dict = {"granular_category": {"$eq": granular_category}}
     else:
-        filter_dict = expiry_filter
+        filter_dict = None
 
     cat_suffix = ""
     if granular_category and granular_category != "Other":
@@ -358,9 +347,9 @@ def _search_promos_for_item(pc: Pinecone, index, item: dict) -> list[dict]:
     for query_text in query_texts:
         hits = _pinecone_search_and_rerank(index, query_text, filter_dict)
 
-        # Fallback without category filter (still enforce expiry)
+        # Fallback without category filter
         if not hits and granular_category:
-            hits = _pinecone_search_and_rerank(index, query_text, filter_dict=expiry_filter)
+            hits = _pinecone_search_and_rerank(index, query_text, filter_dict=None)
 
         for hit in hits:
             hit_id = hit.get("_id", "")
@@ -370,13 +359,13 @@ def _search_promos_for_item(pc: Pinecone, index, item: dict) -> list[dict]:
                 seen_ids.add(hit_id)
             all_results.append(hit)
 
-    # Filter by rerank score threshold + expiration safety net
+    # Filter by rerank score threshold
     relevant = []
     for hit in all_results:
         score = hit.get("_score", 0)
         if score >= RERANK_SCORE_THRESHOLD:
             promo = _build_promo_dict(hit.get("fields", {}), score)
-            if _is_valid_promo(promo) and not _is_expired(promo):
+            if _is_valid_promo(promo):
                 relevant.append(promo)
 
     # Fallback: broader category search
@@ -390,7 +379,7 @@ def _search_promos_for_item(pc: Pinecone, index, item: dict) -> list[dict]:
                 score = hit.get("_score", 0)
                 if score >= RERANK_SCORE_THRESHOLD:
                     promo = _build_promo_dict(hit.get("fields", {}), score)
-                    if _is_valid_promo(promo) and not _is_expired(promo):
+                    if _is_valid_promo(promo):
                         relevant.append(promo)
             relevant = relevant[:RERANK_TOP_N]
 
@@ -674,6 +663,59 @@ def _build_llm_context(profile: dict, promo_results: dict[str, list[dict]]) -> s
     return "\n".join(parts)
 
 
+def _repair_truncated_json(raw: str) -> str | None:
+    """Attempt to repair truncated JSON by closing open brackets/braces."""
+    # Strip any trailing incomplete string (unterminated "...")
+    import re
+    s = raw.rstrip()
+
+    # Remove trailing incomplete key-value or string
+    # If we're mid-string, close it
+    quote_count = s.count('"') - s.count('\\"')
+    if quote_count % 2 == 1:
+        # Odd quotes = unterminated string, close it
+        s += '"'
+
+    # Remove trailing comma if present
+    s = re.sub(r',\s*$', '', s)
+
+    # Count open vs close brackets
+    stack = []
+    in_string = False
+    escape = False
+    for ch in s:
+        if escape:
+            escape = False
+            continue
+        if ch == '\\' and in_string:
+            escape = True
+            continue
+        if ch == '"':
+            in_string = not in_string
+            continue
+        if in_string:
+            continue
+        if ch in ('{', '['):
+            stack.append(ch)
+        elif ch == '}':
+            if stack and stack[-1] == '{':
+                stack.pop()
+        elif ch == ']':
+            if stack and stack[-1] == '[':
+                stack.pop()
+
+    # Close remaining open brackets
+    closers = {'[': ']', '{': '}'}
+    for opener in reversed(stack):
+        s += closers[opener]
+
+    try:
+        json.loads(s)
+        return s
+    except json.JSONDecodeError:
+        return None
+
+
 def _parse_llm_response(raw_response: str) -> dict:
     """Parse Gemini's structured JSON output and apply server-side fixups.
 
@@ -704,9 +746,19 @@ def _parse_llm_response(raw_response: str) -> dict:
         try:
             data = json.loads(clean, strict=False)
         except json.JSONDecodeError as e2:
-            logger.error(f"Failed to parse LLM JSON response: {e2}")
-            logger.error(f"Raw response (first 500 chars): {raw_response[:500]}")
-            return _empty_fallback()
+            logger.warning(f"JSON parse failed: {e2}, attempting truncation repair...")
+            repaired = _repair_truncated_json(clean)
+            if repaired:
+                try:
+                    data = json.loads(repaired, strict=False)
+                    logger.info("Truncated JSON repaired successfully")
+                except json.JSONDecodeError as e3:
+                    logger.error(f"Failed to parse even repaired JSON: {e3}")
+                    logger.error(f"Raw response (first 500 chars): {raw_response[:500]}")
+                    return _empty_fallback()
+            else:
+                logger.error(f"JSON repair failed. Raw (first 500 chars): {raw_response[:500]}")
+                return _empty_fallback()
 
     # Cap top_picks at 3
     data["top_picks"] = data.get("top_picks", [])[:3]

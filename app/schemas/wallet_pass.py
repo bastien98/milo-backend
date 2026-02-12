@@ -23,7 +23,6 @@ class PassColor(BaseModel):
 
 class WalletPassCreateRequest(BaseModel):
     store_name: str = Field(..., min_length=1, max_length=100)
-    member_number: Optional[str] = Field(default="", max_length=50)
     barcode_value: str = Field(..., min_length=1)
     barcode_format: BarcodeFormat = BarcodeFormat.QR
     background_color: PassColor
