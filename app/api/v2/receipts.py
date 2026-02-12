@@ -202,6 +202,7 @@ async def list_receipts(
                         health_score=t.health_score,
                         original_description=t.original_description,
                         normalized_name=t.normalized_name,
+                        normalized_brand=t.normalized_brand,
                         is_discount=t.is_discount,
                         is_deposit=t.is_deposit,
                         granular_category=t.granular_category,

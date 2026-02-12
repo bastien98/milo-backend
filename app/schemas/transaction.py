@@ -36,6 +36,9 @@ class TransactionResponse(TransactionBase):
     user_id: str
     receipt_id: Optional[str] = None
     created_at: datetime
+    original_description: Optional[str] = None
+    normalized_name: Optional[str] = None
+    normalized_brand: Optional[str] = None
 
     class Config:
         from_attributes = True
