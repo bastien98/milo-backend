@@ -398,9 +398,13 @@ def _search_promos_for_item(pc: Pinecone, index, item: dict) -> list[dict]:
 
 
 def _pinecone_search_and_rerank(
-    index, query_text: str, filter_dict: Optional[dict]
+    index, query_text: str, filter_dict: Optional[dict],
+    _max_retries: int = 3,
 ) -> list[dict]:
-    """Execute integrated search + rerank in a single Pinecone API call."""
+    """Execute integrated search + rerank in a single Pinecone API call.
+
+    Retries with exponential backoff on 429 rate-limit errors.
+    """
     query: dict[str, Any] = {
         "inputs": {"text": query_text},
         "top_k": SEARCH_TOP_K,
@@ -414,14 +418,21 @@ def _pinecone_search_and_rerank(
         "top_n": RERANK_TOP_N,
     }
 
-    try:
-        results = index.search_records(namespace="__default__", query=query, rerank=rerank)
-        return _extract_hits(results)
-    except (AttributeError, TypeError):
+    for attempt in range(_max_retries):
         try:
-            results = index.search(namespace="__default__", query=query, rerank=rerank)
+            try:
+                results = index.search_records(namespace="__default__", query=query, rerank=rerank)
+            except (AttributeError, TypeError):
+                results = index.search(namespace="__default__", query=query, rerank=rerank)
             return _extract_hits(results)
         except Exception as e:
+            error_str = str(e)
+            is_rate_limit = "429" in error_str or "Too Many Requests" in error_str or "RESOURCE_EXHAUSTED" in error_str
+            if is_rate_limit and attempt < _max_retries - 1:
+                wait = 2 ** attempt  # 1s, 2s, 4s
+                logger.warning(f"Pinecone rerank rate-limited (attempt {attempt + 1}), retrying in {wait}s...")
+                time.sleep(wait)
+                continue
             logger.warning(f"Pinecone search+rerank failed: {e}")
             return []
 
