@@ -127,7 +127,7 @@ class SplitAwareCalculation:
         tx_ids = [t.id for t in transactions]
         shares = await self.get_user_share_for_transactions(user_id, tx_ids)
 
-        return sum(shares.values())
+        return round(sum(shares.values()), 2)
 
     async def calculate_split_adjusted_spend_by_category(
         self,

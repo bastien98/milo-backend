@@ -80,7 +80,7 @@ class BudgetService:
         """
         today = date.today()
 
-        current_spend = await self.get_current_month_spend(user_id)
+        current_spend = round(await self.get_current_month_spend(user_id), 2)
         spend_by_category = await self.get_current_month_spend_by_category(user_id)
 
         days_elapsed = today.day
@@ -92,9 +92,10 @@ class BudgetService:
         if budget.category_allocations:
             for alloc in budget.category_allocations:
                 category_name = alloc.get("category", "")
-                limit_amount = alloc.get("amount", 0)
-                spent_amount = spend_by_category.get(category_name, 0)
+                limit_amount = round(float(alloc.get("amount", 0)), 2)
+                spent_amount = round(spend_by_category.get(category_name, 0), 2)
 
+                # Over budget only when spend exceeds limit by at least 1 cent
                 is_over_budget = spent_amount > limit_amount
                 over_budget_amount = round(spent_amount - limit_amount, 2) if is_over_budget else None
 
@@ -111,8 +112,11 @@ class BudgetService:
                     )
                 )
 
-            # Sort by spent_amount descending
-            category_progress.sort(key=lambda x: x.spent_amount, reverse=True)
+            # Sort by progress ratio descending, then by spent_amount descending
+            def _progress_ratio(cp: CategoryProgress) -> float:
+                return cp.spent_amount / cp.limit_amount if cp.limit_amount > 0 else 0
+
+            category_progress.sort(key=lambda x: (_progress_ratio(x), x.spent_amount), reverse=True)
 
         budget_response = BudgetResponse(
             id=budget.id,
