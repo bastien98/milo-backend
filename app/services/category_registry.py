@@ -51,8 +51,8 @@ GROUP_COLORS: Dict[str, str] = {
 GROUP_ICONS: Dict[str, str] = {
     "Fresh Food": "leaf.fill",
     "Pantry & Frozen": "cabinet.fill",
-    "Snacks & Beverages": "cup.and.saucer.fill",
-    "Household & Care": "house.fill",
+    "Snacks & Beverages": "mug.fill",
+    "Household & Care": "bubbles.and.sparkles.fill",
     "Other": "square.grid.2x2.fill",
 }
 

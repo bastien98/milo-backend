@@ -11,7 +11,7 @@ class ChatMessage(BaseModel):
 
 
 class ChatRequest(BaseModel):
-    """Request for the Dobby AI chat endpoint."""
+    """Request for the Milo AI chat endpoint."""
     message: str = Field(..., min_length=1, max_length=2000, description="User's question about their transactional data")
     conversation_history: Optional[List[ChatMessage]] = Field(
         default=None,
@@ -20,7 +20,7 @@ class ChatRequest(BaseModel):
 
 
 class ChatResponse(BaseModel):
-    """Response from the Dobby AI chat endpoint (non-streaming)."""
+    """Response from the Milo AI chat endpoint (non-streaming)."""
     response: str = Field(..., description="AI assistant's response")
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 

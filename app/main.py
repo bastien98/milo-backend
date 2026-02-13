@@ -42,7 +42,7 @@ Receipt scanning and expense tracking API powered by Veryfi OCR and AI.
 - **Duplicate Detection**: Automatically detects and rejects duplicate receipts - not saved to database
 - **Transaction Management**: View, edit, and delete transactions
 - **Analytics**: Spending summaries, category breakdowns, and trends
-- **AI Chat**: Ask questions about your spending with Dobby AI assistant
+- **AI Chat**: Ask questions about your spending with Milo AI assistant
 
 ### Authentication
 All endpoints require Firebase Authentication. Include the ID token in the Authorization header:

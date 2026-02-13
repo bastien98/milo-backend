@@ -11,7 +11,7 @@ from app.config import get_settings
 from app.db.session import async_session_maker
 from app.models.user import User
 from app.schemas.chat import ChatRequest, ChatResponse
-from app.services.dobby_chat_service_gemini import DobbyChatServiceGemini
+from app.services.milo_chat_service_gemini import MiloChatServiceGemini
 from app.services.rate_limit_service import RateLimitService, RateLimitStatus
 from app.core.exceptions import GeminiAPIError, RateLimitExceededError
 
@@ -47,10 +47,10 @@ async def chat(
     current_user: User = Depends(get_current_db_user),
 ):
     """
-    Send a message to Dobby AI and receive a response about your transactional data.
+    Send a message to Milo AI and receive a response about your transactional data.
 
     This is a non-streaming endpoint that returns the complete response at once.
-    Uses Google Gemini for AI processing.
+    Uses Google Gemini Pro for AI processing.
 
     Rate limit information is included in the response headers:
     - X-RateLimit-Limit: Maximum messages allowed per period
@@ -73,7 +73,7 @@ async def chat(
         )
 
     try:
-        chat_service = DobbyChatServiceGemini()
+        chat_service = MiloChatServiceGemini()
         response_text = await chat_service.chat(
             db=db,
             user_id=str(current_user.id),
@@ -115,7 +115,7 @@ async def stream_response(
             rate_limit_service = RateLimitService(db)
             rate_status = await rate_limit_service.check_rate_limit(firebase_uid)
 
-            chat_service = DobbyChatServiceGemini()
+            chat_service = MiloChatServiceGemini()
             async for chunk in chat_service.chat_stream(
                 db=db,
                 user_id=user_id,
@@ -148,10 +148,10 @@ async def chat_stream(
     current_user: User = Depends(get_current_db_user),
 ):
     """
-    Send a message to Dobby AI and receive a streaming response about your transactional data.
+    Send a message to Milo AI and receive a streaming response about your transactional data.
 
     This endpoint uses Server-Sent Events (SSE) to stream the response.
-    Uses Google Gemini for AI processing.
+    Uses Google Gemini Pro for AI processing.
 
     Each event is a JSON object with:
     - type: "text" | "error" | "done"
@@ -228,7 +228,7 @@ async def chat_test(
         raise HTTPException(status_code=404, detail="No users found in database")
 
     try:
-        chat_service = DobbyChatServiceGemini()
+        chat_service = MiloChatServiceGemini()
         response_text = await chat_service.chat(
             db=db,
             user_id=str(user.id),
