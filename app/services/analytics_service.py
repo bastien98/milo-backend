@@ -223,7 +223,7 @@ class AnalyticsService:
             categories.append(
                 PieChartCategory(
                     category_id=registry.get_category_id(category_name),
-                    name=category_name,
+                    name=get_category_registry().get_display_name(category_name),
                     total_spent=round(data["amount"], 2),
                     color_hex=color_hex,
                     percentage=round(percentage, 1),
@@ -352,7 +352,7 @@ class AnalyticsService:
             )
             categories.append(
                 CategorySpending(
-                    name=category_name,
+                    name=get_category_registry().get_display_name(category_name),
                     spent=round(data["amount"], 2),
                     percentage=round(percentage, 1),
                     transaction_count=data["count"],
@@ -459,7 +459,7 @@ class AnalyticsService:
             )
             categories.append(
                 CategorySpending(
-                    name=category_name,
+                    name=get_category_registry().get_display_name(category_name),
                     spent=round(data["amount"], 2),
                     percentage=round(percentage, 1),
                     transaction_count=data["count"],
@@ -1369,7 +1369,7 @@ class AnalyticsService:
             )
             categories.append(
                 CategorySpending(
-                    name=category_name,
+                    name=get_category_registry().get_display_name(category_name),
                     spent=round(data["amount"], 2),
                     percentage=round(percentage, 1),
                     transaction_count=data["count"],
@@ -1446,7 +1446,7 @@ class AnalyticsService:
             )
             categories.append(
                 CategorySpending(
-                    name=category_name,
+                    name=get_category_registry().get_display_name(category_name),
                     spent=round(data["amount"], 2),
                     percentage=round(percentage, 1),
                     transaction_count=data["count"],
@@ -1640,7 +1640,7 @@ class AnalyticsService:
                 else None
             )
             categories_list.append({
-                "name": category_name,
+                "name": get_category_registry().get_display_name(category_name),
                 "total_spent": round(data["amount"], 2),
                 "percentage": round(percentage, 1),
                 "transaction_count": data["count"],
@@ -1822,7 +1822,7 @@ class AnalyticsService:
             )
             categories.append(
                 YearCategorySpending(
-                    name=category_name,
+                    name=get_category_registry().get_display_name(category_name),
                     spent=round(data["amount"], 2),
                     percentage=round(percentage, 1),
                     transaction_count=data["count"],

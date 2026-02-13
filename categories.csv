@@ -1,32 +1,32 @@
-Group,Category
-Fresh Food,Fruits
-Fresh Food,Vegetables
-Fresh Food,Meat & Poultry (Raw)
-Fresh Food,Charcuterie & Salads (Preparé/Deli)
-Fresh Food,Fish & Seafood
-Fresh Food,"Dairy, Eggs & Cheese"
-Fresh Food,Bakery (Bread, Pistolets)
-Fresh Food,Pastries & Koffiekoeken
-Pantry & Staples,"Grains, Pasta & Potatoes"
-Pantry & Staples,Canned & Jarred Goods
-Pantry & Staples,"Sauces, Mayo & Condiments"
-Pantry & Staples,Breakfast & Cereal (Choco/Jam)
-Pantry & Staples,Baking & Flour
-Frozen,Frozen Ingredients (Veg/Fruit)
-Frozen,Fries & Snacks (Frituur at home)
-Frozen,Ready Meals & Pizza
-Drinks,Water (Bottled)
-Drinks,Soda & Juices
-Drinks,Coffee & Tea
-Drinks,"Alcohol (Beer, Cider, Wine, Whisky, Vodka, Gin, Cava, Champagne)"
-Snacks,"Chips, Nuts & Aperitif"
-Snacks,Chocolate & Sweets (Biscuits)
-Household,Official Waste Bags (PMD/Rest)
-Household,Cleaning & Paper Goods
-Personal Care,Pharmacy & Hygiene
-Other,Baby & Kids
-Other,Pet Supplies
-Other,Tobacco
-Other,Lottery & Scratch Cards
-Other,Deposits (Statiegeld/Vidange)
-Other,Other
+Group,Category,DisplayName
+Fresh Food,Fruits,Fruits
+Fresh Food,Vegetables,Vegetables
+Fresh Food,Meat & Poultry (Raw),Meat & Poultry
+Fresh Food,Charcuterie & Salads (Preparé/Deli),Charcuterie & Salads
+Fresh Food,Fish & Seafood,Fish & Seafood
+Fresh Food,"Dairy, Eggs & Cheese","Dairy, Eggs & Cheese"
+Fresh Food,Bakery (Bread, Pistolets),Bakery
+Fresh Food,Pastries & Koffiekoeken,Pastries
+Pantry & Staples,"Grains, Pasta & Potatoes","Grains, Pasta & Potatoes"
+Pantry & Staples,Canned & Jarred Goods,Canned & Jarred Goods
+Pantry & Staples,"Sauces, Mayo & Condiments",Sauces & Condiments
+Pantry & Staples,Breakfast & Cereal (Choco/Jam),Breakfast & Cereal
+Pantry & Staples,Baking & Flour,Baking & Flour
+Frozen,Frozen Ingredients (Veg/Fruit),Frozen Ingredients
+Frozen,Fries & Snacks (Frituur at home),Fries & Snacks
+Frozen,Ready Meals & Pizza,Ready Meals & Pizza
+Drinks,Water (Bottled),Water
+Drinks,Soda & Juices,Soda & Juices
+Drinks,Coffee & Tea,Coffee & Tea
+Drinks,"Alcohol (Beer, Cider, Wine, Whisky, Vodka, Gin, Cava, Champagne)",Alcohol
+Snacks,"Chips, Nuts & Aperitif","Chips, Nuts & Aperitif"
+Snacks,Chocolate & Sweets (Biscuits),Chocolate & Sweets
+Household,Official Waste Bags (PMD/Rest),Waste Bags
+Household,Cleaning & Paper Goods,Cleaning & Paper Goods
+Personal Care,Pharmacy & Hygiene,Pharmacy & Hygiene
+Other,Baby & Kids,Baby & Kids
+Other,Pet Supplies,Pet Supplies
+Other,Tobacco,Tobacco
+Other,Lottery & Scratch Cards,Lottery & Scratch Cards
+Other,Deposits (Statiegeld/Vidange),Deposits
+Other,Other,Other

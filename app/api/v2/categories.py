@@ -65,6 +65,7 @@ async def get_used_categories(
         info = registry.get_info(sub_category)
         used_categories.append({
             "sub_category": sub_category,
+            "display_name": registry.get_display_name(sub_category),
             "category": info.category if info else "Uncategorized",
             "group": info.group if info else "Miscellaneous",
             "total_spent": float(row.total_spent),

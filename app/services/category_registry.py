@@ -23,6 +23,7 @@ class SubCategoryInfo:
     sub_category: str
     category: str
     group: str
+    display_name: str = ""
 
 
 @dataclass
@@ -128,6 +129,7 @@ class CategoryRegistry:
             for row in reader:
                 group_name = row["Group"].strip()
                 category_name = row["Category"].strip()
+                display_name = row.get("DisplayName", "").strip() or category_name
 
                 # 2-level hierarchy: category is the leaf level
                 # For backward compat, sub_category = category
@@ -135,6 +137,7 @@ class CategoryRegistry:
                     sub_category=category_name,
                     category=category_name,
                     group=group_name,
+                    display_name=display_name,
                 )
                 self._lookup[category_name] = info
                 self._lower_lookup[category_name.lower()] = category_name
@@ -157,6 +160,7 @@ class CategoryRegistry:
                     sub_category=old_name,
                     category=new_info.category,
                     group=new_info.group,
+                    display_name=new_info.display_name,
                 )
                 self._lower_lookup[old_name.lower()] = old_name
 
@@ -190,6 +194,16 @@ class CategoryRegistry:
         if canonical:
             return self._lookup[canonical]
         return None
+
+    def get_display_name(self, sub_category: str) -> str:
+        """Get the clean display name for a sub-category."""
+        info = self._lookup.get(sub_category)
+        if info:
+            return info.display_name
+        canonical = self._lower_lookup.get(sub_category.lower())
+        if canonical:
+            return self._lookup[canonical].display_name
+        return sub_category
 
     def get_group_color(self, sub_category: str) -> str:
         """Get the hex color for a sub-category based on its group."""
@@ -254,8 +268,12 @@ class CategoryRegistry:
         for group_name, group_node in self._groups.items():
             categories = []
             for cat_name, cat_node in group_node.categories.items():
+                # Look up display name for this category
+                cat_info = self._lookup.get(cat_name)
+                cat_display = cat_info.display_name if cat_info else cat_name
                 categories.append({
                     "name": cat_name,
+                    "display_name": cat_display,
                     "sub_categories": cat_node.sub_categories,
                 })
             groups.append({
@@ -267,12 +285,12 @@ class CategoryRegistry:
         return {"groups": groups}
 
     def get_category_id(self, sub_category: str) -> str:
-        """Generate a stable category_id string from a sub-category name.
+        """Generate a stable category_id string from a sub-category's display name.
 
         Converts display name to an uppercase snake_case ID.
-        e.g., "Fresh Produce (Fruit & Veg)" -> "FRESH_PRODUCE_FRUIT_VEG"
+        e.g., "Meat & Poultry" -> "MEAT_POULTRY"
         """
-        s = sub_category.upper()
+        s = self.get_display_name(sub_category).upper()
         # Remove parentheses content markers but keep the text
         s = s.replace("(", "").replace(")", "")
         # Replace special chars with underscores
