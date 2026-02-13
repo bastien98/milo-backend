@@ -1,20 +1,32 @@
-Group,Category,Sub-Category
-Fresh Food,Fruits,Fruits
-Fresh Food,Vegetables,Vegetables
-Fresh Food,Meat,Meat
-Fresh Food,Seafood,Seafood
-Fresh Food,Dairy & Eggs,Dairy & Eggs
-Fresh Food,Bakery,Bakery
-Pantry & Frozen,Pantry,Pantry
-Pantry & Frozen,Frozen,Frozen
-Pantry & Frozen,Ready Meals,Ready Meals
-Snacks & Beverages,Snacks,Snacks
-Snacks & Beverages,Candy,Candy
-Snacks & Beverages,Non-Alcoholic Drinks,Drinks
-Snacks & Beverages,Alcohol,Alcohol
-Household & Care,Household,Household
-Household & Care,Personal Care,Personal Care
-Other,Baby & Kids,Baby & Kids
-Other,Pet Supplies,Pet Supplies
-Other,Tobacco,Tobacco
-Other,Uncategorized,Other
+Group,Category
+Fresh Food,Fruits
+Fresh Food,Vegetables
+Fresh Food,Meat & Poultry (Raw)
+Fresh Food,Charcuterie & Salads (Preparé/Deli)
+Fresh Food,Fish & Seafood
+Fresh Food,"Dairy, Eggs & Cheese"
+Fresh Food,Bakery (Bread, Pistolets)
+Fresh Food,Pastries & Koffiekoeken
+Pantry & Staples,"Grains, Pasta & Potatoes"
+Pantry & Staples,Canned & Jarred Goods
+Pantry & Staples,"Sauces, Mayo & Condiments"
+Pantry & Staples,Breakfast & Cereal (Choco/Jam)
+Pantry & Staples,Baking & Flour
+Frozen,Frozen Ingredients (Veg/Fruit)
+Frozen,Fries & Snacks (Frituur at home)
+Frozen,Ready Meals & Pizza
+Drinks,Water (Bottled)
+Drinks,Soda & Juices
+Drinks,Coffee & Tea
+Drinks,"Alcohol (Beer, Cider, Wine, Whisky, Vodka, Gin, Cava, Champagne)"
+Snacks,"Chips, Nuts & Aperitif"
+Snacks,Chocolate & Sweets (Biscuits)
+Household,Official Waste Bags (PMD/Rest)
+Household,Cleaning & Paper Goods
+Personal Care,Pharmacy & Hygiene
+Other,Baby & Kids
+Other,Pet Supplies
+Other,Tobacco
+Other,Lottery & Scratch Cards
+Other,Deposits (Statiegeld/Vidange)
+Other,Other

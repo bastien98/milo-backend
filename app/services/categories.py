@@ -1,345 +1,411 @@
 """
 Granular category definitions for semantic categorization.
 
-Maps ~200 granular categories to the 19 parent categories.
+Maps ~200 granular categories to the parent categories defined in categories.csv.
 Used by GeminiVisionService for detailed product classification.
 
 Category names are kept flat (no parentheses) to optimize for semantic search
 and embedding similarity matching.
 """
 
+# Parent category name constants (must match categories.csv exactly)
+_FRUITS = "Fruits"
+_VEGETABLES = "Vegetables"
+_MEAT_RAW = "Meat & Poultry (Raw)"
+_CHARCUTERIE = "Charcuterie & Salads (Preparé/Deli)"
+_FISH = "Fish & Seafood"
+_DAIRY = "Dairy, Eggs & Cheese"
+_BAKERY = "Bakery (Bread, Pistolets)"
+_PASTRIES = "Pastries & Koffiekoeken"
+_GRAINS = "Grains, Pasta & Potatoes"
+_CANNED = "Canned & Jarred Goods"
+_SAUCES = "Sauces, Mayo & Condiments"
+_BREAKFAST = "Breakfast & Cereal (Choco/Jam)"
+_BAKING = "Baking & Flour"
+_FROZEN_INGR = "Frozen Ingredients (Veg/Fruit)"
+_FRIES = "Fries & Snacks (Frituur at home)"
+_READY_MEALS = "Ready Meals & Pizza"
+_WATER = "Water (Bottled)"
+_SODA = "Soda & Juices"
+_COFFEE = "Coffee & Tea"
+_ALCOHOL = "Alcohol (Beer, Cider, Wine, Whisky, Vodka, Gin, Cava, Champagne)"
+_CHIPS = "Chips, Nuts & Aperitif"
+_CHOCOLATE = "Chocolate & Sweets (Biscuits)"
+_WASTE_BAGS = "Official Waste Bags (PMD/Rest)"
+_CLEANING = "Cleaning & Paper Goods"
+_PHARMACY = "Pharmacy & Hygiene"
+_BABY = "Baby & Kids"
+_PET = "Pet Supplies"
+_TOBACCO = "Tobacco"
+_LOTTERY = "Lottery & Scratch Cards"
+_DEPOSITS = "Deposits (Statiegeld/Vidange)"
+_OTHER = "Other"
+
+
 # Mapping of granular categories to parent categories (string-based)
 GRANULAR_CATEGORIES: dict[str, str] = {
     # ===================
     # ALCOHOL
     # ===================
-    "Beer Pils": "Alcohol",
-    "Beer Abbey Trappist": "Alcohol",
-    "Beer Special": "Alcohol",
-    "Beer White Fruit": "Alcohol",
-    "Beer Non-Alcoholic": "Drinks",  # Non-alcoholic
-    "Cider": "Alcohol",
-    "Wine Red": "Alcohol",
-    "Wine White": "Alcohol",
-    "Wine Rosé": "Alcohol",
-    "Wine Sparkling": "Alcohol",
-    "Spirits Whisky": "Alcohol",
-    "Spirits Gin": "Alcohol",
-    "Spirits Vodka": "Alcohol",
-    "Spirits Rum": "Alcohol",
-    "Spirits Liqueur": "Alcohol",
-    "Aperitif": "Alcohol",
+    "Beer Pils": _ALCOHOL,
+    "Beer Abbey Trappist": _ALCOHOL,
+    "Beer Special": _ALCOHOL,
+    "Beer White Fruit": _ALCOHOL,
+    "Beer Non-Alcoholic": _SODA,  # Non-alcoholic
+    "Cider": _ALCOHOL,
+    "Wine Red": _ALCOHOL,
+    "Wine White": _ALCOHOL,
+    "Wine Rosé": _ALCOHOL,
+    "Wine Sparkling": _ALCOHOL,
+    "Spirits Whisky": _ALCOHOL,
+    "Spirits Gin": _ALCOHOL,
+    "Spirits Vodka": _ALCOHOL,
+    "Spirits Rum": _ALCOHOL,
+    "Spirits Liqueur": _ALCOHOL,
+    "Aperitif": _ALCOHOL,
 
     # ===================
     # DRINKS
     # ===================
-    "Cola": "Drinks",
-    "Lemonade & Soda": "Drinks",
-    "Energy Drinks": "Drinks",
-    "Ice Tea": "Drinks",
-    "Fruit Juice": "Drinks",
-    "Vegetable Juice": "Drinks",
-    "Smoothies": "Drinks",
-    "Syrup": "Drinks",
-    "Water Still": "Drinks",
-    "Water Sparkling": "Drinks",
-    "Water Flavored": "Drinks",
+    "Cola": _SODA,
+    "Lemonade & Soda": _SODA,
+    "Energy Drinks": _SODA,
+    "Ice Tea": _SODA,
+    "Fruit Juice": _SODA,
+    "Vegetable Juice": _SODA,
+    "Smoothies": _SODA,
+    "Syrup": _SODA,
+    "Water Still": _WATER,
+    "Water Sparkling": _WATER,
+    "Water Flavored": _WATER,
 
     # ===================
-    # HOT BEVERAGES (mapped to PANTRY)
+    # HOT BEVERAGES
     # ===================
-    "Coffee Beans Ground": "Pantry",
-    "Coffee Capsules": "Pantry",
-    "Coffee Instant": "Pantry",
-    "Tea": "Pantry",
-    "Hot Chocolate": "Pantry",
+    "Coffee Beans Ground": _COFFEE,
+    "Coffee Capsules": _COFFEE,
+    "Coffee Instant": _COFFEE,
+    "Tea": _COFFEE,
+    "Hot Chocolate": _COFFEE,
 
     # ===================
-    # DAIRY & EGGS
+    # DAIRY, EGGS & CHEESE
     # ===================
-    "Plant Milk": "Dairy & Eggs",
-    "Milk Fresh": "Dairy & Eggs",
-    "Milk Long Life": "Dairy & Eggs",
-    "Cream": "Dairy & Eggs",
-    "Yoghurt Natural": "Dairy & Eggs",
-    "Yoghurt Fruit": "Dairy & Eggs",
-    "Yoghurt Drinks": "Dairy & Eggs",
-    "Skyr & Quark": "Dairy & Eggs",
-    "Pudding & Desserts": "Dairy & Eggs",
-    "Butter": "Dairy & Eggs",
-    "Margarine": "Dairy & Eggs",
-    "Cooking Fat": "Dairy & Eggs",
-    "Cheese Hard": "Dairy & Eggs",
-    "Cheese Soft": "Dairy & Eggs",
-    "Cheese Blue": "Dairy & Eggs",
-    "Cheese Fresh": "Dairy & Eggs",
-    "Cheese Spread": "Dairy & Eggs",
-    "Cheese Sliced": "Dairy & Eggs",
-    "Cheese Grated": "Dairy & Eggs",
-    "Cheese Belgian": "Dairy & Eggs",
-    "Eggs": "Dairy & Eggs",
+    "Plant Milk": _DAIRY,
+    "Milk Fresh": _DAIRY,
+    "Milk Long Life": _DAIRY,
+    "Cream": _DAIRY,
+    "Yoghurt Natural": _DAIRY,
+    "Yoghurt Fruit": _DAIRY,
+    "Yoghurt Drinks": _DAIRY,
+    "Skyr & Quark": _DAIRY,
+    "Pudding & Desserts": _DAIRY,
+    "Butter": _DAIRY,
+    "Margarine": _DAIRY,
+    "Cooking Fat": _DAIRY,
+    "Cheese Hard": _DAIRY,
+    "Cheese Soft": _DAIRY,
+    "Cheese Blue": _DAIRY,
+    "Cheese Fresh": _DAIRY,
+    "Cheese Spread": _DAIRY,
+    "Cheese Sliced": _DAIRY,
+    "Cheese Grated": _DAIRY,
+    "Cheese Belgian": _DAIRY,
+    "Eggs": _DAIRY,
 
     # ===================
-    # MEAT
+    # MEAT & POULTRY (RAW)
     # ===================
-    "Beef": "Meat",
-    "Pork": "Meat",
-    "Chicken": "Meat",
-    "Turkey": "Meat",
-    "Lamb": "Meat",
-    "Minced Meat": "Meat",
-    "Meat Preparations": "Meat",
-    "Offal": "Meat",
-    "Ham Cooked": "Meat",
-    "Ham Dry": "Meat",
-    "Salami & Sausage": "Meat",
-    "Pâté & Terrine": "Meat",
-    "Bacon & Lardons": "Meat",
-    "Chicken Turkey Deli": "Meat",
-    "Vegetarian Deli": "Meat",
+    "Beef": _MEAT_RAW,
+    "Pork": _MEAT_RAW,
+    "Chicken": _MEAT_RAW,
+    "Turkey": _MEAT_RAW,
+    "Lamb": _MEAT_RAW,
+    "Minced Meat": _MEAT_RAW,
+    "Meat Preparations": _MEAT_RAW,
+    "Offal": _MEAT_RAW,
 
     # ===================
-    # SEAFOOD
+    # CHARCUTERIE & SALADS (PREPARÉ/DELI)
     # ===================
-    "Fish Fresh": "Seafood",
-    "Fish Smoked": "Seafood",
-    "Fish Frozen": "Seafood",
-    "Shellfish": "Seafood",
-    "Canned Fish": "Seafood",
-    "Surimi": "Seafood",
+    "Ham Cooked": _CHARCUTERIE,
+    "Ham Dry": _CHARCUTERIE,
+    "Salami & Sausage": _CHARCUTERIE,
+    "Pâté & Terrine": _CHARCUTERIE,
+    "Bacon & Lardons": _CHARCUTERIE,
+    "Chicken Turkey Deli": _CHARCUTERIE,
+    "Vegetarian Deli": _CHARCUTERIE,
+    "Meals Salads": _CHARCUTERIE,
+    "Sandwiches": _CHARCUTERIE,
+    "Sushi": _CHARCUTERIE,
+    "Hummus & Dips": _CHARCUTERIE,
+
+    # ===================
+    # FISH & SEAFOOD
+    # ===================
+    "Fish Fresh": _FISH,
+    "Fish Smoked": _FISH,
+    "Fish Frozen": _FISH,
+    "Shellfish": _FISH,
+    "Canned Fish": _FISH,
+    "Surimi": _FISH,
 
     # ===================
     # FRUITS
     # ===================
-    "Fruit Apples Pears": "Fruits",
-    "Fruit Citrus": "Fruits",
-    "Fruit Bananas": "Fruits",
-    "Fruit Berries": "Fruits",
-    "Fruit Stone": "Fruits",
-    "Fruit Grapes": "Fruits",
-    "Fruit Melons": "Fruits",
-    "Fruit Tropical": "Fruits",
-    "Fruit Dried": "Fruits",
-    "Nuts": "Fruits",
+    "Fruit Apples Pears": _FRUITS,
+    "Fruit Citrus": _FRUITS,
+    "Fruit Bananas": _FRUITS,
+    "Fruit Berries": _FRUITS,
+    "Fruit Stone": _FRUITS,
+    "Fruit Grapes": _FRUITS,
+    "Fruit Melons": _FRUITS,
+    "Fruit Tropical": _FRUITS,
+    "Fruit Dried": _FRUITS,
+    "Nuts": _FRUITS,
 
     # ===================
     # VEGETABLES
     # ===================
-    "Tomatoes": "Vegetables",
-    "Salad & Leafy Greens": "Vegetables",
-    "Cucumber & Peppers": "Vegetables",
-    "Onions & Garlic": "Vegetables",
-    "Carrots & Root Veg": "Vegetables",
-    "Potatoes": "Vegetables",
-    "Cabbage & Broccoli": "Vegetables",
-    "Beans & Peas": "Vegetables",
-    "Mushrooms": "Vegetables",
-    "Zucchini & Eggplant": "Vegetables",
-    "Corn": "Vegetables",
-    "Fresh Herbs": "Vegetables",
-    "Prepared Vegetables": "Vegetables",
+    "Tomatoes": _VEGETABLES,
+    "Salad & Leafy Greens": _VEGETABLES,
+    "Cucumber & Peppers": _VEGETABLES,
+    "Onions & Garlic": _VEGETABLES,
+    "Carrots & Root Veg": _VEGETABLES,
+    "Potatoes": _VEGETABLES,
+    "Cabbage & Broccoli": _VEGETABLES,
+    "Beans & Peas": _VEGETABLES,
+    "Mushrooms": _VEGETABLES,
+    "Zucchini & Eggplant": _VEGETABLES,
+    "Corn": _VEGETABLES,
+    "Fresh Herbs": _VEGETABLES,
+    "Prepared Vegetables": _VEGETABLES,
 
     # ===================
-    # BAKERY
+    # BAKERY (BREAD, PISTOLETS)
     # ===================
-    "Bread Fresh": "Bakery",
-    "Bread Sliced": "Bakery",
-    "Bread Specialty": "Bakery",
-    "Wraps & Pita": "Bakery",
-    "Croissants & Pastries": "Bakery",
-    "Cakes & Tarts": "Bakery",
-    "Cookies & Biscuits": "Snacks",  # Cookies are snacks
-    "Waffles": "Bakery",
-    "Crackers": "Bakery",
+    "Bread Fresh": _BAKERY,
+    "Bread Sliced": _BAKERY,
+    "Bread Specialty": _BAKERY,
+    "Wraps & Pita": _BAKERY,
+    "Crackers": _BAKERY,
 
     # ===================
-    # PANTRY
+    # PASTRIES & KOFFIEKOEKEN
     # ===================
-    "Pasta Dry": "Pantry",
-    "Pasta Fresh": "Pantry",
-    "Rice": "Pantry",
-    "Noodles Asian": "Pantry",
-    "Couscous & Bulgur": "Pantry",
-    "Grains & Legumes": "Pantry",
-    "Canned Tomatoes": "Pantry",
-    "Canned Vegetables": "Pantry",
-    "Canned Beans": "Pantry",
-    "Canned Fruits": "Pantry",
-    "Pickles & Olives": "Pantry",
-    "Jarred Antipasti": "Pantry",
-    "Pasta Sauce": "Pantry",
-    "Tomato Sauce & Ketchup": "Pantry",
-    "Mayonnaise": "Pantry",
-    "Mustard": "Pantry",
-    "Soy & Asian Sauce": "Pantry",
-    "BBQ Sauce": "Pantry",
-    "Salad Dressing": "Pantry",
-    "Vinegar": "Pantry",
-    "Olive Oil": "Pantry",
-    "Cooking Oil": "Pantry",
-    "Salt Pepper & Spices": "Pantry",
-    "Stock & Bouillon": "Pantry",
-    "Dried Herbs": "Pantry",
-    "Cereals": "Pantry",
-    "Oatmeal": "Pantry",
-    "Spreads Chocolate": "Pantry",
-    "Spreads Jam": "Pantry",
-    "Spreads Honey": "Pantry",
-    "Spreads Peanut Nut": "Pantry",
-    "Spreads Savory": "Pantry",
-    "Soup Canned": "Pantry",
-    "Soup Carton Fresh": "Pantry",
-    "Soup Instant": "Pantry",
-    "Flour": "Pantry",
-    "Sugar": "Pantry",
-    "Baking Ingredients": "Pantry",
-    "Baking Decorations": "Pantry",
+    "Croissants & Pastries": _PASTRIES,
+    "Cakes & Tarts": _PASTRIES,
+    "Waffles": _PASTRIES,
 
     # ===================
-    # SNACKS
+    # GRAINS, PASTA & POTATOES
     # ===================
-    "Chips": "Snacks",
-    "Nuts Snack": "Snacks",
-    "Crackers Snack": "Snacks",
-    "Popcorn": "Snacks",
-    "Dried Meat Snack": "Snacks",
+    "Pasta Dry": _GRAINS,
+    "Pasta Fresh": _GRAINS,
+    "Rice": _GRAINS,
+    "Noodles Asian": _GRAINS,
+    "Couscous & Bulgur": _GRAINS,
+    "Grains & Legumes": _GRAINS,
 
     # ===================
-    # CANDY
+    # CANNED & JARRED GOODS
     # ===================
-    "Chocolate Bars": "Candy",
-    "Chocolate Pralines": "Candy",
-    "Chocolate Baking": "Pantry",  # Baking ingredient
-    "Candy": "Candy",
-    "Licorice": "Candy",
-    "Gum & Mints": "Candy",
-    "Marshmallows": "Candy",
+    "Canned Tomatoes": _CANNED,
+    "Canned Vegetables": _CANNED,
+    "Canned Beans": _CANNED,
+    "Canned Fruits": _CANNED,
+    "Pickles & Olives": _CANNED,
+    "Jarred Antipasti": _CANNED,
+    "Soup Canned": _CANNED,
+    "Soup Carton Fresh": _CANNED,
+    "Soup Instant": _CANNED,
+
+    # ===================
+    # SAUCES, MAYO & CONDIMENTS
+    # ===================
+    "Pasta Sauce": _SAUCES,
+    "Tomato Sauce & Ketchup": _SAUCES,
+    "Mayonnaise": _SAUCES,
+    "Mustard": _SAUCES,
+    "Soy & Asian Sauce": _SAUCES,
+    "BBQ Sauce": _SAUCES,
+    "Salad Dressing": _SAUCES,
+    "Vinegar": _SAUCES,
+    "Olive Oil": _SAUCES,
+    "Cooking Oil": _SAUCES,
+    "Salt Pepper & Spices": _SAUCES,
+    "Stock & Bouillon": _SAUCES,
+    "Dried Herbs": _SAUCES,
+
+    # ===================
+    # BREAKFAST & CEREAL (CHOCO/JAM)
+    # ===================
+    "Cereals": _BREAKFAST,
+    "Oatmeal": _BREAKFAST,
+    "Spreads Chocolate": _BREAKFAST,
+    "Spreads Jam": _BREAKFAST,
+    "Spreads Honey": _BREAKFAST,
+    "Spreads Peanut Nut": _BREAKFAST,
+    "Spreads Savory": _BREAKFAST,
+
+    # ===================
+    # BAKING & FLOUR
+    # ===================
+    "Flour": _BAKING,
+    "Sugar": _BAKING,
+    "Baking Ingredients": _BAKING,
+    "Baking Decorations": _BAKING,
+    "Chocolate Baking": _BAKING,
+
+    # ===================
+    # CHIPS, NUTS & APERITIF (SNACKS)
+    # ===================
+    "Chips": _CHIPS,
+    "Nuts Snack": _CHIPS,
+    "Crackers Snack": _CHIPS,
+    "Popcorn": _CHIPS,
+    "Dried Meat Snack": _CHIPS,
+    "Cookies & Biscuits": _CHIPS,
+    "Protein Bars": _CHIPS,
+
+    # ===================
+    # CHOCOLATE & SWEETS (BISCUITS)
+    # ===================
+    "Chocolate Bars": _CHOCOLATE,
+    "Chocolate Pralines": _CHOCOLATE,
+    "Candy": _CHOCOLATE,
+    "Licorice": _CHOCOLATE,
+    "Gum & Mints": _CHOCOLATE,
+    "Marshmallows": _CHOCOLATE,
+
+    # ===================
+    # FROZEN INGREDIENTS (VEG/FRUIT)
+    # ===================
+    "Frozen Vegetables": _FROZEN_INGR,
+    "Frozen Fish": _FROZEN_INGR,
+    "Frozen Meat": _FROZEN_INGR,
+    "Frozen Bread": _FROZEN_INGR,
+    "Frozen Fruits": _FROZEN_INGR,
+
+    # ===================
+    # FRIES & SNACKS (FRITUUR AT HOME)
+    # ===================
+    "Frozen Fries": _FRIES,
+    "Frozen Snacks": _FRIES,
+    "Ice Cream": _FRIES,
+    "Frozen Desserts": _FRIES,
+
+    # ===================
+    # READY MEALS & PIZZA
+    # ===================
+    "Frozen Pizza": _READY_MEALS,
+    "Frozen Meals": _READY_MEALS,
+    "Meals Fresh": _READY_MEALS,
+    "Pizza Fresh": _READY_MEALS,
+    "Meat Substitute": _READY_MEALS,
+    "Vegetarian Meals": _READY_MEALS,
+    "Vegan Cheese Dairy": _READY_MEALS,
+    "Asian Food": _READY_MEALS,
+    "Mexican Food": _READY_MEALS,
+    "Italian Specialty": _READY_MEALS,
+    "Middle Eastern": _READY_MEALS,
 
     # ===================
     # SPORTS NUTRITION
     # ===================
-    "Protein Bars": "Snacks",
-    "Protein Shakes": "Dairy & Eggs",
-    "Protein Desserts": "Dairy & Eggs",
-
-    # ===================
-    # FROZEN
-    # ===================
-    "Frozen Fries": "Frozen",
-    "Frozen Pizza": "Frozen",
-    "Frozen Meals": "Frozen",
-    "Frozen Vegetables": "Frozen",
-    "Frozen Fish": "Frozen",
-    "Frozen Meat": "Frozen",
-    "Frozen Snacks": "Frozen",
-    "Frozen Bread": "Frozen",
-    "Ice Cream": "Frozen",
-    "Frozen Desserts": "Frozen",
-    "Frozen Fruits": "Frozen",
-
-    # ===================
-    # READY MEALS
-    # ===================
-    "Meals Fresh": "Ready Meals",
-    "Meals Salads": "Ready Meals",
-    "Pizza Fresh": "Ready Meals",
-    "Sandwiches": "Ready Meals",
-    "Sushi": "Ready Meals",
-    "Hummus & Dips": "Ready Meals",
-    "Meat Substitute": "Ready Meals",
-    "Vegetarian Meals": "Ready Meals",
-    "Vegan Cheese Dairy": "Ready Meals",
-    "Asian Food": "Ready Meals",
-    "Mexican Food": "Ready Meals",
-    "Italian Specialty": "Ready Meals",
-    "Middle Eastern": "Ready Meals",
+    "Protein Shakes": _DAIRY,
+    "Protein Desserts": _DAIRY,
 
     # ===================
     # BABY & KIDS
     # ===================
-    "Baby Milk": "Baby & Kids",
-    "Baby Food": "Baby & Kids",
-    "Baby Snacks": "Baby & Kids",
-    "Diapers": "Baby & Kids",
-    "Baby Care": "Baby & Kids",
+    "Baby Milk": _BABY,
+    "Baby Food": _BABY,
+    "Baby Snacks": _BABY,
+    "Diapers": _BABY,
+    "Baby Care": _BABY,
 
     # ===================
-    # HOUSEHOLD
+    # HOUSEHOLD - WASTE BAGS
     # ===================
-    "Cleaning All-Purpose": "Household",
-    "Cleaning Kitchen": "Household",
-    "Cleaning Bathroom": "Household",
-    "Cleaning Floor": "Household",
-    "Cleaning Glass": "Household",
-    "Cleaning WC": "Household",
-    "Cleaning Tools": "Household",
-    "Trash Bags": "Household",
-    "Laundry Detergent": "Household",
-    "Laundry Softener": "Household",
-    "Laundry Stain Remover": "Household",
-    "Laundry Ironing": "Household",
-    "Toilet Paper": "Household",
-    "Kitchen Paper": "Household",
-    "Tissues": "Household",
-    "Napkins": "Household",
-    "Batteries": "Household",
-    "Lightbulbs": "Household",
-    "Kitchen Accessories": "Household",
-    "Party Supplies": "Household",
-    "Flowers & Plants": "Household",
+    "Trash Bags": _WASTE_BAGS,
 
     # ===================
-    # PERSONAL CARE
+    # HOUSEHOLD - CLEANING & PAPER
     # ===================
-    "Shower Gel": "Personal Care",
-    "Soap": "Personal Care",
-    "Deodorant": "Personal Care",
-    "Body Lotion": "Personal Care",
-    "Sunscreen": "Personal Care",
-    "Shampoo": "Personal Care",
-    "Conditioner": "Personal Care",
-    "Hair Styling": "Personal Care",
-    "Hair Color": "Personal Care",
-    "Face Care": "Personal Care",
-    "Toothpaste": "Personal Care",
-    "Toothbrush": "Personal Care",
-    "Mouthwash": "Personal Care",
-    "Shaving": "Personal Care",
-    "Feminine Hygiene": "Personal Care",
-    "Contraception": "Personal Care",
-    "First Aid": "Personal Care",
-    "Vitamins & Supplements": "Personal Care",
-    "Pain Relief": "Personal Care",
+    "Cleaning All-Purpose": _CLEANING,
+    "Cleaning Kitchen": _CLEANING,
+    "Cleaning Bathroom": _CLEANING,
+    "Cleaning Floor": _CLEANING,
+    "Cleaning Glass": _CLEANING,
+    "Cleaning WC": _CLEANING,
+    "Cleaning Tools": _CLEANING,
+    "Laundry Detergent": _CLEANING,
+    "Laundry Softener": _CLEANING,
+    "Laundry Stain Remover": _CLEANING,
+    "Laundry Ironing": _CLEANING,
+    "Toilet Paper": _CLEANING,
+    "Kitchen Paper": _CLEANING,
+    "Tissues": _CLEANING,
+    "Napkins": _CLEANING,
+    "Batteries": _CLEANING,
+    "Lightbulbs": _CLEANING,
+    "Kitchen Accessories": _CLEANING,
+    "Party Supplies": _CLEANING,
+    "Flowers & Plants": _CLEANING,
+
+    # ===================
+    # PERSONAL CARE / PHARMACY & HYGIENE
+    # ===================
+    "Shower Gel": _PHARMACY,
+    "Soap": _PHARMACY,
+    "Deodorant": _PHARMACY,
+    "Body Lotion": _PHARMACY,
+    "Sunscreen": _PHARMACY,
+    "Shampoo": _PHARMACY,
+    "Conditioner": _PHARMACY,
+    "Hair Styling": _PHARMACY,
+    "Hair Color": _PHARMACY,
+    "Face Care": _PHARMACY,
+    "Toothpaste": _PHARMACY,
+    "Toothbrush": _PHARMACY,
+    "Mouthwash": _PHARMACY,
+    "Shaving": _PHARMACY,
+    "Feminine Hygiene": _PHARMACY,
+    "Contraception": _PHARMACY,
+    "First Aid": _PHARMACY,
+    "Vitamins & Supplements": _PHARMACY,
+    "Pain Relief": _PHARMACY,
 
     # ===================
     # PET SUPPLIES
     # ===================
-    "Pet Food Dog": "Pet Supplies",
-    "Pet Food Cat": "Pet Supplies",
-    "Pet Treats": "Pet Supplies",
-    "Pet Litter": "Pet Supplies",
-    "Pet Care": "Pet Supplies",
+    "Pet Food Dog": _PET,
+    "Pet Food Cat": _PET,
+    "Pet Treats": _PET,
+    "Pet Litter": _PET,
+    "Pet Care": _PET,
 
     # ===================
     # TOBACCO
     # ===================
-    "Tobacco": "Tobacco",
+    "Tobacco": _TOBACCO,
 
     # ===================
-    # DISCOUNTS
+    # DEPOSITS & DISCOUNTS
     # ===================
-    "Discounts": "Other",
+    "Discounts": _DEPOSITS,
 
     # ===================
     # OTHER
     # ===================
-    "Other": "Other",
+    "Other": _OTHER,
 }
 
 
 def get_parent_category(granular: str) -> str:
     """Get parent category for a granular category, defaulting to Other."""
-    return GRANULAR_CATEGORIES.get(granular, "Other")
+    return GRANULAR_CATEGORIES.get(granular, _OTHER)
 
 
 def get_all_granular_categories() -> list[str]:

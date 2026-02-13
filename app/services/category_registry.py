@@ -1,12 +1,13 @@
 """
 Category Registry - loads category hierarchy from CSV and provides lookups.
 
-The category system has 3 levels:
-- Group (top): e.g., "Fresh Food", "Snacks & Beverages"
-- Category (mid): e.g., "Fruits & Vegetables", "Snacks"
-- Sub-Category (leaf): e.g., "Fresh Produce (Fruit & Veg)", "Snacks & Candy"
+The category system has 2 levels:
+- Group (top): e.g., "Fresh Food", "Drinks", "Snacks"
+- Category (leaf): e.g., "Fruits", "Soda & Juices", "Chips, Nuts & Aperitif"
 
-Transactions store the sub-category display name as a string.
+Transactions store the category display name as a string.
+For backward compatibility, the code still uses "sub_category" terminology
+internally (since category IS the leaf level).
 """
 import csv
 import os
@@ -41,19 +42,42 @@ class GroupNode:
 # Group-level colors (hex) for pie chart visualization
 GROUP_COLORS: Dict[str, str] = {
     "Fresh Food": "#2ECC71",               # Emerald Green
-    "Pantry & Frozen": "#E67E22",          # Warm Orange
-    "Snacks & Beverages": "#E74C3C",       # Coral Red
-    "Household & Care": "#8E44AD",         # Royal Purple
+    "Pantry & Staples": "#E67E22",         # Warm Orange
+    "Frozen": "#3498DB",                   # Blue
+    "Drinks": "#E74C3C",                   # Coral Red
+    "Snacks": "#F39C12",                   # Amber
+    "Household": "#8E44AD",               # Royal Purple
+    "Personal Care": "#1ABC9C",            # Teal
     "Other": "#95A5A6",                    # Slate Gray
 }
 
 # Group-level SF Symbol icons (sent to iOS)
 GROUP_ICONS: Dict[str, str] = {
     "Fresh Food": "leaf.fill",
-    "Pantry & Frozen": "cabinet.fill",
-    "Snacks & Beverages": "mug.fill",
-    "Household & Care": "bubbles.and.sparkles.fill",
+    "Pantry & Staples": "cabinet.fill",
+    "Frozen": "snowflake",
+    "Drinks": "mug.fill",
+    "Snacks": "popcorn.fill",
+    "Household": "bubbles.and.sparkles.fill",
+    "Personal Care": "heart.fill",
     "Other": "square.grid.2x2.fill",
+}
+
+# Backward compatibility: old category names -> new names
+# Used to look up transactions saved with old category names
+OLD_TO_NEW_CATEGORY: Dict[str, str] = {
+    "Alcohol": "Alcohol (Beer, Cider, Wine, Whisky, Vodka, Gin, Cava, Champagne)",
+    "Drinks": "Soda & Juices",
+    "Dairy & Eggs": "Dairy, Eggs & Cheese",
+    "Meat": "Meat & Poultry (Raw)",
+    "Seafood": "Fish & Seafood",
+    "Bakery": "Bakery (Bread, Pistolets)",
+    "Pantry": "Grains, Pasta & Potatoes",
+    "Snacks": "Chips, Nuts & Aperitif",
+    "Candy": "Chocolate & Sweets (Biscuits)",
+    "Frozen": "Frozen Ingredients (Veg/Fruit)",
+    "Ready Meals": "Ready Meals & Pizza",
+    "Personal Care": "Pharmacy & Hygiene",
 }
 
 
@@ -104,26 +128,37 @@ class CategoryRegistry:
             for row in reader:
                 group_name = row["Group"].strip()
                 category_name = row["Category"].strip()
-                sub_category_name = row["Sub-Category"].strip()
 
-                # Build lookup
+                # 2-level hierarchy: category is the leaf level
+                # For backward compat, sub_category = category
                 info = SubCategoryInfo(
-                    sub_category=sub_category_name,
+                    sub_category=category_name,
                     category=category_name,
                     group=group_name,
                 )
-                self._lookup[sub_category_name] = info
-                self._lower_lookup[sub_category_name.lower()] = sub_category_name
-                self._all_sub_categories.append(sub_category_name)
+                self._lookup[category_name] = info
+                self._lower_lookup[category_name.lower()] = category_name
+                self._all_sub_categories.append(category_name)
 
-                # Build tree
+                # Build tree: each category is its own node with itself as sub_category
                 if group_name not in self._groups:
                     self._groups[group_name] = GroupNode(name=group_name)
                 group_node = self._groups[group_name]
 
                 if category_name not in group_node.categories:
                     group_node.categories[category_name] = CategoryNode(name=category_name)
-                group_node.categories[category_name].sub_categories.append(sub_category_name)
+                group_node.categories[category_name].sub_categories.append(category_name)
+
+        # Register backward-compat aliases for old category names
+        for old_name, new_name in OLD_TO_NEW_CATEGORY.items():
+            if new_name in self._lookup and old_name not in self._lookup:
+                new_info = self._lookup[new_name]
+                self._lookup[old_name] = SubCategoryInfo(
+                    sub_category=old_name,
+                    category=new_info.category,
+                    group=new_info.group,
+                )
+                self._lower_lookup[old_name.lower()] = old_name
 
     def get_group(self, sub_category: str) -> Optional[str]:
         """Get the group name for a sub-category."""
