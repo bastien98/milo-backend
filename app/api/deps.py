@@ -1,6 +1,7 @@
 from typing import AsyncGenerator
 
 from fastapi import Depends
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.session import async_session_maker
@@ -36,11 +37,17 @@ async def get_current_db_user(
     user = await user_repo.get_by_firebase_uid(firebase_user.uid)
 
     if user is None:
-        # Create new user on first authentication
-        user = await user_repo.create(
-            firebase_uid=firebase_user.uid,
-            email=firebase_user.email,
-            display_name=firebase_user.name,
-        )
+        # Create new user on first authentication.
+        # Handle race condition: concurrent requests for a new user can both
+        # see user=None and try to INSERT, causing a unique constraint violation.
+        try:
+            user = await user_repo.create(
+                firebase_uid=firebase_user.uid,
+                email=firebase_user.email,
+                display_name=firebase_user.name,
+            )
+        except IntegrityError:
+            await db.rollback()
+            user = await user_repo.get_by_firebase_uid(firebase_user.uid)
 
     return user
