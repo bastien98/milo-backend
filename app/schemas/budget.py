@@ -16,7 +16,7 @@ def _filter_zero_allocations(data):
         allocs = data.get('category_allocations')
         if allocs is not None:
             filtered = [a for a in allocs if isinstance(a, dict) and a.get('amount', 0) > 0]
-            data['category_allocations'] = filtered if filtered else None
+            data['category_allocations'] = filtered
     return data
 
 

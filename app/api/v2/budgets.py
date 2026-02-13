@@ -1,8 +1,11 @@
+import logging
 from datetime import date
 from dateutil.relativedelta import relativedelta
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.ext.asyncio import AsyncSession
+
+logger = logging.getLogger(__name__)
 
 from app.api.deps import get_db, get_current_db_user
 from app.models.user import User
@@ -168,34 +171,44 @@ async def create_budget(
     db: AsyncSession = Depends(get_db),
 ):
     """Create a new budget (or replace existing)."""
-    repo = BudgetRepository(db)
-    history_repo = BudgetHistoryRepository(db)
+    try:
+        repo = BudgetRepository(db)
+        history_repo = BudgetHistoryRepository(db)
 
-    category_allocations = None
-    if budget_data.category_allocations:
-        category_allocations = [
-            {"category": alloc.category, "amount": alloc.amount}
-            for alloc in budget_data.category_allocations
-        ]
+        category_allocations = None
+        if budget_data.category_allocations:
+            category_allocations = [
+                {"category": alloc.category, "amount": alloc.amount}
+                for alloc in budget_data.category_allocations
+            ]
 
-    budget = await repo.upsert(
-        user_id=current_user.id,
-        monthly_amount=budget_data.monthly_amount,
-        category_allocations=category_allocations,
-        is_smart_budget=budget_data.is_smart_budget,
-    )
+        logger.info(f"Creating budget for user {current_user.id}: amount={budget_data.monthly_amount}")
 
-    current_month = date.today().strftime("%Y-%m")
-    await history_repo.upsert(
-        user_id=current_user.id,
-        monthly_amount=budget.monthly_amount,
-        month=current_month,
-        was_smart_budget=budget.is_smart_budget,
-        category_allocations=budget.category_allocations,
-        was_deleted=False,
-    )
+        budget = await repo.upsert(
+            user_id=current_user.id,
+            monthly_amount=budget_data.monthly_amount,
+            category_allocations=category_allocations,
+            is_smart_budget=budget_data.is_smart_budget,
+        )
 
-    return _budget_to_response(budget)
+        logger.info(f"Budget created: {budget.id}, saving history...")
+
+        current_month = date.today().strftime("%Y-%m")
+        await history_repo.upsert(
+            user_id=current_user.id,
+            monthly_amount=budget.monthly_amount,
+            month=current_month,
+            was_smart_budget=budget.is_smart_budget,
+            category_allocations=budget.category_allocations,
+            was_deleted=False,
+        )
+
+        logger.info(f"Budget history saved for {current_month}")
+
+        return _budget_to_response(budget)
+    except Exception as e:
+        logger.error(f"Budget creation failed: {type(e).__name__}: {e}", exc_info=True)
+        raise
 
 
 @router.put(
