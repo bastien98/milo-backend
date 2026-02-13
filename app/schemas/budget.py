@@ -22,7 +22,7 @@ def _filter_zero_allocations(data):
 
 class BudgetBase(BaseModel):
     """Base budget schema with common fields."""
-    monthly_amount: float = Field(..., gt=0)
+    monthly_amount: float = Field(..., ge=0)
     category_allocations: Optional[List[CategoryAllocation]] = None
     is_smart_budget: bool = True  # When true, budget auto-rolls to next month
 
@@ -35,10 +35,19 @@ class BudgetCreate(BudgetBase):
     def filter_zero_allocations(cls, data):
         return _filter_zero_allocations(data)
 
+    @model_validator(mode='after')
+    def require_budget_or_categories(self):
+        """At least one of monthly_amount > 0 or category_allocations must be set."""
+        has_total = self.monthly_amount > 0
+        has_categories = bool(self.category_allocations)
+        if not has_total and not has_categories:
+            raise ValueError('Must set either a monthly budget or category allocations')
+        return self
+
 
 class BudgetUpdate(BaseModel):
     """Schema for updating a budget. All fields are optional."""
-    monthly_amount: Optional[float] = Field(None, gt=0)
+    monthly_amount: Optional[float] = Field(None, ge=0)
     category_allocations: Optional[List[CategoryAllocation]] = None
     is_smart_budget: Optional[bool] = None  # Allows toggling smart budget
 

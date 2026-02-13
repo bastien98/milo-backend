@@ -115,6 +115,14 @@ async def stream_response(
             rate_limit_service = RateLimitService(db)
             rate_status = await rate_limit_service.check_rate_limit(firebase_uid)
 
+            if not rate_status.allowed:
+                error_data = json.dumps({
+                    "type": "error",
+                    "error": "You've reached your message limit for this period",
+                })
+                yield f"data: {error_data}\n\n"
+                return
+
             chat_service = MiloChatServiceGemini()
             async for chunk in chat_service.chat_stream(
                 db=db,
@@ -144,7 +152,6 @@ async def stream_response(
 @router.post("/stream")
 async def chat_stream(
     request: ChatRequest,
-    db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_db_user),
 ):
     """
@@ -157,38 +164,16 @@ async def chat_stream(
     - type: "text" | "error" | "done"
     - content: The text chunk (for "text" type)
     - error: The error message (for "error" type)
-
-    Rate limit information is included in the response headers:
-    - X-RateLimit-Limit: Maximum messages allowed per period
-    - X-RateLimit-Remaining: Messages remaining in current period
-    - X-RateLimit-Reset: Unix timestamp when the rate limit resets
     """
-    # Check rate limit (initial check only - actual increment happens in stream_response)
-    rate_limit_service = RateLimitService(db)
-    rate_status = await rate_limit_service.check_rate_limit(current_user.firebase_uid)
-
-    if not rate_status.allowed:
-        raise RateLimitExceededError(
-            message="You've reached your message limit for this period",
-            details={
-                "messages_used": rate_status.messages_used,
-                "messages_limit": rate_status.messages_limit,
-                "period_end_date": rate_status.period_end_date.isoformat(),
-                "retry_after_seconds": rate_status.retry_after_seconds,
-            },
-        )
-
-    # Build headers with rate limit info
     headers = {
         "Cache-Control": "no-cache",
         "Connection": "keep-alive",
         "X-Accel-Buffering": "no",  # Disable nginx buffering
-        **build_rate_limit_headers(rate_status),
     }
 
-    # NOTE: stream_response manages its own database session because FastAPI's
-    # dependency injection lifecycle ends when StreamingResponse is returned,
-    # not when the stream completes. This prevents connection pool exhaustion.
+    # All DB work (rate limiting, chat) happens inside stream_response which
+    # manages its own session. This avoids connection pool issues from FastAPI's
+    # dependency injection lifecycle ending before the stream completes.
     return StreamingResponse(
         stream_response(
             user_id=str(current_user.id),
