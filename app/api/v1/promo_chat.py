@@ -15,6 +15,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.api.deps import get_db, get_current_db_user
 from app.config import get_settings
 from app.models.user import User
+from app.models.user_profile import UserProfile
 from app.schemas.promo_chat import PromoChatRequest, PromoChatResponse
 from app.services.promo_chat_service import PromoChatService
 from app.services.rate_limit_service import RateLimitService
@@ -79,11 +80,18 @@ async def promo_chat(
             },
         )
 
+    # Fetch user's language preference
+    profile_result = await db.execute(
+        select(UserProfile.language).where(UserProfile.user_id == current_user.firebase_uid)
+    )
+    user_language = profile_result.scalar_one_or_none()
+
     try:
         promo_service = PromoChatService()
         result = await promo_service.chat(
             message=request.message,
             conversation_history=request.conversation_history,
+            language=user_language,
         )
 
         # Increment counter on successful response

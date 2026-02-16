@@ -194,6 +194,17 @@ You will receive the user's profile information (name, etc.) and their full tran
 
         return "\n".join(context_parts)
 
+    def _build_language_instruction(self, profile: Optional[UserProfile]) -> str:
+        """Build a language instruction suffix for the system prompt based on user's language preference."""
+        if not profile or not profile.language:
+            return ""
+        lang = profile.language.value
+        if lang == "nl":
+            return "\n\nIMPORTANT LANGUAGE RULE: The user's language is Dutch (Flemish/Belgian Dutch). You MUST respond entirely in Flemish Dutch (Vlaams Nederlands). Use Belgian Dutch vocabulary and expressions, not Netherlands Dutch. For example: use 'kassaticket' not 'kassabon', 'winkelkar' not 'winkelwagen', 'boodschappen' not 'boodschappenlijst'. Keep your personality and humor but express it in natural Flemish Dutch."
+        elif lang == "fr":
+            return "\n\nIMPORTANT LANGUAGE RULE: The user's language is French (Belgian French). You MUST respond entirely in French. Use Belgian French vocabulary where appropriate."
+        return ""
+
     async def chat(
         self,
         db: AsyncSession,
@@ -210,6 +221,9 @@ You will receive the user's profile information (name, etc.) and their full tran
             profile = await self._get_user_profile(db, user_id)
             profile_context = self._build_profile_context(profile)
             transaction_context = await self._get_user_transaction_context(db, user_id)
+
+            # Build language-aware system prompt
+            system_prompt = self.SYSTEM_PROMPT + self._build_language_instruction(profile)
 
             # Build contents with conversation history
             contents = []
@@ -240,7 +254,7 @@ My question: {message}"""
                 model=self.MODEL,
                 contents=contents,
                 config=types.GenerateContentConfig(
-                    system_instruction=self.SYSTEM_PROMPT,
+                    system_instruction=system_prompt,
                     max_output_tokens=self.MAX_TOKENS,
                     temperature=0.7,
                 ),
@@ -271,6 +285,9 @@ My question: {message}"""
             profile_context = self._build_profile_context(profile)
             transaction_context = await self._get_user_transaction_context(db, user_id)
 
+            # Build language-aware system prompt
+            system_prompt = self.SYSTEM_PROMPT + self._build_language_instruction(profile)
+
             # Build contents with conversation history
             contents = []
 
@@ -300,7 +317,7 @@ My question: {message}"""
                 model=self.MODEL,
                 contents=contents,
                 config=types.GenerateContentConfig(
-                    system_instruction=self.SYSTEM_PROMPT,
+                    system_instruction=system_prompt,
                     max_output_tokens=self.MAX_TOKENS,
                     temperature=0.7,
                 ),

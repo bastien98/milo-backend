@@ -15,8 +15,13 @@ from typing import Any, Optional
 from pinecone import Pinecone
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from sqlalchemy import select
+
 from app.config import get_settings
 from app.db.repositories.enriched_profile_repo import EnrichedProfileRepository
+from app.models.user import User
+from app.models.user_profile import UserProfile
+from app.models.enums import Language
 
 logger = logging.getLogger(__name__)
 
@@ -178,6 +183,15 @@ class PromoService:
         self.settings = get_settings()
         self.enriched_repo = EnrichedProfileRepository(db)
 
+    async def _fetch_user_language(self, user_id: str) -> Optional[Language]:
+        """Fetch the user's language preference from their profile."""
+        result = await self.db.execute(
+            select(UserProfile.language)
+            .join(User, User.firebase_uid == UserProfile.user_id)
+            .where(User.id == user_id)
+        )
+        return result.scalar_one_or_none()
+
     async def get_recommendations(self, user_id: str) -> dict:
         """Full pipeline: fetch profile -> search Pinecone -> generate via LLM."""
         # Step 1: Fetch enriched profile
@@ -187,11 +201,14 @@ class PromoService:
         if not interest_items:
             return self._empty_response()
 
+        # Fetch user's language preference
+        language = await self._fetch_user_language(user_id)
+
         # Step 2: Search Pinecone (sync SDK, run in thread pool)
         promo_results = await self._search_all_promos(interest_items)
 
         # Step 3: Generate LLM recommendations
-        recommendations = await self._generate_recommendations(profile, promo_results)
+        recommendations = await self._generate_recommendations(profile, promo_results, language=language)
         return recommendations
 
     async def _fetch_enriched_profile(self, user_id: str) -> dict:
@@ -236,26 +253,33 @@ class PromoService:
         return all_results
 
     async def _generate_recommendations(
-        self, profile: dict, promo_results: dict[str, list[dict]]
+        self, profile: dict, promo_results: dict[str, list[dict]], language: Optional[Language] = None
     ) -> dict:
         """Send profile + matched promos to Gemini for recommendation generation."""
         user_message = _build_llm_context(profile, promo_results)
         raw_response = await asyncio.to_thread(
-            self._call_gemini, user_message
+            self._call_gemini, user_message, 1, language
         )
         return _parse_llm_response(raw_response)
 
-    def _call_gemini(self, user_message: str, attempt: int = 1) -> str:
+    def _call_gemini(self, user_message: str, attempt: int = 1, language: Optional[Language] = None) -> str:
         from google import genai
         from google.genai import types
         from app.schemas.promo import GeminiPromoOutput
+
+        # Build language-aware system prompt
+        system_prompt = SYSTEM_PROMPT
+        if language and language.value == "nl":
+            system_prompt += "\n\nCRITICAL LANGUAGE RULE: ALL text fields (reason, tip, closing_nudge, smart_switch reason) MUST be written in Flemish Dutch (Vlaams Nederlands). Use natural Belgian Dutch. Keep promo mechanisms in their original form (1+1 Gratis, -50%, etc). Product names and brand names stay as-is. Only the descriptive/personalized text fields must be in Dutch."
+        elif language and language.value == "fr":
+            system_prompt += "\n\nCRITICAL LANGUAGE RULE: ALL text fields (reason, tip, closing_nudge, smart_switch reason) MUST be written in French (Belgian French). Keep promo mechanisms in their original form. Product names and brand names stay as-is. Only the descriptive/personalized text fields must be in French."
 
         client = genai.Client(api_key=self.settings.GEMINI_API_KEY)
         response = client.models.generate_content(
             model="gemini-3-pro-preview",
             contents=[user_message],
             config=types.GenerateContentConfig(
-                system_instruction=SYSTEM_PROMPT,
+                system_instruction=system_prompt,
                 max_output_tokens=16384,
                 temperature=0.7,
                 response_mime_type="application/json",
@@ -274,7 +298,7 @@ class PromoService:
             if attempt < 2:
                 logger.warning(f"Gemini returned truncated JSON (attempt {attempt}), retrying...")
                 time.sleep(1)
-                return self._call_gemini(user_message, attempt + 1)
+                return self._call_gemini(user_message, attempt + 1, language)
             logger.warning(f"Gemini returned truncated JSON on final attempt")
 
         return response.text

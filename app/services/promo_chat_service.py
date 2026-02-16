@@ -16,6 +16,7 @@ from typing import Optional
 from pinecone import Pinecone
 
 from app.config import get_settings
+from app.models.enums import Language
 from app.schemas.promo_chat import (
     PromoChatMessage,
     PromoChatResponse,
@@ -130,6 +131,7 @@ class PromoChatService:
         self,
         message: str,
         conversation_history: Optional[list[PromoChatMessage]] = None,
+        language: Optional[Language] = None,
     ) -> PromoChatResponse:
         """
         Process a promo search chat message.
@@ -144,8 +146,11 @@ class PromoChatService:
 
         # Step 2: Check if clarification needed
         if search_query.is_vague:
+            clarification = search_query.clarification_needed or "Could you be more specific about what products or promotions you're looking for?"
+            if language and language.value == "nl":
+                clarification = search_query.clarification_needed or "Kan je iets specifieker zijn over welke producten of promoties je zoekt?"
             return PromoChatResponse(
-                message=search_query.clarification_needed or "Could you be more specific about what products or promotions you're looking for?",
+                message=clarification,
                 promos=[],
                 search_query=search_query,
                 needs_clarification=True,
@@ -156,9 +161,9 @@ class PromoChatService:
 
         # Step 4: Build response
         if promos:
-            response_message = self._build_success_response(search_query, promos)
+            response_message = self._build_success_response(search_query, promos, language)
         else:
-            response_message = self._build_no_results_response(search_query)
+            response_message = self._build_no_results_response(search_query, language)
 
         return PromoChatResponse(
             message=response_message,
@@ -480,43 +485,67 @@ class PromoChatService:
         except (ValueError, TypeError):
             return False
 
-    def _build_success_response(self, search_query: SearchQuery, promos: list[PromoResult]) -> str:
+    def _build_success_response(self, search_query: SearchQuery, promos: list[PromoResult], language: Optional[Language] = None) -> str:
         """Build a friendly response message for successful search."""
         num_promos = len(promos)
         retailers = list(set(p.retailer for p in promos if p.retailer))
-
-        # Calculate total potential savings
         total_savings = sum(p.savings or 0 for p in promos)
+        is_nl = language and language.value == "nl"
 
         parts = []
 
-        if search_query.brands:
-            brand_str = ", ".join(search_query.brands)
-            parts.append(f"I found {num_promos} promotion{'s' if num_promos != 1 else ''} for {brand_str}")
-        elif search_query.product_keywords:
-            keyword_str = ", ".join(search_query.product_keywords[:2])
-            parts.append(f"I found {num_promos} promotion{'s' if num_promos != 1 else ''} for {keyword_str}")
-        else:
-            parts.append(f"I found {num_promos} matching promotion{'s' if num_promos != 1 else ''}")
-
-        if retailers:
-            if len(retailers) == 1:
-                parts.append(f"at {retailers[0].title()}")
+        if is_nl:
+            if search_query.brands:
+                brand_str = ", ".join(search_query.brands)
+                parts.append(f"Ik heb {num_promos} promotie{'s' if num_promos != 1 else ''} gevonden voor {brand_str}")
+            elif search_query.product_keywords:
+                keyword_str = ", ".join(search_query.product_keywords[:2])
+                parts.append(f"Ik heb {num_promos} promotie{'s' if num_promos != 1 else ''} gevonden voor {keyword_str}")
             else:
-                parts.append(f"across {len(retailers)} stores")
-
-        result = " ".join(parts) + "."
-
-        if total_savings > 0:
-            result += f" Total potential savings: EUR {total_savings:.2f}."
+                parts.append(f"Ik heb {num_promos} passende promotie{'s' if num_promos != 1 else ''} gevonden")
+            if retailers:
+                if len(retailers) == 1:
+                    parts.append(f"bij {retailers[0].title()}")
+                else:
+                    parts.append(f"in {len(retailers)} winkels")
+            result = " ".join(parts) + "."
+            if total_savings > 0:
+                result += f" Totale mogelijke besparing: €{total_savings:.2f}."
+        else:
+            if search_query.brands:
+                brand_str = ", ".join(search_query.brands)
+                parts.append(f"I found {num_promos} promotion{'s' if num_promos != 1 else ''} for {brand_str}")
+            elif search_query.product_keywords:
+                keyword_str = ", ".join(search_query.product_keywords[:2])
+                parts.append(f"I found {num_promos} promotion{'s' if num_promos != 1 else ''} for {keyword_str}")
+            else:
+                parts.append(f"I found {num_promos} matching promotion{'s' if num_promos != 1 else ''}")
+            if retailers:
+                if len(retailers) == 1:
+                    parts.append(f"at {retailers[0].title()}")
+                else:
+                    parts.append(f"across {len(retailers)} stores")
+            result = " ".join(parts) + "."
+            if total_savings > 0:
+                result += f" Total potential savings: EUR {total_savings:.2f}."
 
         return result
 
-    def _build_no_results_response(self, search_query: SearchQuery) -> str:
+    def _build_no_results_response(self, search_query: SearchQuery, language: Optional[Language] = None) -> str:
         """Build a response when no promos are found."""
-        if search_query.brands:
-            return f"I couldn't find any current promotions for {', '.join(search_query.brands)}. Try searching for similar products or a broader category."
-        elif search_query.retailers:
-            return f"No matching promotions found at {', '.join(search_query.retailers)} right now. Try searching without the store filter or check back later."
+        is_nl = language and language.value == "nl"
+
+        if is_nl:
+            if search_query.brands:
+                return f"Ik kon geen huidige promoties vinden voor {', '.join(search_query.brands)}. Probeer te zoeken naar gelijkaardige producten of een bredere categorie."
+            elif search_query.retailers:
+                return f"Geen passende promoties gevonden bij {', '.join(search_query.retailers)} op dit moment. Probeer zonder winkelfilter te zoeken of kijk later opnieuw."
+            else:
+                return "Ik kon geen promoties vinden die overeenkomen met je zoekopdracht. Probeer specifieker te zijn over het product of merk dat je zoekt."
         else:
-            return "I couldn't find any promotions matching your search. Try being more specific about the product or brand you're looking for."
+            if search_query.brands:
+                return f"I couldn't find any current promotions for {', '.join(search_query.brands)}. Try searching for similar products or a broader category."
+            elif search_query.retailers:
+                return f"No matching promotions found at {', '.join(search_query.retailers)} right now. Try searching without the store filter or check back later."
+            else:
+                return "I couldn't find any promotions matching your search. Try being more specific about the product or brand you're looking for."
