@@ -5,14 +5,18 @@ from datetime import date
 from math import ceil
 from typing import Optional
 
-from fastapi import APIRouter, Depends, UploadFile, File, Query
+from fastapi import APIRouter, BackgroundTasks, Depends, UploadFile, File, Query
+from fastapi.responses import JSONResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_db, get_current_db_user
+from app.models.enums import ReceiptStatus
 from app.models.user import User
 
 logger = logging.getLogger(__name__)
 from app.schemas.receipt import (
+    ReceiptUploadAcceptedResponse,
+    ReceiptStatusResponse,
     ReceiptUploadResponse,
     ReceiptResponse,
     GroupedReceipt,
@@ -20,7 +24,8 @@ from app.schemas.receipt import (
     GroupedReceiptListResponse,
     LineItemDeleteResponse,
 )
-from app.services.receipt_processor_v2 import ReceiptProcessorV2
+from app.services.image_validator import ImageValidator
+from app.services.receipt_background_worker import process_receipt_background
 from app.db.repositories.receipt_repo import ReceiptRepository
 from app.db.repositories.transaction_repo import TransactionRepository
 from app.core.exceptions import ResourceNotFoundError
@@ -29,73 +34,69 @@ from app.services.enriched_profile_service import EnrichedProfileService
 router = APIRouter()
 
 
-@router.post("/upload", response_model=ReceiptUploadResponse)
+@router.post("/upload", response_model=ReceiptUploadAcceptedResponse, status_code=202)
 async def upload_receipt(
+    background_tasks: BackgroundTasks,
     file: UploadFile = File(...),
     receipt_date: Optional[date] = Query(None, description="Override receipt date"),
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_db_user),
 ):
     """
-    Upload and process a receipt.
+    Upload a receipt for async processing.
 
-    Accepts PDF, JPG, or PNG files. The receipt will be analyzed using
-    Google Gemini Vision for OCR, semantic normalization, and categorization.
+    Accepts PDF, JPG, or PNG files. Returns immediately with a receipt ID
+    and PENDING status. The receipt is processed in the background via
+    Google Gemini Vision for OCR, normalization, and categorization.
 
-    Features:
-    - Line item extraction with original and normalized names
-    - Granular categorization (~200 categories) plus parent categories
-    - Belgian pricing conventions (comma→dot, Hoeveelheidsvoordeel)
-    - Deposit detection (Leeggoed/Vidange items)
-    - Health scoring (0-5 scale)
-
-    Returns the extracted data synchronously.
-
-    **Duplicate Detection**: If a receipt with the same content hash was previously
-    uploaded, returns `is_duplicate: true` with empty `receipt_id` and no transactions saved.
+    Poll `GET /receipts/{receipt_id}/status` to track processing progress.
     """
-    t_total = time.monotonic()
+    # Validate content type synchronously (fail fast on bad files)
+    content_type = file.content_type or "application/octet-stream"
+    image_validator = ImageValidator()
+    image_validator.validate_content_type(content_type)
 
-    # Log upload start
+    # Read file bytes now — the UploadFile stream closes with the request
+    file_content = await file.read()
+    filename = file.filename or "receipt"
+    file_type_mapping = {
+        "image/jpeg": "jpg", "image/jpg": "jpg",
+        "image/png": "png", "application/pdf": "pdf",
+    }
+    file_type = file_type_mapping.get(content_type, "unknown")
+
     logger.info(
-        f"Receipt upload started: user_id={current_user.id}, "
-        f"filename={file.filename}, content_type={file.content_type}, "
-        f"date_override={receipt_date}"
+        f"Receipt upload accepted: user_id={current_user.id}, "
+        f"filename={filename}, type={file_type}, size={len(file_content)} bytes"
     )
 
+    # Create receipt record with PENDING status
     receipt_repo = ReceiptRepository(db)
-    transaction_repo = TransactionRepository(db)
-
-    processor = ReceiptProcessorV2(
-        receipt_repo=receipt_repo,
-        transaction_repo=transaction_repo,
+    receipt = await receipt_repo.create(
+        user_id=current_user.id,
+        filename=filename,
+        file_type=file_type,
+        file_size=len(file_content),
+        status=ReceiptStatus.PENDING,
     )
 
-    t0 = time.monotonic()
-    result = await processor.process_receipt(
+    # Schedule background processing
+    background_tasks.add_task(
+        process_receipt_background,
+        receipt_id=receipt.id,
         user_id=current_user.id,
-        file=file,
+        file_content=file_content,
+        content_type=content_type,
+        filename=filename,
+        file_type=file_type,
         receipt_date_override=receipt_date,
     )
-    logger.info(f"⏱ process_receipt_total: {time.monotonic() - t0:.3f}s")
 
-    # Log result
-    if result.is_duplicate:
-        logger.info(f"Receipt upload duplicate: user_id={current_user.id}, filename={file.filename}")
-    else:
-        logger.info(
-            f"Receipt upload complete: user_id={current_user.id}, "
-            f"receipt_id={result.receipt_id}, store={result.store_name}, "
-            f"items={result.items_count}, total={result.total_amount}"
-        )
-
-    if not result.is_duplicate:
-        t0 = time.monotonic()
-        await EnrichedProfileService.rebuild_profile(current_user.id, db)
-        logger.info(f"⏱ rebuild_enriched_profile: {time.monotonic() - t0:.3f}s")
-
-    logger.info(f"⏱ UPLOAD_TOTAL: {time.monotonic() - t_total:.3f}s")
-    return result
+    return ReceiptUploadAcceptedResponse(
+        receipt_id=receipt.id,
+        status=ReceiptStatus.PENDING,
+        filename=filename,
+    )
 
 
 @router.get("", response_model=GroupedReceiptListResponse)
@@ -230,6 +231,47 @@ async def list_receipts(
         page=page,
         page_size=page_size,
         total_pages=total_pages,
+    )
+
+
+@router.get("/{receipt_id}/status", response_model=ReceiptStatusResponse)
+async def get_receipt_status(
+    receipt_id: str,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_db_user),
+):
+    """Poll receipt processing status.
+
+    Returns the current processing state along with the filename
+    (for persistent UI display) and detected_date once completed
+    (so the frontend knows which period to refresh).
+    """
+    receipt_repo = ReceiptRepository(db)
+
+    receipt = await receipt_repo.get_by_id_and_user(
+        receipt_id=receipt_id,
+        user_id=current_user.id,
+    )
+
+    if not receipt:
+        raise ResourceNotFoundError(f"Receipt {receipt_id} not found")
+
+    # Count transactions if processing is complete
+    items_count = 0
+    if receipt.status == ReceiptStatus.COMPLETED:
+        transaction_repo = TransactionRepository(db)
+        transactions = await transaction_repo.get_by_receipt(receipt_id)
+        items_count = len(transactions)
+
+    return ReceiptStatusResponse(
+        receipt_id=receipt.id,
+        status=receipt.status,
+        filename=receipt.original_filename,
+        detected_date=receipt.receipt_date,
+        store_name=receipt.store_name,
+        total_amount=receipt.total_amount,
+        items_count=items_count,
+        error_message=receipt.error_message,
     )
 
 
