@@ -149,6 +149,8 @@ class PromoChatService:
             clarification = search_query.clarification_needed or "Could you be more specific about what products or promotions you're looking for?"
             if language and language.value == "nl":
                 clarification = search_query.clarification_needed or "Kan je iets specifieker zijn over welke producten of promoties je zoekt?"
+            elif language and language.value == "fr":
+                clarification = search_query.clarification_needed or "Pourriez-vous être plus précis sur les produits ou promotions que vous recherchez ?"
             return PromoChatResponse(
                 message=clarification,
                 promos=[],
@@ -491,6 +493,7 @@ class PromoChatService:
         retailers = list(set(p.retailer for p in promos if p.retailer))
         total_savings = sum(p.savings or 0 for p in promos)
         is_nl = language and language.value == "nl"
+        is_fr = language and language.value == "fr"
 
         parts = []
 
@@ -511,6 +514,23 @@ class PromoChatService:
             result = " ".join(parts) + "."
             if total_savings > 0:
                 result += f" Totale mogelijke besparing: €{total_savings:.2f}."
+        elif is_fr:
+            if search_query.brands:
+                brand_str = ", ".join(search_query.brands)
+                parts.append(f"J'ai trouvé {num_promos} promotion{'s' if num_promos != 1 else ''} pour {brand_str}")
+            elif search_query.product_keywords:
+                keyword_str = ", ".join(search_query.product_keywords[:2])
+                parts.append(f"J'ai trouvé {num_promos} promotion{'s' if num_promos != 1 else ''} pour {keyword_str}")
+            else:
+                parts.append(f"J'ai trouvé {num_promos} promotion{'s' if num_promos != 1 else ''} correspondante{'s' if num_promos != 1 else ''}")
+            if retailers:
+                if len(retailers) == 1:
+                    parts.append(f"chez {retailers[0].title()}")
+                else:
+                    parts.append(f"dans {len(retailers)} magasins")
+            result = " ".join(parts) + "."
+            if total_savings > 0:
+                result += f" Économies potentielles : {total_savings:.2f} €."
         else:
             if search_query.brands:
                 brand_str = ", ".join(search_query.brands)
@@ -534,6 +554,7 @@ class PromoChatService:
     def _build_no_results_response(self, search_query: SearchQuery, language: Optional[Language] = None) -> str:
         """Build a response when no promos are found."""
         is_nl = language and language.value == "nl"
+        is_fr = language and language.value == "fr"
 
         if is_nl:
             if search_query.brands:
@@ -542,6 +563,13 @@ class PromoChatService:
                 return f"Geen passende promoties gevonden bij {', '.join(search_query.retailers)} op dit moment. Probeer zonder winkelfilter te zoeken of kijk later opnieuw."
             else:
                 return "Ik kon geen promoties vinden die overeenkomen met je zoekopdracht. Probeer specifieker te zijn over het product of merk dat je zoekt."
+        elif is_fr:
+            if search_query.brands:
+                return f"Je n'ai trouvé aucune promotion en cours pour {', '.join(search_query.brands)}. Essayez de chercher des produits similaires ou une catégorie plus large."
+            elif search_query.retailers:
+                return f"Aucune promotion trouvée chez {', '.join(search_query.retailers)} pour le moment. Essayez sans filtre de magasin ou revenez plus tard."
+            else:
+                return "Je n'ai trouvé aucune promotion correspondant à votre recherche. Essayez d'être plus précis sur le produit ou la marque que vous cherchez."
         else:
             if search_query.brands:
                 return f"I couldn't find any current promotions for {', '.join(search_query.brands)}. Try searching for similar products or a broader category."

@@ -202,7 +202,7 @@ You will receive the user's profile information (name, etc.) and their full tran
         if lang == "nl":
             return "\n\nIMPORTANT LANGUAGE RULE: The user's language is Dutch (Flemish/Belgian Dutch). You MUST respond entirely in Flemish Dutch (Vlaams Nederlands). Use Belgian Dutch vocabulary and expressions, not Netherlands Dutch. For example: use 'kassaticket' not 'kassabon', 'winkelkar' not 'winkelwagen', 'boodschappen' not 'boodschappenlijst'. Keep your personality and humor but express it in natural Flemish Dutch."
         elif lang == "fr":
-            return "\n\nIMPORTANT LANGUAGE RULE: The user's language is French (Belgian French). You MUST respond entirely in French. Use Belgian French vocabulary where appropriate."
+            return "\n\nIMPORTANT LANGUAGE RULE: The user's language is French (Belgian French). You MUST respond entirely in French. Use Belgian French vocabulary and expressions where appropriate. For example: use 'ticket de caisse' for receipts, 'courses' for groceries. Keep your personality and humor but express it in natural Belgian French."
         return ""
 
     async def chat(
