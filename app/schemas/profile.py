@@ -3,14 +3,17 @@ from typing import Optional
 
 from pydantic import BaseModel, Field
 
-from app.models.enums import Gender
+from app.models.enums import Gender, Language
 
 
 class ProfileBase(BaseModel):
     """Base profile schema with common fields"""
     first_name: Optional[str] = Field(None, max_length=100)
     last_name: Optional[str] = Field(None, max_length=100)
+    nickname: Optional[str] = Field(None, max_length=100)
     gender: Optional[Gender] = None
+    age: Optional[int] = Field(None, ge=1, le=150)
+    language: Optional[Language] = None
 
 
 class ProfileCreate(ProfileBase):
@@ -22,7 +25,10 @@ class ProfileUpdate(BaseModel):
     """Schema for partial profile updates"""
     first_name: Optional[str] = Field(None, max_length=100)
     last_name: Optional[str] = Field(None, max_length=100)
+    nickname: Optional[str] = Field(None, max_length=100)
     gender: Optional[Gender] = None
+    age: Optional[int] = Field(None, ge=1, le=150)
+    language: Optional[Language] = None
 
 
 class ProfileResponse(ProfileBase):

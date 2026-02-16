@@ -1,12 +1,12 @@
 from datetime import datetime
 from typing import TYPE_CHECKING, Optional
 
-from sqlalchemy import String, DateTime, Boolean, Enum as SQLEnum, ForeignKey
+from sqlalchemy import String, Integer, DateTime, Boolean, Enum as SQLEnum, ForeignKey
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from sqlalchemy.sql import func
 
 from app.db.base import Base
-from app.models.enums import Gender
+from app.models.enums import Gender, Language
 
 if TYPE_CHECKING:
     from app.models.user import User
@@ -21,8 +21,13 @@ class UserProfile(Base):
     )
     first_name: Mapped[Optional[str]] = mapped_column(String, nullable=True)
     last_name: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+    nickname: Mapped[Optional[str]] = mapped_column(String, nullable=True)
     gender: Mapped[Optional[Gender]] = mapped_column(
         SQLEnum(Gender, native_enum=False), nullable=True
+    )
+    age: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    language: Mapped[Optional[Language]] = mapped_column(
+        SQLEnum(Language, native_enum=False), nullable=True
     )
     profile_completed: Mapped[bool] = mapped_column(Boolean, default=False)
     created_at: Mapped[datetime] = mapped_column(

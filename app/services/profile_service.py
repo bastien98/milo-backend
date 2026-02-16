@@ -4,7 +4,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.repositories.user_profile_repo import UserProfileRepository
 from app.models.user_profile import UserProfile
-from app.models.enums import Gender
+from app.models.enums import Gender, Language
 from app.core.exceptions import ResourceNotFoundError
 
 
@@ -22,7 +22,10 @@ class ProfileService:
         user_id: str,
         first_name: Optional[str] = None,
         last_name: Optional[str] = None,
+        nickname: Optional[str] = None,
         gender: Optional[Gender] = None,
+        age: Optional[int] = None,
+        language: Optional[Language] = None,
     ) -> UserProfile:
         """Create or update user profile (POST operation)."""
         # Check if profile exists
@@ -34,7 +37,10 @@ class ProfileService:
                 profile=existing_profile,
                 first_name=first_name,
                 last_name=last_name,
+                nickname=nickname,
                 gender=gender,
+                age=age,
+                language=language,
             )
         else:
             # Create new profile
@@ -42,7 +48,10 @@ class ProfileService:
                 user_id=user_id,
                 first_name=first_name,
                 last_name=last_name,
+                nickname=nickname,
                 gender=gender,
+                age=age,
+                language=language,
             )
 
     async def update_profile(
@@ -50,7 +59,10 @@ class ProfileService:
         user_id: str,
         first_name: Optional[str] = None,
         last_name: Optional[str] = None,
+        nickname: Optional[str] = None,
         gender: Optional[Gender] = None,
+        age: Optional[int] = None,
+        language: Optional[Language] = None,
     ) -> UserProfile:
         """Update existing user profile (PUT operation)."""
         # Get existing profile
@@ -68,7 +80,10 @@ class ProfileService:
             profile=existing_profile,
             first_name=first_name,
             last_name=last_name,
+            nickname=nickname,
             gender=gender,
+            age=age,
+            language=language,
         )
 
     async def delete_profile(self, user_id: str) -> None:

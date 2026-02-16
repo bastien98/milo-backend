@@ -77,7 +77,10 @@ async def create_or_update_profile(
         user_id=current_user.firebase_uid,
         first_name=profile_data.first_name,
         last_name=profile_data.last_name,
+        nickname=profile_data.nickname,
         gender=profile_data.gender,
+        age=profile_data.age,
+        language=profile_data.language,
     )
 
     await db.commit()
@@ -116,7 +119,10 @@ async def update_profile(
             user_id=current_user.firebase_uid,
             first_name=profile_data.first_name,
             last_name=profile_data.last_name,
+            nickname=profile_data.nickname,
             gender=profile_data.gender,
+            age=profile_data.age,
+            language=profile_data.language,
         )
     except ResourceNotFoundError as e:
         raise HTTPException(

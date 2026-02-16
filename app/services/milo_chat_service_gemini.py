@@ -85,12 +85,14 @@ You will receive the user's profile information (name, etc.) and their full tran
             return ""
 
         profile_parts = []
-        if profile.first_name:
-            profile_parts.append(f"Name: {profile.first_name}")
-        if profile.last_name:
-            profile_parts.append(f"Last Name: {profile.last_name}")
+        if profile.nickname:
+            profile_parts.append(f"Name: {profile.nickname}")
         if profile.gender and profile.gender.value != "prefer_not_to_say":
             profile_parts.append(f"Gender: {profile.gender.value}")
+        if profile.age is not None:
+            profile_parts.append(f"Age: {profile.age}")
+        if profile.language:
+            profile_parts.append(f"Language: {profile.language.value}")
 
         if not profile_parts:
             return ""
