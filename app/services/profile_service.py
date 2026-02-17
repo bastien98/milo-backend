@@ -1,4 +1,4 @@
-from typing import Optional
+from typing import List, Optional
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -26,6 +26,7 @@ class ProfileService:
         gender: Optional[Gender] = None,
         age: Optional[int] = None,
         language: Optional[Language] = None,
+        preferred_stores: Optional[List[str]] = None,
     ) -> UserProfile:
         """Create or update user profile (POST operation)."""
         # Check if profile exists
@@ -41,6 +42,7 @@ class ProfileService:
                 gender=gender,
                 age=age,
                 language=language,
+                preferred_stores=preferred_stores,
             )
         else:
             # Create new profile
@@ -52,6 +54,7 @@ class ProfileService:
                 gender=gender,
                 age=age,
                 language=language,
+                preferred_stores=preferred_stores,
             )
 
     async def update_profile(
@@ -63,6 +66,7 @@ class ProfileService:
         gender: Optional[Gender] = None,
         age: Optional[int] = None,
         language: Optional[Language] = None,
+        preferred_stores: Optional[List[str]] = None,
     ) -> UserProfile:
         """Update existing user profile (PUT operation)."""
         # Get existing profile
@@ -84,6 +88,7 @@ class ProfileService:
             gender=gender,
             age=age,
             language=language,
+            preferred_stores=preferred_stores,
         )
 
     async def delete_profile(self, user_id: str) -> None:

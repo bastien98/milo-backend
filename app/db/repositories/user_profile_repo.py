@@ -1,4 +1,4 @@
-from typing import Optional
+from typing import List, Optional
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -27,6 +27,7 @@ class UserProfileRepository:
         gender: Optional[Gender] = None,
         age: Optional[int] = None,
         language: Optional[Language] = None,
+        preferred_stores: Optional[List[str]] = None,
     ) -> UserProfile:
         """Create a new user profile."""
         # Determine if profile is completed (new fields: nickname, gender, age, language)
@@ -40,6 +41,7 @@ class UserProfileRepository:
             gender=gender,
             age=age,
             language=language,
+            preferred_stores=preferred_stores,
             profile_completed=profile_completed,
         )
         self.db.add(profile)
@@ -56,6 +58,7 @@ class UserProfileRepository:
         gender: Optional[Gender] = None,
         age: Optional[int] = None,
         language: Optional[Language] = None,
+        preferred_stores: Optional[List[str]] = None,
     ) -> UserProfile:
         """Update an existing user profile."""
         # Update only provided fields
@@ -71,6 +74,8 @@ class UserProfileRepository:
             profile.age = age
         if language is not None:
             profile.language = language
+        if preferred_stores is not None:
+            profile.preferred_stores = preferred_stores
 
         # Update profile_completed status (new fields)
         profile.profile_completed = all([

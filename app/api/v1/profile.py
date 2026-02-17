@@ -81,6 +81,7 @@ async def create_or_update_profile(
         gender=profile_data.gender,
         age=profile_data.age,
         language=profile_data.language,
+        preferred_stores=profile_data.preferred_stores,
     )
 
     await db.commit()
@@ -123,6 +124,7 @@ async def update_profile(
             gender=profile_data.gender,
             age=profile_data.age,
             language=profile_data.language,
+            preferred_stores=profile_data.preferred_stores,
         )
     except ResourceNotFoundError as e:
         raise HTTPException(

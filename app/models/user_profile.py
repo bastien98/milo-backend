@@ -2,6 +2,7 @@ from datetime import datetime
 from typing import TYPE_CHECKING, Optional
 
 from sqlalchemy import String, Integer, DateTime, Boolean, Enum as SQLEnum, ForeignKey
+from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from sqlalchemy.sql import func
 
@@ -29,6 +30,7 @@ class UserProfile(Base):
     language: Mapped[Optional[Language]] = mapped_column(
         SQLEnum(Language, native_enum=False), nullable=True
     )
+    preferred_stores: Mapped[Optional[list]] = mapped_column(JSONB, nullable=True)
     profile_completed: Mapped[bool] = mapped_column(Boolean, default=False)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()

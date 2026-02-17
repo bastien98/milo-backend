@@ -10,7 +10,7 @@ import json
 import logging
 import time
 from datetime import date, timedelta
-from typing import Any, Optional
+from typing import Any, List, Optional
 
 from pinecone import Pinecone
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -183,17 +183,20 @@ class PromoService:
         self.settings = get_settings()
         self.enriched_repo = EnrichedProfileRepository(db)
 
-    async def _fetch_user_language(self, user_id: str) -> Optional[Language]:
-        """Fetch the user's language preference from their profile."""
+    async def _fetch_user_profile_prefs(self, user_id: str) -> tuple[Optional[Language], Optional[List[str]]]:
+        """Fetch the user's language and preferred stores from their profile."""
         result = await self.db.execute(
-            select(UserProfile.language)
+            select(UserProfile.language, UserProfile.preferred_stores)
             .join(User, User.firebase_uid == UserProfile.user_id)
             .where(User.id == user_id)
         )
-        return result.scalar_one_or_none()
+        row = result.one_or_none()
+        if row:
+            return row[0], row[1]
+        return None, None
 
     async def get_recommendations(self, user_id: str) -> dict:
-        """Full pipeline: fetch profile -> search Pinecone -> generate via LLM."""
+        """Full pipeline: fetch profile -> search Pinecone -> filter by stores -> generate via LLM."""
         # Step 1: Fetch enriched profile
         profile = await self._fetch_enriched_profile(user_id)
 
@@ -201,14 +204,28 @@ class PromoService:
         if not interest_items:
             return self._empty_response()
 
-        # Fetch user's language preference
-        language = await self._fetch_user_language(user_id)
+        # Fetch user's language and store preferences
+        language, preferred_stores = await self._fetch_user_profile_prefs(user_id)
 
         # Step 2: Search Pinecone (sync SDK, run in thread pool)
         promo_results = await self._search_all_promos(interest_items)
 
-        # Step 3: Generate LLM recommendations
-        recommendations = await self._generate_recommendations(profile, promo_results, language=language)
+        # Step 3: Filter by preferred stores (if set)
+        if preferred_stores:
+            store_set = {s.lower() for s in preferred_stores}
+            filtered_results: dict[str, list[dict]] = {}
+            for item_name, promos in promo_results.items():
+                filtered = [
+                    p for p in promos
+                    if p.get("source_retailer", "").lower() in store_set
+                ]
+                filtered_results[item_name] = filtered
+            promo_results = filtered_results
+
+        # Step 4: Generate LLM recommendations
+        recommendations = await self._generate_recommendations(
+            profile, promo_results, language=language, preferred_stores=preferred_stores
+        )
         return recommendations
 
     async def _fetch_enriched_profile(self, user_id: str) -> dict:
@@ -253,22 +270,31 @@ class PromoService:
         return all_results
 
     async def _generate_recommendations(
-        self, profile: dict, promo_results: dict[str, list[dict]], language: Optional[Language] = None
+        self, profile: dict, promo_results: dict[str, list[dict]],
+        language: Optional[Language] = None,
+        preferred_stores: Optional[List[str]] = None,
     ) -> dict:
         """Send profile + matched promos to Gemini for recommendation generation."""
         user_message = _build_llm_context(profile, promo_results)
         raw_response = await asyncio.to_thread(
-            self._call_gemini, user_message, 1, language
+            self._call_gemini, user_message, 1, language, preferred_stores
         )
         return _parse_llm_response(raw_response)
 
-    def _call_gemini(self, user_message: str, attempt: int = 1, language: Optional[Language] = None) -> str:
+    def _call_gemini(
+        self, user_message: str, attempt: int = 1,
+        language: Optional[Language] = None,
+        preferred_stores: Optional[List[str]] = None,
+    ) -> str:
         from google import genai
         from google.genai import types
         from app.schemas.promo import GeminiPromoOutput
 
         # Build language-aware system prompt
         system_prompt = SYSTEM_PROMPT
+        if preferred_stores:
+            stores_list = ", ".join(preferred_stores)
+            system_prompt += f"\n\nSTORE FILTER: The user has selected these stores: {stores_list}. ONLY include deals from these stores. Do NOT include deals from any other stores."
         if language and language.value == "nl":
             system_prompt += "\n\nCRITICAL LANGUAGE RULE: ALL text fields (reason, tip, closing_nudge, smart_switch reason) MUST be written in Flemish Dutch (Vlaams Nederlands). Use natural Belgian Dutch. Keep promo mechanisms in their original form (1+1 Gratis, -50%, etc). Product names and brand names stay as-is. Only the descriptive/personalized text fields must be in Dutch."
         elif language and language.value == "fr":
@@ -298,7 +324,7 @@ class PromoService:
             if attempt < 2:
                 logger.warning(f"Gemini returned truncated JSON (attempt {attempt}), retrying...")
                 time.sleep(1)
-                return self._call_gemini(user_message, attempt + 1, language)
+                return self._call_gemini(user_message, attempt + 1, language, preferred_stores)
             logger.warning(f"Gemini returned truncated JSON on final attempt")
 
         return response.text

@@ -1,5 +1,5 @@
 from datetime import datetime
-from typing import Optional
+from typing import List, Optional
 
 from pydantic import BaseModel, Field
 
@@ -14,6 +14,7 @@ class ProfileBase(BaseModel):
     gender: Optional[Gender] = None
     age: Optional[int] = Field(None, ge=1, le=150)
     language: Optional[Language] = None
+    preferred_stores: Optional[List[str]] = None
 
 
 class ProfileCreate(ProfileBase):
@@ -29,6 +30,7 @@ class ProfileUpdate(BaseModel):
     gender: Optional[Gender] = None
     age: Optional[int] = Field(None, ge=1, le=150)
     language: Optional[Language] = None
+    preferred_stores: Optional[List[str]] = None
 
 
 class ProfileResponse(ProfileBase):
