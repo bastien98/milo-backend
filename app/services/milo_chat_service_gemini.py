@@ -20,7 +20,7 @@ settings = get_settings()
 class MiloChatServiceGemini:
     """Milo AI chat service for answering questions about transactional data using Gemini."""
 
-    MODEL = "gemini-2.5-pro"
+    MODEL = "gemini-2.5-flash"
     MAX_TOKENS = 4096
 
     SYSTEM_PROMPT = """You are Milo, a joyful and hilariously witty AI shopping assistant who genuinely LOVES helping people understand their spending! You're like that one friend who's amazing with money but also cracks jokes at the grocery store. Part financial whiz, part stand-up comedian, part receipt detective.
@@ -205,6 +205,13 @@ You will receive the user's profile information (name, etc.) and their full tran
             return "\n\nIMPORTANT LANGUAGE RULE: The user's language is French (Belgian French). You MUST respond entirely in French. Use Belgian French vocabulary and expressions where appropriate. For example: use 'ticket de caisse' for receipts, 'courses' for groceries. Keep your personality and humor but express it in natural Belgian French."
         return ""
 
+    def _build_config(self, system_prompt: str) -> types.GenerateContentConfig:
+        return types.GenerateContentConfig(
+            system_instruction=system_prompt,
+            max_output_tokens=self.MAX_TOKENS,
+            temperature=0.7,
+        )
+
     async def chat(
         self,
         db: AsyncSession,
@@ -253,11 +260,7 @@ My question: {message}"""
             response = self.client.models.generate_content(
                 model=self.MODEL,
                 contents=contents,
-                config=types.GenerateContentConfig(
-                    system_instruction=system_prompt,
-                    max_output_tokens=self.MAX_TOKENS,
-                    temperature=0.7,
-                ),
+                config=self._build_config(system_prompt),
             )
 
             return response.text
@@ -316,11 +319,7 @@ My question: {message}"""
             response = self.client.models.generate_content_stream(
                 model=self.MODEL,
                 contents=contents,
-                config=types.GenerateContentConfig(
-                    system_instruction=system_prompt,
-                    max_output_tokens=self.MAX_TOKENS,
-                    temperature=0.7,
-                ),
+                config=self._build_config(system_prompt),
             )
 
             for chunk in response:
