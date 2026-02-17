@@ -151,3 +151,32 @@ class LineItemDeleteResponse(BaseModel):
     updated_items_count: int  # New item count after deletion
     updated_average_health_score: Optional[float]  # New average health score
     receipt_deleted: bool = False  # True if the entire receipt was deleted (last item)
+
+
+class ReceiptUploadAcceptedResponse(BaseModel):
+    """Returned immediately from POST /upload (HTTP 202).
+
+    The receipt has been created and background processing has started.
+    Poll GET /receipts/{receipt_id}/status for progress.
+    """
+
+    receipt_id: str
+    status: ReceiptStatus
+    filename: str
+
+
+class ReceiptStatusResponse(BaseModel):
+    """Returned from GET /receipts/{receipt_id}/status.
+
+    Includes filename for persistent UI state and detected_date
+    once processing completes so the frontend knows which period to refresh.
+    """
+
+    receipt_id: str
+    status: ReceiptStatus
+    filename: Optional[str] = None
+    detected_date: Optional[date] = None  # receipt_date once extracted
+    store_name: Optional[str] = None
+    total_amount: Optional[float] = None
+    items_count: int = 0
+    error_message: Optional[str] = None
