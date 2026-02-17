@@ -243,6 +243,18 @@ class CategoryRegistry:
         """Get all group names."""
         return list(self._groups.keys())
 
+    def get_raw_names_for_display(self, display_name: str) -> List[str]:
+        """Get all raw category names that map to a given display name.
+
+        Used to resolve display names back to the actual category strings
+        stored in the database (which may include parenthetical suffixes).
+        """
+        raw_names = []
+        for raw_name, info in self._lookup.items():
+            if info.display_name == display_name:
+                raw_names.append(raw_name)
+        return raw_names
+
     def find_closest_match(self, name: str, threshold: float = 0.6) -> Optional[str]:
         """Find the closest matching sub-category using fuzzy matching."""
         if self.is_valid(name):

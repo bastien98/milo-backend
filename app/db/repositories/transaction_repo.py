@@ -72,15 +72,19 @@ class TransactionRepository:
         if store_name:
             conditions.append(Transaction.store_name == store_name)
         if category:
-            # Handle both old enum names (MEAT_FISH) and new display names (Meat Fish)
-            normalized = normalize_category_for_matching(category)
-            conditions.append(
-                or_(
-                    Transaction.category == category,  # Exact match
-                    Transaction.category == normalized,  # Normalized match (e.g., MEAT_FISH)
-                    func.upper(Transaction.category) == normalized,  # Case-insensitive
-                )
-            )
+            # Resolve display name to all possible raw category names
+            # (e.g., "Bakery" → ["Bakery (Bread, Pistolets)", "Bakery"])
+            from app.services.category_registry import get_category_registry
+            registry = get_category_registry()
+            raw_names = registry.get_raw_names_for_display(category)
+
+            # Build set of all names to match against
+            all_names = list(set([category] + raw_names))
+
+            if len(all_names) == 1:
+                conditions.append(Transaction.category == all_names[0])
+            else:
+                conditions.append(Transaction.category.in_(all_names))
 
         # Get total count
         count_result = await self.db.execute(
