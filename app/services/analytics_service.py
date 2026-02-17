@@ -45,6 +45,7 @@ from app.core.categories import (
     get_group_icon,
     GROUP_COLORS,
     GROUP_ICONS,
+    EXCLUDED_CATEGORIES,
 )
 from app.services.split_aware_calculation import SplitAwareCalculation
 
@@ -207,13 +208,18 @@ class AnalyticsService:
         # Calculate total spend (split-adjusted)
         total_spend = sum(amount for _, amount in tx_amounts)
 
-        # Group by category (split-adjusted)
+        # Group by category (split-adjusted), excluding non-product categories
         category_data = defaultdict(lambda: {"amount": 0.0, "count": 0, "health_scores": []})
         for t, amount in tx_amounts:
+            if t.category in EXCLUDED_CATEGORIES:
+                continue
             category_data[t.category]["amount"] += amount
             category_data[t.category]["count"] += 1
             if t.health_score is not None:
                 category_data[t.category]["health_scores"].append(t.health_score)
+
+        # Recalculate total from included categories only
+        total_spend = sum(data["amount"] for data in category_data.values())
 
         # Build category list with color_hex
         categories = []

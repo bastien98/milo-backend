@@ -93,6 +93,7 @@ CATEGORY_ICONS: Dict[str, str] = {
     "Pet Supplies": "paw-print",
     "Tobacco": "cigarette",
     "Lottery & Scratch Cards": "ticket",
+    "Promos & Discounts": "percent",
     "Deposits (Statiegeld/Vidange)": "recycle",
     "Other": "tag",
 }
@@ -127,6 +128,7 @@ CATEGORY_COLORS: Dict[str, str] = {
     "Pet Supplies": "#FF9500",
     "Tobacco": "#8E8E93",
     "Lottery & Scratch Cards": "#5856D6",
+    "Promos & Discounts": "#30D158",
     "Deposits (Statiegeld/Vidange)": "#34C759",
     "Other": "#8E8E93",
 }
@@ -168,7 +170,7 @@ _HIERARCHY: Dict[str, List[tuple]] = {
     ],
     "Snacks": [
         ("Chips, Nuts & Aperitif", "Chips, Nuts & Aperitif"),
-        ("Chocolate & Sweets (Biscuits)", "Chocolate & Sweets"),
+        ("Chocolate & Sweets (Biscuits)", "Chocolate, Biscuits & Sweets"),
     ],
     "Household": [
         ("Official Waste Bags (PMD/Rest)", "Waste Bags"),
@@ -182,6 +184,7 @@ _HIERARCHY: Dict[str, List[tuple]] = {
         ("Pet Supplies", "Pet Supplies"),
         ("Tobacco", "Tobacco"),
         ("Lottery & Scratch Cards", "Lottery & Scratch Cards"),
+        ("Promos & Discounts", "Promos & Discounts"),
         ("Deposits (Statiegeld/Vidange)", "Deposits"),
         ("Other", "Other"),
     ],
@@ -221,8 +224,17 @@ _BABY = "Baby & Kids"
 _PET = "Pet Supplies"
 _TOBACCO = "Tobacco"
 _LOTTERY = "Lottery & Scratch Cards"
+_PROMOS = "Promos & Discounts"
 _DEPOSITS = "Deposits (Statiegeld/Vidange)"
 _OTHER = "Other"
+
+
+# Categories that represent non-product line items (discounts, refunds, deposit returns).
+# Excluded from pie chart analytics and not selectable for budget allocation.
+EXCLUDED_CATEGORIES: frozenset = frozenset({
+    _PROMOS,
+    _DEPOSITS,
+})
 
 
 # ============================================================
@@ -451,7 +463,7 @@ GRANULAR_CATEGORIES: Dict[str, str] = {
     "Crackers Snack": _CHIPS,
     "Popcorn": _CHIPS,
     "Dried Meat Snack": _CHIPS,
-    "Cookies & Biscuits": _CHIPS,
+    "Cookies & Biscuits": _CHOCOLATE,
     "Protein Bars": _CHIPS,
 
     # ===================
@@ -478,8 +490,8 @@ GRANULAR_CATEGORIES: Dict[str, str] = {
     # ===================
     "Frozen Fries": _FRIES,
     "Frozen Snacks": _FRIES,
-    "Ice Cream": _FRIES,
-    "Frozen Desserts": _FRIES,
+    "Ice Cream": _FROZEN_INGR,
+    "Frozen Desserts": _FROZEN_INGR,
 
     # ===================
     # READY MEALS & PIZZA
@@ -490,7 +502,7 @@ GRANULAR_CATEGORIES: Dict[str, str] = {
     "Pizza Fresh": _READY_MEALS,
     "Meat Substitute": _READY_MEALS,
     "Vegetarian Meals": _READY_MEALS,
-    "Vegan Cheese Dairy": _READY_MEALS,
+    "Vegan Cheese Dairy": _DAIRY,
     "Asian Food": _READY_MEALS,
     "Mexican Food": _READY_MEALS,
     "Italian Specialty": _READY_MEALS,
@@ -534,11 +546,11 @@ GRANULAR_CATEGORIES: Dict[str, str] = {
     "Kitchen Paper": _CLEANING,
     "Tissues": _CLEANING,
     "Napkins": _CLEANING,
-    "Batteries": _CLEANING,
-    "Lightbulbs": _CLEANING,
+    "Batteries": _OTHER,
+    "Lightbulbs": _OTHER,
     "Kitchen Accessories": _CLEANING,
-    "Party Supplies": _CLEANING,
-    "Flowers & Plants": _CLEANING,
+    "Party Supplies": _OTHER,
+    "Flowers & Plants": _OTHER,
 
     # ===================
     # PERSONAL CARE / PHARMACY & HYGIENE
@@ -578,9 +590,26 @@ GRANULAR_CATEGORIES: Dict[str, str] = {
     "Tobacco": _TOBACCO,
 
     # ===================
-    # DEPOSITS & DISCOUNTS
+    # LOTTERY & SCRATCH CARDS
     # ===================
-    "Discounts": _DEPOSITS,
+    "Lottery & Scratch Cards": _LOTTERY,
+
+    # ===================
+    # PROMOS & DISCOUNTS
+    # ===================
+    "Discount": _PROMOS,
+    "Coupon": _PROMOS,
+    "Loyalty Discount": _PROMOS,
+    "Promotional Offer": _PROMOS,
+    "Multi-Buy Deal": _PROMOS,
+
+    # ===================
+    # DEPOSITS (STATIEGELD/VIDANGE)
+    # ===================
+    "Bottle Deposit": _DEPOSITS,
+    "Can Deposit": _DEPOSITS,
+    "Crate Deposit": _DEPOSITS,
+    "Deposit Refund": _DEPOSITS,
 
     # ===================
     # OTHER
@@ -795,6 +824,7 @@ def get_hierarchy() -> dict:
                 "sub_categories": [cat_name],
                 "icon": CATEGORY_ICONS.get(cat_name, "tag"),
                 "color_hex": CATEGORY_COLORS.get(cat_name, GROUP_COLORS[group_name]),
+                "budgetable": cat_name not in EXCLUDED_CATEGORIES,
             })
         groups.append({
             "name": group_name,
