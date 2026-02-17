@@ -1,8 +1,11 @@
 """
-Category definitions - single source of truth for the entire app.
+Category definitions — single source of truth for the entire app.
 
 Three-level hierarchy:
-  Group (8)  -->  Category / Parent (31)  -->  Granular (~200)
+  Group (8)  →  Category / Parent (31)  →  Granular (~200)
+
+Everything is defined once in _TREE below. All lookup dicts and constants
+are derived from it at module load time.
 
 Groups provide coarse visual grouping (section headers, group-level SF Symbol icons).
 Categories have their own Phosphor icon and hex color (cross-platform: iOS + Android).
@@ -33,621 +36,681 @@ class CategoryInfo:
 
 
 # ============================================================
-# GROUP-LEVEL CONSTANTS
+# SINGLE SOURCE OF TRUTH
+# ============================================================
+#
+# Structure: list of groups, each containing its categories,
+# each category containing its granular sub-categories.
+#
+# Group fields:
+#   group      — Group name (section header)
+#   color      — Hex color for the group
+#   icon       — SF Symbol icon for the group
+#   categories — List of parent categories in this group
+#
+# Category fields:
+#   name       — Internal DB name (e.g. "Meat & Poultry (Raw)")
+#   display    — Clean display name (e.g. "Meat & Poultry")
+#   icon       — Phosphor icon (kebab-case, cross-platform)
+#   color      — Hex color for this specific category
+#   granular   — List of granular sub-category names (used by LLM)
+#   excluded   — (optional) If True, excluded from analytics/budgets
+
+_TREE = [
+
+    # ── Fresh Food ───────────────────────────────────────────
+    {
+        "group": "Fresh Food",
+        "color": "#2ECC71",
+        "icon": "leaf.fill",
+        "categories": [
+            {
+                "name": "Fruits",
+                "display": "Fruits",
+                "icon": "apple-logo",
+                "color": "#FF9500",
+                "granular": [
+                    "Fruit Apples Pears",
+                    "Fruit Citrus",
+                    "Fruit Bananas",
+                    "Fruit Berries",
+                    "Fruit Stone",
+                    "Fruit Grapes",
+                    "Fruit Melons",
+                    "Fruit Tropical",
+                    "Fruit Dried",
+                    "Nuts",
+                ],
+            },
+            {
+                "name": "Vegetables",
+                "display": "Vegetables",
+                "icon": "carrot",
+                "color": "#34C759",
+                "granular": [
+                    "Tomatoes",
+                    "Salad & Leafy Greens",
+                    "Cucumber & Peppers",
+                    "Onions & Garlic",
+                    "Carrots & Root Veg",
+                    "Potatoes",
+                    "Cabbage & Broccoli",
+                    "Beans & Peas",
+                    "Mushrooms",
+                    "Zucchini & Eggplant",
+                    "Corn",
+                    "Fresh Herbs",
+                    "Prepared Vegetables",
+                ],
+            },
+            {
+                "name": "Meat & Poultry (Raw)",
+                "display": "Meat & Poultry",
+                "icon": "bone",
+                "color": "#FF3B30",
+                "granular": [
+                    "Beef",
+                    "Pork",
+                    "Chicken",
+                    "Turkey",
+                    "Lamb",
+                    "Minced Meat",
+                    "Meat Preparations",
+                    "Offal",
+                ],
+            },
+            {
+                "name": "Charcuterie & Salads (Preparé/Deli)",
+                "display": "Charcuterie & Salads",
+                "icon": "bowl-food",
+                "color": "#FF2D55",
+                "granular": [
+                    "Ham Cooked",
+                    "Ham Dry",
+                    "Salami & Sausage",
+                    "Pâté & Terrine",
+                    "Bacon & Lardons",
+                    "Chicken Turkey Deli",
+                    "Vegetarian Deli",
+                    "Meals Salads",
+                    "Sandwiches",
+                    "Sushi",
+                    "Hummus & Dips",
+                ],
+            },
+            {
+                "name": "Fish & Seafood",
+                "display": "Fish & Seafood",
+                "icon": "fish",
+                "color": "#007AFF",
+                "granular": [
+                    "Fish Fresh",
+                    "Fish Smoked",
+                    "Fish Frozen",
+                    "Shellfish",
+                    "Canned Fish",
+                    "Surimi",
+                ],
+            },
+            {
+                "name": "Dairy, Eggs & Cheese",
+                "display": "Dairy, Eggs & Cheese",
+                "icon": "cheese",
+                "color": "#FFCC00",
+                "granular": [
+                    "Plant Milk",
+                    "Milk Fresh",
+                    "Milk Long Life",
+                    "Cream",
+                    "Yoghurt Natural",
+                    "Yoghurt Fruit",
+                    "Yoghurt Drinks",
+                    "Skyr & Quark",
+                    "Pudding & Desserts",
+                    "Butter",
+                    "Margarine",
+                    "Cooking Fat",
+                    "Cheese Hard",
+                    "Cheese Soft",
+                    "Cheese Blue",
+                    "Cheese Fresh",
+                    "Cheese Spread",
+                    "Cheese Sliced",
+                    "Cheese Grated",
+                    "Cheese Belgian",
+                    "Eggs",
+                    "Vegan Cheese Dairy",
+                    "Protein Shakes",
+                    "Protein Desserts",
+                ],
+            },
+            {
+                "name": "Bakery (Bread, Pistolets)",
+                "display": "Bakery",
+                "icon": "bread",
+                "color": "#A2845E",
+                "granular": [
+                    "Bread Fresh",
+                    "Bread Sliced",
+                    "Bread Specialty",
+                    "Wraps & Pita",
+                    "Crackers",
+                ],
+            },
+            {
+                "name": "Pastries & Koffiekoeken",
+                "display": "Pastries",
+                "icon": "cookie",
+                "color": "#AF52DE",
+                "granular": [
+                    "Croissants & Pastries",
+                    "Cakes & Tarts",
+                    "Waffles",
+                ],
+            },
+        ],
+    },
+
+    # ── Pantry & Staples ─────────────────────────────────────
+    {
+        "group": "Pantry & Staples",
+        "color": "#E67E22",
+        "icon": "cabinet.fill",
+        "categories": [
+            {
+                "name": "Grains, Pasta & Potatoes",
+                "display": "Grains, Pasta & Potatoes",
+                "icon": "grains",
+                "color": "#999999",
+                "granular": [
+                    "Pasta Dry",
+                    "Pasta Fresh",
+                    "Rice",
+                    "Noodles Asian",
+                    "Couscous & Bulgur",
+                    "Grains & Legumes",
+                ],
+            },
+            {
+                "name": "Canned & Jarred Goods",
+                "display": "Canned & Jarred Goods",
+                "icon": "jar",
+                "color": "#8E8E93",
+                "granular": [
+                    "Canned Tomatoes",
+                    "Canned Vegetables",
+                    "Canned Beans",
+                    "Canned Fruits",
+                    "Pickles & Olives",
+                    "Jarred Antipasti",
+                    "Soup Canned",
+                    "Soup Carton Fresh",
+                    "Soup Instant",
+                ],
+            },
+            {
+                "name": "Sauces, Mayo & Condiments",
+                "display": "Sauces & Condiments",
+                "icon": "drop",
+                "color": "#E63333",
+                "granular": [
+                    "Pasta Sauce",
+                    "Tomato Sauce & Ketchup",
+                    "Mayonnaise",
+                    "Mustard",
+                    "Soy & Asian Sauce",
+                    "BBQ Sauce",
+                    "Salad Dressing",
+                    "Vinegar",
+                    "Olive Oil",
+                    "Cooking Oil",
+                    "Salt Pepper & Spices",
+                    "Stock & Bouillon",
+                    "Dried Herbs",
+                ],
+            },
+            {
+                "name": "Breakfast & Cereal (Choco/Jam)",
+                "display": "Breakfast & Cereal",
+                "icon": "sun",
+                "color": "#E69933",
+                "granular": [
+                    "Cereals",
+                    "Oatmeal",
+                    "Spreads Chocolate",
+                    "Spreads Jam",
+                    "Spreads Honey",
+                    "Spreads Peanut Nut",
+                    "Spreads Savory",
+                ],
+            },
+            {
+                "name": "Baking & Flour",
+                "display": "Baking & Flour",
+                "icon": "cooking-pot",
+                "color": "#CCCCCC",
+                "granular": [
+                    "Flour",
+                    "Sugar",
+                    "Baking Ingredients",
+                    "Baking Decorations",
+                    "Chocolate Baking",
+                ],
+            },
+        ],
+    },
+
+    # ── Frozen ───────────────────────────────────────────────
+    {
+        "group": "Frozen",
+        "color": "#3498DB",
+        "icon": "snowflake",
+        "categories": [
+            {
+                "name": "Frozen Ingredients (Veg/Fruit)",
+                "display": "Frozen Ingredients",
+                "icon": "snowflake",
+                "color": "#5AC8FA",
+                "granular": [
+                    "Frozen Vegetables",
+                    "Frozen Fish",
+                    "Frozen Meat",
+                    "Frozen Bread",
+                    "Frozen Fruits",
+                    "Ice Cream",
+                    "Frozen Desserts",
+                ],
+            },
+            {
+                "name": "Fries & Snacks (Frituur at home)",
+                "display": "Fries & Snacks",
+                "icon": "fire",
+                "color": "#FFCC00",
+                "granular": [
+                    "Frozen Fries",
+                    "Frozen Snacks",
+                ],
+            },
+            {
+                "name": "Ready Meals & Pizza",
+                "display": "Ready Meals & Pizza",
+                "icon": "pizza",
+                "color": "#FF9500",
+                "granular": [
+                    "Frozen Pizza",
+                    "Frozen Meals",
+                    "Meals Fresh",
+                    "Pizza Fresh",
+                    "Meat Substitute",
+                    "Vegetarian Meals",
+                    "Asian Food",
+                    "Mexican Food",
+                    "Italian Specialty",
+                    "Middle Eastern",
+                ],
+            },
+        ],
+    },
+
+    # ── Drinks ───────────────────────────────────────────────
+    {
+        "group": "Drinks",
+        "color": "#E74C3C",
+        "icon": "mug.fill",
+        "categories": [
+            {
+                "name": "Water (Bottled)",
+                "display": "Water",
+                "icon": "drop",
+                "color": "#007AFF",
+                "granular": [
+                    "Water Still",
+                    "Water Sparkling",
+                    "Water Flavored",
+                ],
+            },
+            {
+                "name": "Soda & Juices",
+                "display": "Soda & Juices",
+                "icon": "orange-slice",
+                "color": "#FF2D55",
+                "granular": [
+                    "Cola",
+                    "Lemonade & Soda",
+                    "Energy Drinks",
+                    "Ice Tea",
+                    "Fruit Juice",
+                    "Vegetable Juice",
+                    "Smoothies",
+                    "Syrup",
+                    "Beer Non-Alcoholic",
+                ],
+            },
+            {
+                "name": "Coffee & Tea",
+                "display": "Coffee & Tea",
+                "icon": "coffee",
+                "color": "#A2845E",
+                "granular": [
+                    "Coffee Beans Ground",
+                    "Coffee Capsules",
+                    "Coffee Instant",
+                    "Tea",
+                    "Hot Chocolate",
+                ],
+            },
+            {
+                "name": "Alcohol (Beer, Cider, Wine, Whisky, Vodka, Gin, Cava, Champagne)",
+                "display": "Alcohol",
+                "icon": "wine",
+                "color": "#AF52DE",
+                "granular": [
+                    "Beer Pils",
+                    "Beer Abbey Trappist",
+                    "Beer Special",
+                    "Beer White Fruit",
+                    "Cider",
+                    "Wine Red",
+                    "Wine White",
+                    "Wine Rosé",
+                    "Wine Sparkling",
+                    "Spirits Whisky",
+                    "Spirits Gin",
+                    "Spirits Vodka",
+                    "Spirits Rum",
+                    "Spirits Liqueur",
+                    "Aperitif",
+                ],
+            },
+        ],
+    },
+
+    # ── Snacks ───────────────────────────────────────────────
+    {
+        "group": "Snacks",
+        "color": "#F39C12",
+        "icon": "popcorn.fill",
+        "categories": [
+            {
+                "name": "Chips, Nuts & Aperitif",
+                "display": "Chips, Nuts & Aperitif",
+                "icon": "popcorn",
+                "color": "#FFCC00",
+                "granular": [
+                    "Chips",
+                    "Nuts Snack",
+                    "Crackers Snack",
+                    "Popcorn",
+                    "Dried Meat Snack",
+                    "Protein Bars",
+                ],
+            },
+            {
+                "name": "Chocolate & Sweets (Biscuits)",
+                "display": "Chocolate, Biscuits & Sweets",
+                "icon": "cookie",
+                "color": "#A2845E",
+                "granular": [
+                    "Cookies & Biscuits",
+                    "Chocolate Bars",
+                    "Chocolate Pralines",
+                    "Candy",
+                    "Licorice",
+                    "Gum & Mints",
+                    "Marshmallows",
+                ],
+            },
+        ],
+    },
+
+    # ── Household ────────────────────────────────────────────
+    {
+        "group": "Household",
+        "color": "#8E44AD",
+        "icon": "bubbles.and.sparkles.fill",
+        "categories": [
+            {
+                "name": "Official Waste Bags (PMD/Rest)",
+                "display": "Waste Bags",
+                "icon": "trash",
+                "color": "#8E8E93",
+                "granular": [
+                    "Trash Bags",
+                ],
+            },
+            {
+                "name": "Cleaning & Paper Goods",
+                "display": "Cleaning & Paper Goods",
+                "icon": "sparkle",
+                "color": "#00C7BE",
+                "granular": [
+                    "Cleaning All-Purpose",
+                    "Cleaning Kitchen",
+                    "Cleaning Bathroom",
+                    "Cleaning Floor",
+                    "Cleaning Glass",
+                    "Cleaning WC",
+                    "Cleaning Tools",
+                    "Laundry Detergent",
+                    "Laundry Softener",
+                    "Laundry Stain Remover",
+                    "Laundry Ironing",
+                    "Toilet Paper",
+                    "Kitchen Paper",
+                    "Tissues",
+                    "Napkins",
+                    "Kitchen Accessories",
+                ],
+            },
+        ],
+    },
+
+    # ── Personal Care ────────────────────────────────────────
+    {
+        "group": "Personal Care",
+        "color": "#1ABC9C",
+        "icon": "heart.fill",
+        "categories": [
+            {
+                "name": "Pharmacy & Hygiene",
+                "display": "Pharmacy & Hygiene",
+                "icon": "pill",
+                "color": "#FF3B30",
+                "granular": [
+                    "Shower Gel",
+                    "Soap",
+                    "Deodorant",
+                    "Body Lotion",
+                    "Sunscreen",
+                    "Shampoo",
+                    "Conditioner",
+                    "Hair Styling",
+                    "Hair Color",
+                    "Face Care",
+                    "Toothpaste",
+                    "Toothbrush",
+                    "Mouthwash",
+                    "Shaving",
+                    "Feminine Hygiene",
+                    "Contraception",
+                    "First Aid",
+                    "Vitamins & Supplements",
+                    "Pain Relief",
+                ],
+            },
+        ],
+    },
+
+    # ── Other ────────────────────────────────────────────────
+    {
+        "group": "Other",
+        "color": "#95A5A6",
+        "icon": "square.grid.2x2.fill",
+        "categories": [
+            {
+                "name": "Baby & Kids",
+                "display": "Baby & Kids",
+                "icon": "baby",
+                "color": "#30B0C7",
+                "granular": [
+                    "Baby Milk",
+                    "Baby Food",
+                    "Baby Snacks",
+                    "Diapers",
+                    "Baby Care",
+                ],
+            },
+            {
+                "name": "Pet Supplies",
+                "display": "Pet Supplies",
+                "icon": "paw-print",
+                "color": "#FF9500",
+                "granular": [
+                    "Pet Food Dog",
+                    "Pet Food Cat",
+                    "Pet Treats",
+                    "Pet Litter",
+                    "Pet Care",
+                ],
+            },
+            {
+                "name": "Tobacco",
+                "display": "Tobacco",
+                "icon": "cigarette",
+                "color": "#8E8E93",
+                "granular": [
+                    "Tobacco",
+                ],
+            },
+            {
+                "name": "Lottery & Scratch Cards",
+                "display": "Lottery & Scratch Cards",
+                "icon": "ticket",
+                "color": "#5856D6",
+                "granular": [
+                    "Lottery & Scratch Cards",
+                ],
+            },
+            {
+                "name": "Promos & Discounts",
+                "display": "Promos & Discounts",
+                "icon": "percent",
+                "color": "#30D158",
+                "excluded": True,
+                "granular": [
+                    "Discount",
+                    "Coupon",
+                    "Loyalty Discount",
+                    "Promotional Offer",
+                    "Multi-Buy Deal",
+                ],
+            },
+            {
+                "name": "Deposits (Statiegeld/Vidange)",
+                "display": "Deposits",
+                "icon": "recycle",
+                "color": "#34C759",
+                "excluded": True,
+                "granular": [
+                    "Bottle Deposit",
+                    "Can Deposit",
+                    "Crate Deposit",
+                    "Deposit Refund",
+                ],
+            },
+            {
+                "name": "Other",
+                "display": "Other",
+                "icon": "tag",
+                "color": "#8E8E93",
+                "granular": [
+                    "Batteries",
+                    "Lightbulbs",
+                    "Party Supplies",
+                    "Flowers & Plants",
+                    "Other",
+                ],
+            },
+        ],
+    },
+]
+
+
+# ============================================================
+# DERIVED LOOKUPS (built once at module load time from _TREE)
 # ============================================================
 
-GROUP_COLORS: Dict[str, str] = {
-    "Fresh Food": "#2ECC71",
-    "Pantry & Staples": "#E67E22",
-    "Frozen": "#3498DB",
-    "Drinks": "#E74C3C",
-    "Snacks": "#F39C12",
-    "Household": "#8E44AD",
-    "Personal Care": "#1ABC9C",
-    "Other": "#95A5A6",
-}
+GROUP_COLORS: Dict[str, str] = {}
+GROUP_ICONS: Dict[str, str] = {}
+CATEGORY_ICONS: Dict[str, str] = {}
+CATEGORY_COLORS: Dict[str, str] = {}
+GRANULAR_CATEGORIES: Dict[str, str] = {}
+EXCLUDED_CATEGORIES: frozenset
 
-GROUP_ICONS: Dict[str, str] = {
-    "Fresh Food": "leaf.fill",
-    "Pantry & Staples": "cabinet.fill",
-    "Frozen": "snowflake",
-    "Drinks": "mug.fill",
-    "Snacks": "popcorn.fill",
-    "Household": "bubbles.and.sparkles.fill",
-    "Personal Care": "heart.fill",
-    "Other": "square.grid.2x2.fill",
-}
-
-
-# ============================================================
-# CATEGORY-LEVEL CONSTANTS (Phosphor icons + individual colors)
-# ============================================================
-
-CATEGORY_ICONS: Dict[str, str] = {
-    "Fruits": "apple-logo",
-    "Vegetables": "carrot",
-    "Meat & Poultry (Raw)": "bone",
-    "Charcuterie & Salads (Preparé/Deli)": "bowl-food",
-    "Fish & Seafood": "fish",
-    "Dairy, Eggs & Cheese": "cheese",
-    "Bakery (Bread, Pistolets)": "bread",
-    "Pastries & Koffiekoeken": "cookie",
-    "Grains, Pasta & Potatoes": "grains",
-    "Canned & Jarred Goods": "jar",
-    "Sauces, Mayo & Condiments": "drop",
-    "Breakfast & Cereal (Choco/Jam)": "sun",
-    "Baking & Flour": "cooking-pot",
-    "Frozen Ingredients (Veg/Fruit)": "snowflake",
-    "Fries & Snacks (Frituur at home)": "fire",
-    "Ready Meals & Pizza": "pizza",
-    "Water (Bottled)": "drop",
-    "Soda & Juices": "orange-slice",
-    "Coffee & Tea": "coffee",
-    "Alcohol (Beer, Cider, Wine, Whisky, Vodka, Gin, Cava, Champagne)": "wine",
-    "Chips, Nuts & Aperitif": "popcorn",
-    "Chocolate & Sweets (Biscuits)": "cookie",
-    "Official Waste Bags (PMD/Rest)": "trash",
-    "Cleaning & Paper Goods": "sparkle",
-    "Pharmacy & Hygiene": "pill",
-    "Baby & Kids": "baby",
-    "Pet Supplies": "paw-print",
-    "Tobacco": "cigarette",
-    "Lottery & Scratch Cards": "ticket",
-    "Promos & Discounts": "percent",
-    "Deposits (Statiegeld/Vidange)": "recycle",
-    "Other": "tag",
-}
-
-CATEGORY_COLORS: Dict[str, str] = {
-    "Fruits": "#FF9500",
-    "Vegetables": "#34C759",
-    "Meat & Poultry (Raw)": "#FF3B30",
-    "Charcuterie & Salads (Preparé/Deli)": "#FF2D55",
-    "Fish & Seafood": "#007AFF",
-    "Dairy, Eggs & Cheese": "#FFCC00",
-    "Bakery (Bread, Pistolets)": "#A2845E",
-    "Pastries & Koffiekoeken": "#AF52DE",
-    "Grains, Pasta & Potatoes": "#999999",
-    "Canned & Jarred Goods": "#8E8E93",
-    "Sauces, Mayo & Condiments": "#E63333",
-    "Breakfast & Cereal (Choco/Jam)": "#E69933",
-    "Baking & Flour": "#CCCCCC",
-    "Frozen Ingredients (Veg/Fruit)": "#5AC8FA",
-    "Fries & Snacks (Frituur at home)": "#FFCC00",
-    "Ready Meals & Pizza": "#FF9500",
-    "Water (Bottled)": "#007AFF",
-    "Soda & Juices": "#FF2D55",
-    "Coffee & Tea": "#A2845E",
-    "Alcohol (Beer, Cider, Wine, Whisky, Vodka, Gin, Cava, Champagne)": "#AF52DE",
-    "Chips, Nuts & Aperitif": "#FFCC00",
-    "Chocolate & Sweets (Biscuits)": "#A2845E",
-    "Official Waste Bags (PMD/Rest)": "#8E8E93",
-    "Cleaning & Paper Goods": "#00C7BE",
-    "Pharmacy & Hygiene": "#FF3B30",
-    "Baby & Kids": "#30B0C7",
-    "Pet Supplies": "#FF9500",
-    "Tobacco": "#8E8E93",
-    "Lottery & Scratch Cards": "#5856D6",
-    "Promos & Discounts": "#30D158",
-    "Deposits (Statiegeld/Vidange)": "#34C759",
-    "Other": "#8E8E93",
-}
-
-
-# ============================================================
-# CATEGORY HIERARCHY (replaces categories.csv)
-# ============================================================
-# Dict[group_name, List[Tuple[category_name, display_name]]]
-
-_HIERARCHY: Dict[str, List[tuple]] = {
-    "Fresh Food": [
-        ("Fruits", "Fruits"),
-        ("Vegetables", "Vegetables"),
-        ("Meat & Poultry (Raw)", "Meat & Poultry"),
-        ("Charcuterie & Salads (Preparé/Deli)", "Charcuterie & Salads"),
-        ("Fish & Seafood", "Fish & Seafood"),
-        ("Dairy, Eggs & Cheese", "Dairy, Eggs & Cheese"),
-        ("Bakery (Bread, Pistolets)", "Bakery"),
-        ("Pastries & Koffiekoeken", "Pastries"),
-    ],
-    "Pantry & Staples": [
-        ("Grains, Pasta & Potatoes", "Grains, Pasta & Potatoes"),
-        ("Canned & Jarred Goods", "Canned & Jarred Goods"),
-        ("Sauces, Mayo & Condiments", "Sauces & Condiments"),
-        ("Breakfast & Cereal (Choco/Jam)", "Breakfast & Cereal"),
-        ("Baking & Flour", "Baking & Flour"),
-    ],
-    "Frozen": [
-        ("Frozen Ingredients (Veg/Fruit)", "Frozen Ingredients"),
-        ("Fries & Snacks (Frituur at home)", "Fries & Snacks"),
-        ("Ready Meals & Pizza", "Ready Meals & Pizza"),
-    ],
-    "Drinks": [
-        ("Water (Bottled)", "Water"),
-        ("Soda & Juices", "Soda & Juices"),
-        ("Coffee & Tea", "Coffee & Tea"),
-        ("Alcohol (Beer, Cider, Wine, Whisky, Vodka, Gin, Cava, Champagne)", "Alcohol"),
-    ],
-    "Snacks": [
-        ("Chips, Nuts & Aperitif", "Chips, Nuts & Aperitif"),
-        ("Chocolate & Sweets (Biscuits)", "Chocolate, Biscuits & Sweets"),
-    ],
-    "Household": [
-        ("Official Waste Bags (PMD/Rest)", "Waste Bags"),
-        ("Cleaning & Paper Goods", "Cleaning & Paper Goods"),
-    ],
-    "Personal Care": [
-        ("Pharmacy & Hygiene", "Pharmacy & Hygiene"),
-    ],
-    "Other": [
-        ("Baby & Kids", "Baby & Kids"),
-        ("Pet Supplies", "Pet Supplies"),
-        ("Tobacco", "Tobacco"),
-        ("Lottery & Scratch Cards", "Lottery & Scratch Cards"),
-        ("Promos & Discounts", "Promos & Discounts"),
-        ("Deposits (Statiegeld/Vidange)", "Deposits"),
-        ("Other", "Other"),
-    ],
-}
-
-
-# ============================================================
-# PARENT CATEGORY NAME CONSTANTS (for GRANULAR_CATEGORIES mapping)
-# ============================================================
-
-_FRUITS = "Fruits"
-_VEGETABLES = "Vegetables"
-_MEAT_RAW = "Meat & Poultry (Raw)"
-_CHARCUTERIE = "Charcuterie & Salads (Preparé/Deli)"
-_FISH = "Fish & Seafood"
-_DAIRY = "Dairy, Eggs & Cheese"
-_BAKERY = "Bakery (Bread, Pistolets)"
-_PASTRIES = "Pastries & Koffiekoeken"
-_GRAINS = "Grains, Pasta & Potatoes"
-_CANNED = "Canned & Jarred Goods"
-_SAUCES = "Sauces, Mayo & Condiments"
-_BREAKFAST = "Breakfast & Cereal (Choco/Jam)"
-_BAKING = "Baking & Flour"
-_FROZEN_INGR = "Frozen Ingredients (Veg/Fruit)"
-_FRIES = "Fries & Snacks (Frituur at home)"
-_READY_MEALS = "Ready Meals & Pizza"
-_WATER = "Water (Bottled)"
-_SODA = "Soda & Juices"
-_COFFEE = "Coffee & Tea"
-_ALCOHOL = "Alcohol (Beer, Cider, Wine, Whisky, Vodka, Gin, Cava, Champagne)"
-_CHIPS = "Chips, Nuts & Aperitif"
-_CHOCOLATE = "Chocolate & Sweets (Biscuits)"
-_WASTE_BAGS = "Official Waste Bags (PMD/Rest)"
-_CLEANING = "Cleaning & Paper Goods"
-_PHARMACY = "Pharmacy & Hygiene"
-_BABY = "Baby & Kids"
-_PET = "Pet Supplies"
-_TOBACCO = "Tobacco"
-_LOTTERY = "Lottery & Scratch Cards"
-_PROMOS = "Promos & Discounts"
-_DEPOSITS = "Deposits (Statiegeld/Vidange)"
-_OTHER = "Other"
-
-
-# Categories that represent non-product line items (discounts, refunds, deposit returns).
-# Excluded from pie chart analytics and not selectable for budget allocation.
-EXCLUDED_CATEGORIES: frozenset = frozenset({
-    _PROMOS,
-    _DEPOSITS,
-})
-
-
-# ============================================================
-# GRANULAR CATEGORIES (~200 entries)
-# ============================================================
-
-GRANULAR_CATEGORIES: Dict[str, str] = {
-    # ===================
-    # ALCOHOL
-    # ===================
-    "Beer Pils": _ALCOHOL,
-    "Beer Abbey Trappist": _ALCOHOL,
-    "Beer Special": _ALCOHOL,
-    "Beer White Fruit": _ALCOHOL,
-    "Beer Non-Alcoholic": _SODA,  # Non-alcoholic
-    "Cider": _ALCOHOL,
-    "Wine Red": _ALCOHOL,
-    "Wine White": _ALCOHOL,
-    "Wine Rosé": _ALCOHOL,
-    "Wine Sparkling": _ALCOHOL,
-    "Spirits Whisky": _ALCOHOL,
-    "Spirits Gin": _ALCOHOL,
-    "Spirits Vodka": _ALCOHOL,
-    "Spirits Rum": _ALCOHOL,
-    "Spirits Liqueur": _ALCOHOL,
-    "Aperitif": _ALCOHOL,
-
-    # ===================
-    # DRINKS
-    # ===================
-    "Cola": _SODA,
-    "Lemonade & Soda": _SODA,
-    "Energy Drinks": _SODA,
-    "Ice Tea": _SODA,
-    "Fruit Juice": _SODA,
-    "Vegetable Juice": _SODA,
-    "Smoothies": _SODA,
-    "Syrup": _SODA,
-    "Water Still": _WATER,
-    "Water Sparkling": _WATER,
-    "Water Flavored": _WATER,
-
-    # ===================
-    # HOT BEVERAGES
-    # ===================
-    "Coffee Beans Ground": _COFFEE,
-    "Coffee Capsules": _COFFEE,
-    "Coffee Instant": _COFFEE,
-    "Tea": _COFFEE,
-    "Hot Chocolate": _COFFEE,
-
-    # ===================
-    # DAIRY, EGGS & CHEESE
-    # ===================
-    "Plant Milk": _DAIRY,
-    "Milk Fresh": _DAIRY,
-    "Milk Long Life": _DAIRY,
-    "Cream": _DAIRY,
-    "Yoghurt Natural": _DAIRY,
-    "Yoghurt Fruit": _DAIRY,
-    "Yoghurt Drinks": _DAIRY,
-    "Skyr & Quark": _DAIRY,
-    "Pudding & Desserts": _DAIRY,
-    "Butter": _DAIRY,
-    "Margarine": _DAIRY,
-    "Cooking Fat": _DAIRY,
-    "Cheese Hard": _DAIRY,
-    "Cheese Soft": _DAIRY,
-    "Cheese Blue": _DAIRY,
-    "Cheese Fresh": _DAIRY,
-    "Cheese Spread": _DAIRY,
-    "Cheese Sliced": _DAIRY,
-    "Cheese Grated": _DAIRY,
-    "Cheese Belgian": _DAIRY,
-    "Eggs": _DAIRY,
-
-    # ===================
-    # MEAT & POULTRY (RAW)
-    # ===================
-    "Beef": _MEAT_RAW,
-    "Pork": _MEAT_RAW,
-    "Chicken": _MEAT_RAW,
-    "Turkey": _MEAT_RAW,
-    "Lamb": _MEAT_RAW,
-    "Minced Meat": _MEAT_RAW,
-    "Meat Preparations": _MEAT_RAW,
-    "Offal": _MEAT_RAW,
-
-    # ===================
-    # CHARCUTERIE & SALADS (PREPARÉ/DELI)
-    # ===================
-    "Ham Cooked": _CHARCUTERIE,
-    "Ham Dry": _CHARCUTERIE,
-    "Salami & Sausage": _CHARCUTERIE,
-    "Pâté & Terrine": _CHARCUTERIE,
-    "Bacon & Lardons": _CHARCUTERIE,
-    "Chicken Turkey Deli": _CHARCUTERIE,
-    "Vegetarian Deli": _CHARCUTERIE,
-    "Meals Salads": _CHARCUTERIE,
-    "Sandwiches": _CHARCUTERIE,
-    "Sushi": _CHARCUTERIE,
-    "Hummus & Dips": _CHARCUTERIE,
-
-    # ===================
-    # FISH & SEAFOOD
-    # ===================
-    "Fish Fresh": _FISH,
-    "Fish Smoked": _FISH,
-    "Fish Frozen": _FISH,
-    "Shellfish": _FISH,
-    "Canned Fish": _FISH,
-    "Surimi": _FISH,
-
-    # ===================
-    # FRUITS
-    # ===================
-    "Fruit Apples Pears": _FRUITS,
-    "Fruit Citrus": _FRUITS,
-    "Fruit Bananas": _FRUITS,
-    "Fruit Berries": _FRUITS,
-    "Fruit Stone": _FRUITS,
-    "Fruit Grapes": _FRUITS,
-    "Fruit Melons": _FRUITS,
-    "Fruit Tropical": _FRUITS,
-    "Fruit Dried": _FRUITS,
-    "Nuts": _FRUITS,
-
-    # ===================
-    # VEGETABLES
-    # ===================
-    "Tomatoes": _VEGETABLES,
-    "Salad & Leafy Greens": _VEGETABLES,
-    "Cucumber & Peppers": _VEGETABLES,
-    "Onions & Garlic": _VEGETABLES,
-    "Carrots & Root Veg": _VEGETABLES,
-    "Potatoes": _VEGETABLES,
-    "Cabbage & Broccoli": _VEGETABLES,
-    "Beans & Peas": _VEGETABLES,
-    "Mushrooms": _VEGETABLES,
-    "Zucchini & Eggplant": _VEGETABLES,
-    "Corn": _VEGETABLES,
-    "Fresh Herbs": _VEGETABLES,
-    "Prepared Vegetables": _VEGETABLES,
-
-    # ===================
-    # BAKERY (BREAD, PISTOLETS)
-    # ===================
-    "Bread Fresh": _BAKERY,
-    "Bread Sliced": _BAKERY,
-    "Bread Specialty": _BAKERY,
-    "Wraps & Pita": _BAKERY,
-    "Crackers": _BAKERY,
-
-    # ===================
-    # PASTRIES & KOFFIEKOEKEN
-    # ===================
-    "Croissants & Pastries": _PASTRIES,
-    "Cakes & Tarts": _PASTRIES,
-    "Waffles": _PASTRIES,
-
-    # ===================
-    # GRAINS, PASTA & POTATOES
-    # ===================
-    "Pasta Dry": _GRAINS,
-    "Pasta Fresh": _GRAINS,
-    "Rice": _GRAINS,
-    "Noodles Asian": _GRAINS,
-    "Couscous & Bulgur": _GRAINS,
-    "Grains & Legumes": _GRAINS,
-
-    # ===================
-    # CANNED & JARRED GOODS
-    # ===================
-    "Canned Tomatoes": _CANNED,
-    "Canned Vegetables": _CANNED,
-    "Canned Beans": _CANNED,
-    "Canned Fruits": _CANNED,
-    "Pickles & Olives": _CANNED,
-    "Jarred Antipasti": _CANNED,
-    "Soup Canned": _CANNED,
-    "Soup Carton Fresh": _CANNED,
-    "Soup Instant": _CANNED,
-
-    # ===================
-    # SAUCES, MAYO & CONDIMENTS
-    # ===================
-    "Pasta Sauce": _SAUCES,
-    "Tomato Sauce & Ketchup": _SAUCES,
-    "Mayonnaise": _SAUCES,
-    "Mustard": _SAUCES,
-    "Soy & Asian Sauce": _SAUCES,
-    "BBQ Sauce": _SAUCES,
-    "Salad Dressing": _SAUCES,
-    "Vinegar": _SAUCES,
-    "Olive Oil": _SAUCES,
-    "Cooking Oil": _SAUCES,
-    "Salt Pepper & Spices": _SAUCES,
-    "Stock & Bouillon": _SAUCES,
-    "Dried Herbs": _SAUCES,
-
-    # ===================
-    # BREAKFAST & CEREAL (CHOCO/JAM)
-    # ===================
-    "Cereals": _BREAKFAST,
-    "Oatmeal": _BREAKFAST,
-    "Spreads Chocolate": _BREAKFAST,
-    "Spreads Jam": _BREAKFAST,
-    "Spreads Honey": _BREAKFAST,
-    "Spreads Peanut Nut": _BREAKFAST,
-    "Spreads Savory": _BREAKFAST,
-
-    # ===================
-    # BAKING & FLOUR
-    # ===================
-    "Flour": _BAKING,
-    "Sugar": _BAKING,
-    "Baking Ingredients": _BAKING,
-    "Baking Decorations": _BAKING,
-    "Chocolate Baking": _BAKING,
-
-    # ===================
-    # CHIPS, NUTS & APERITIF (SNACKS)
-    # ===================
-    "Chips": _CHIPS,
-    "Nuts Snack": _CHIPS,
-    "Crackers Snack": _CHIPS,
-    "Popcorn": _CHIPS,
-    "Dried Meat Snack": _CHIPS,
-    "Cookies & Biscuits": _CHOCOLATE,
-    "Protein Bars": _CHIPS,
-
-    # ===================
-    # CHOCOLATE & SWEETS (BISCUITS)
-    # ===================
-    "Chocolate Bars": _CHOCOLATE,
-    "Chocolate Pralines": _CHOCOLATE,
-    "Candy": _CHOCOLATE,
-    "Licorice": _CHOCOLATE,
-    "Gum & Mints": _CHOCOLATE,
-    "Marshmallows": _CHOCOLATE,
-
-    # ===================
-    # FROZEN INGREDIENTS (VEG/FRUIT)
-    # ===================
-    "Frozen Vegetables": _FROZEN_INGR,
-    "Frozen Fish": _FROZEN_INGR,
-    "Frozen Meat": _FROZEN_INGR,
-    "Frozen Bread": _FROZEN_INGR,
-    "Frozen Fruits": _FROZEN_INGR,
-
-    # ===================
-    # FRIES & SNACKS (FRITUUR AT HOME)
-    # ===================
-    "Frozen Fries": _FRIES,
-    "Frozen Snacks": _FRIES,
-    "Ice Cream": _FROZEN_INGR,
-    "Frozen Desserts": _FROZEN_INGR,
-
-    # ===================
-    # READY MEALS & PIZZA
-    # ===================
-    "Frozen Pizza": _READY_MEALS,
-    "Frozen Meals": _READY_MEALS,
-    "Meals Fresh": _READY_MEALS,
-    "Pizza Fresh": _READY_MEALS,
-    "Meat Substitute": _READY_MEALS,
-    "Vegetarian Meals": _READY_MEALS,
-    "Vegan Cheese Dairy": _DAIRY,
-    "Asian Food": _READY_MEALS,
-    "Mexican Food": _READY_MEALS,
-    "Italian Specialty": _READY_MEALS,
-    "Middle Eastern": _READY_MEALS,
-
-    # ===================
-    # SPORTS NUTRITION
-    # ===================
-    "Protein Shakes": _DAIRY,
-    "Protein Desserts": _DAIRY,
-
-    # ===================
-    # BABY & KIDS
-    # ===================
-    "Baby Milk": _BABY,
-    "Baby Food": _BABY,
-    "Baby Snacks": _BABY,
-    "Diapers": _BABY,
-    "Baby Care": _BABY,
-
-    # ===================
-    # HOUSEHOLD - WASTE BAGS
-    # ===================
-    "Trash Bags": _WASTE_BAGS,
-
-    # ===================
-    # HOUSEHOLD - CLEANING & PAPER
-    # ===================
-    "Cleaning All-Purpose": _CLEANING,
-    "Cleaning Kitchen": _CLEANING,
-    "Cleaning Bathroom": _CLEANING,
-    "Cleaning Floor": _CLEANING,
-    "Cleaning Glass": _CLEANING,
-    "Cleaning WC": _CLEANING,
-    "Cleaning Tools": _CLEANING,
-    "Laundry Detergent": _CLEANING,
-    "Laundry Softener": _CLEANING,
-    "Laundry Stain Remover": _CLEANING,
-    "Laundry Ironing": _CLEANING,
-    "Toilet Paper": _CLEANING,
-    "Kitchen Paper": _CLEANING,
-    "Tissues": _CLEANING,
-    "Napkins": _CLEANING,
-    "Batteries": _OTHER,
-    "Lightbulbs": _OTHER,
-    "Kitchen Accessories": _CLEANING,
-    "Party Supplies": _OTHER,
-    "Flowers & Plants": _OTHER,
-
-    # ===================
-    # PERSONAL CARE / PHARMACY & HYGIENE
-    # ===================
-    "Shower Gel": _PHARMACY,
-    "Soap": _PHARMACY,
-    "Deodorant": _PHARMACY,
-    "Body Lotion": _PHARMACY,
-    "Sunscreen": _PHARMACY,
-    "Shampoo": _PHARMACY,
-    "Conditioner": _PHARMACY,
-    "Hair Styling": _PHARMACY,
-    "Hair Color": _PHARMACY,
-    "Face Care": _PHARMACY,
-    "Toothpaste": _PHARMACY,
-    "Toothbrush": _PHARMACY,
-    "Mouthwash": _PHARMACY,
-    "Shaving": _PHARMACY,
-    "Feminine Hygiene": _PHARMACY,
-    "Contraception": _PHARMACY,
-    "First Aid": _PHARMACY,
-    "Vitamins & Supplements": _PHARMACY,
-    "Pain Relief": _PHARMACY,
-
-    # ===================
-    # PET SUPPLIES
-    # ===================
-    "Pet Food Dog": _PET,
-    "Pet Food Cat": _PET,
-    "Pet Treats": _PET,
-    "Pet Litter": _PET,
-    "Pet Care": _PET,
-
-    # ===================
-    # TOBACCO
-    # ===================
-    "Tobacco": _TOBACCO,
-
-    # ===================
-    # LOTTERY & SCRATCH CARDS
-    # ===================
-    "Lottery & Scratch Cards": _LOTTERY,
-
-    # ===================
-    # PROMOS & DISCOUNTS
-    # ===================
-    "Discount": _PROMOS,
-    "Coupon": _PROMOS,
-    "Loyalty Discount": _PROMOS,
-    "Promotional Offer": _PROMOS,
-    "Multi-Buy Deal": _PROMOS,
-
-    # ===================
-    # DEPOSITS (STATIEGELD/VIDANGE)
-    # ===================
-    "Bottle Deposit": _DEPOSITS,
-    "Can Deposit": _DEPOSITS,
-    "Crate Deposit": _DEPOSITS,
-    "Deposit Refund": _DEPOSITS,
-
-    # ===================
-    # OTHER
-    # ===================
-    "Other": _OTHER,
-}
-
-
-# ============================================================
-# DERIVED / PRE-COMPUTED LOOKUPS (built at module load time)
-# ============================================================
-
+_HIERARCHY: Dict[str, List[tuple]] = {}
 _CATEGORY_LOOKUP: Dict[str, CategoryInfo] = {}
 _LOWER_LOOKUP: Dict[str, str] = {}
-_DISPLAY_LOOKUP: Dict[str, str] = {}  # display name → internal name
+_DISPLAY_LOOKUP: Dict[str, str] = {}
 _ALL_CATEGORIES: List[str] = []
 
 
 def _build_lookups() -> None:
-    """Build all lookup tables from _HIERARCHY at module load time."""
-    for group_name, categories in _HIERARCHY.items():
-        group_color = GROUP_COLORS[group_name]
-        group_icon = GROUP_ICONS[group_name]
-        for cat_name, display_name in categories:
+    """Build all lookup tables from _TREE at module load time."""
+    excluded = set()
+
+    for group in _TREE:
+        group_name = group["group"]
+        group_color = group["color"]
+        group_icon = group["icon"]
+
+        # Group-level dicts
+        GROUP_COLORS[group_name] = group_color
+        GROUP_ICONS[group_name] = group_icon
+
+        # Hierarchy (for backward compat)
+        hierarchy_entries = []
+
+        for cat in group["categories"]:
+            cat_name = cat["name"]
+            display_name = cat["display"]
+            cat_icon = cat["icon"]
+            cat_color = cat["color"]
+
+            # Category-level dicts
+            CATEGORY_ICONS[cat_name] = cat_icon
+            CATEGORY_COLORS[cat_name] = cat_color
+
+            # Hierarchy entry
+            hierarchy_entries.append((cat_name, display_name))
+
+            # Excluded flag
+            if cat.get("excluded"):
+                excluded.add(cat_name)
+
+            # Granular → parent mapping
+            for granular in cat.get("granular", []):
+                GRANULAR_CATEGORIES[granular] = cat_name
+
+            # CategoryInfo lookup
             info = CategoryInfo(
                 name=cat_name,
                 display_name=display_name,
                 group=group_name,
                 color_hex=group_color,
                 icon=group_icon,
-                category_icon=CATEGORY_ICONS.get(cat_name, "tag"),
-                category_color_hex=CATEGORY_COLORS.get(cat_name, group_color),
+                category_icon=cat_icon,
+                category_color_hex=cat_color,
             )
             _CATEGORY_LOOKUP[cat_name] = info
             _LOWER_LOOKUP[cat_name.lower()] = cat_name
             _DISPLAY_LOOKUP[display_name] = cat_name
             _DISPLAY_LOOKUP[display_name.lower()] = cat_name
             _ALL_CATEGORIES.append(cat_name)
+
+        _HIERARCHY[group_name] = hierarchy_entries
+
+    global EXCLUDED_CATEGORIES
+    EXCLUDED_CATEGORIES = frozenset(excluded)
 
 
 _build_lookups()
@@ -674,7 +737,7 @@ PARENT_CATEGORIES_PROMPT_LIST: str = "\n".join(
 
 def get_parent_category(granular: str) -> str:
     """Get parent category for a granular category, defaulting to 'Other'."""
-    return GRANULAR_CATEGORIES.get(granular, _OTHER)
+    return GRANULAR_CATEGORIES.get(granular, "Other")
 
 
 def get_all_granular_categories() -> List[str]:
@@ -688,7 +751,7 @@ def validate_granular_category(granular: str) -> bool:
 
 
 # ============================================================
-# PUBLIC API - Parent category functions (replaces CategoryRegistry)
+# PUBLIC API - Parent category functions
 # ============================================================
 
 def get_category_info(category: str) -> Optional[CategoryInfo]:
@@ -815,21 +878,22 @@ def find_closest_match(name: str, threshold: float = 0.6) -> Optional[str]:
 def get_hierarchy() -> dict:
     """Get the full hierarchy as a dict for API responses."""
     groups = []
-    for group_name, categories in _HIERARCHY.items():
+    for group in _TREE:
+        group_name = group["group"]
         cat_list = []
-        for cat_name, display_name in categories:
+        for cat in group["categories"]:
             cat_list.append({
-                "name": cat_name,
-                "display_name": display_name,
-                "sub_categories": [cat_name],
-                "icon": CATEGORY_ICONS.get(cat_name, "tag"),
-                "color_hex": CATEGORY_COLORS.get(cat_name, GROUP_COLORS[group_name]),
-                "budgetable": cat_name not in EXCLUDED_CATEGORIES,
+                "name": cat["name"],
+                "display_name": cat["display"],
+                "sub_categories": [cat["name"]],
+                "icon": cat["icon"],
+                "color_hex": cat["color"],
+                "budgetable": not cat.get("excluded", False),
             })
         groups.append({
             "name": group_name,
-            "icon": GROUP_ICONS[group_name],
-            "color_hex": GROUP_COLORS[group_name],
+            "icon": group["icon"],
+            "color_hex": group["color"],
             "categories": cat_list,
         })
     return {"groups": groups}
