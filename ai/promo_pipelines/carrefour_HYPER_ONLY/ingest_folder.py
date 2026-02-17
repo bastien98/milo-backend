@@ -35,7 +35,7 @@ from google import genai
 from google.genai import types
 from pinecone import Pinecone
 
-from app.services.categories import CATEGORIES_PROMPT_LIST, GRANULAR_CATEGORIES, get_parent_category
+from app.core.categories import CATEGORIES_PROMPT_LIST, GRANULAR_CATEGORIES, get_parent_category
 
 # ---------------------------------------------------------------------------
 # Config

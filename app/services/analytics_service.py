@@ -37,7 +37,15 @@ from app.schemas.analytics import (
     PieChartSummaryResponse,
     get_category_color,
 )
-from app.services.category_registry import get_category_registry
+from app.core.categories import (
+    get_display_name,
+    get_category_id,
+    get_category_info,
+    get_group_color,
+    get_group_icon,
+    GROUP_COLORS,
+    GROUP_ICONS,
+)
 from app.services.split_aware_calculation import SplitAwareCalculation
 
 
@@ -208,7 +216,6 @@ class AnalyticsService:
                 category_data[t.category]["health_scores"].append(t.health_score)
 
         # Build category list with color_hex
-        registry = get_category_registry()
         categories = []
         for category_name, data in category_data.items():
             percentage = (data["amount"] / total_spend * 100) if total_spend > 0 else 0
@@ -222,8 +229,8 @@ class AnalyticsService:
 
             categories.append(
                 PieChartCategory(
-                    category_id=registry.get_category_id(category_name),
-                    name=get_category_registry().get_display_name(category_name),
+                    category_id=get_category_id(category_name),
+                    name=get_display_name(category_name),
                     total_spent=round(data["amount"], 2),
                     color_hex=color_hex,
                     percentage=round(percentage, 1),
@@ -352,7 +359,7 @@ class AnalyticsService:
             )
             categories.append(
                 CategorySpending(
-                    name=get_category_registry().get_display_name(category_name),
+                    name=get_display_name(category_name),
                     spent=round(data["amount"], 2),
                     percentage=round(percentage, 1),
                     transaction_count=data["count"],
@@ -459,7 +466,7 @@ class AnalyticsService:
             )
             categories.append(
                 CategorySpending(
-                    name=get_category_registry().get_display_name(category_name),
+                    name=get_display_name(category_name),
                     spent=round(data["amount"], 2),
                     percentage=round(percentage, 1),
                     transaction_count=data["count"],
@@ -473,12 +480,10 @@ class AnalyticsService:
         # Format period string
         period_str = "All Time" if all_time else self._format_period(actual_start, actual_end)
 
-        # Enrich categories with group info from registry
-        registry = get_category_registry()
-        from app.services.category_registry import GROUP_COLORS, GROUP_ICONS
+        # Enrich categories with group info
         enriched_categories = []
         for cat in categories:
-            info = registry.get_info(cat.name)
+            info = get_category_info(cat.name)
             group_name = info.group if info else None
             group_color = GROUP_COLORS.get(group_name, "#BDC3C7") if group_name else None
             group_icon = GROUP_ICONS.get(group_name, "square.grid.2x2.fill") if group_name else None
@@ -1369,7 +1374,7 @@ class AnalyticsService:
             )
             categories.append(
                 CategorySpending(
-                    name=get_category_registry().get_display_name(category_name),
+                    name=get_display_name(category_name),
                     spent=round(data["amount"], 2),
                     percentage=round(percentage, 1),
                     transaction_count=data["count"],
@@ -1446,7 +1451,7 @@ class AnalyticsService:
             )
             categories.append(
                 CategorySpending(
-                    name=get_category_registry().get_display_name(category_name),
+                    name=get_display_name(category_name),
                     spent=round(data["amount"], 2),
                     percentage=round(percentage, 1),
                     transaction_count=data["count"],
@@ -1640,7 +1645,7 @@ class AnalyticsService:
                 else None
             )
             categories_list.append({
-                "name": get_category_registry().get_display_name(category_name),
+                "name": get_display_name(category_name),
                 "total_spent": round(data["amount"], 2),
                 "percentage": round(percentage, 1),
                 "transaction_count": data["count"],
@@ -1822,7 +1827,7 @@ class AnalyticsService:
             )
             categories.append(
                 YearCategorySpending(
-                    name=get_category_registry().get_display_name(category_name),
+                    name=get_display_name(category_name),
                     spent=round(data["amount"], 2),
                     percentage=round(percentage, 1),
                     transaction_count=data["count"],

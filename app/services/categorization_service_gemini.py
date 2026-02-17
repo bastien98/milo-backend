@@ -6,7 +6,11 @@ from google import genai
 from google.genai import types
 
 from app.core.exceptions import GeminiAPIError
-from app.services.category_registry import get_category_registry
+from app.core.categories import (
+    is_valid_category,
+    find_closest_match,
+    PARENT_CATEGORIES_PROMPT_LIST,
+)
 from app.config import get_settings
 from app.services.veryfi_service import VeryfiLineItem
 
@@ -65,36 +69,11 @@ For each UNIQUE item (after deduplication), provide:
    - Keep brand names if recognizable (e.g., "Coca-Cola", "Danone")
    - Use title case for proper formatting
 
-2. category: Classify into EXACTLY one of these grocery sub-categories (use the exact string):
+2. category: Classify into EXACTLY one of these grocery categories (use the exact string):
 
-   FRESH FOOD:
-   - "Fruits" (fresh fruits, berries, citrus, bananas, apples, grapes)
-   - "Vegetables" (fresh vegetables, herbs, salads, mushrooms, onions, potatoes)
-   - "Meat" (beef, pork, chicken, poultry, lamb, charcuterie, sausages)
-   - "Seafood" (fish, shrimp, mussels, salmon, tuna, crab, shellfish)
-   - "Dairy & Eggs" (milk, cheese, yogurt, eggs, butter, cream)
-   - "Bakery" (bread, pastries, croissants, baguettes)
+""" + PARENT_CATEGORIES_PROMPT_LIST + """
 
-   PANTRY & FROZEN:
-   - "Pantry" (pasta, rice, oil, canned goods, spices, sugar, flour, sauces, condiments)
-   - "Frozen" (frozen vegetables, frozen meals, ice cream, frozen pizza)
-   - "Ready Meals" (prepared foods, salads, soups, pizza, lasagna, deli items)
-
-   SNACKS & BEVERAGES:
-   - "Snacks" (chips, cookies, biscuits, nuts as snacks, crackers, popcorn)
-   - "Candy" (chocolate, candy, sweets, gummy bears, lollipops, confectionery)
-   - "Drinks" (sodas, juices, energy drinks, water, coffee, tea)
-   - "Alcohol" (beer, wine, spirits, vodka, whisky, cider, including deposit/leeggoed)
-
-   HOUSEHOLD & CARE:
-   - "Household" (cleaning products, paper towels, bags, detergent, sponges)
-   - "Personal Care" (shampoo, soap, dental care, deodorant, razors)
-
-   OTHER:
-   - "Baby & Kids" (baby food, formula, baby snacks)
-   - "Pet Supplies" (pet food, pet treats, pet accessories)
-   - "Tobacco" (cigarettes, rolling tobacco, lighters, rolling papers, filters, e-cigarettes, vapes)
-   - "Other" (anything that doesn't fit the above categories)
+   IMPORTANT: Use the EXACT category string from the list above, including any text in parentheses.
 
 3. health_score: Rate healthiness from 0 to 5 for ALL food items:
    - 5: Very healthy (fresh vegetables, fruits, water, plain nuts)
@@ -111,10 +90,10 @@ For each UNIQUE item (after deduplication), provide:
 
 IMPORTANT:
 - Belgian receipts may have Dutch/French product names - keep in the original language but clean up the text
-- Deposit items (leeggoed/vidange) should be categorized with the related product (usually "Alcohol" or "Drinks")
+- Deposit items (leeggoed/vidange) should be categorized as "Deposits (Statiegeld/Vidange)"
 - Use the item type hint if provided (e.g., "food", "alcohol", "product")
 - The number of items in output should be LESS than or EQUAL to input if duplicates were found
-- You MUST use the EXACT sub-category string from the list above (e.g., "Fruits" not "Fresh Produce")
+- You MUST use the EXACT category string from the list above (e.g., "Fruits" not "Fresh Produce")
 
 Return ONLY valid JSON with this exact format:
 {
@@ -129,7 +108,7 @@ Return ONLY valid JSON with this exact format:
     {
       "original_indices": [1, 5, 9],
       "item_name": "Merged Duplicate Product",
-      "category": "Dairy & Eggs",
+      "category": "Dairy, Eggs & Cheese",
       "health_score": 4
     }
   ]
@@ -254,12 +233,11 @@ Return ONLY valid JSON with this exact format:
             if primary_item.total is None and primary_item.price is None:
                 continue
 
-            # Parse category with registry validation
+            # Parse category with validation
             category_str = cat_data.get("category", "Unknown Transaction")
-            registry = get_category_registry()
-            if not registry.is_valid(category_str):
+            if not is_valid_category(category_str):
                 # Try fuzzy matching
-                matched = registry.find_closest_match(category_str)
+                matched = find_closest_match(category_str)
                 category_str = matched if matched else "Unknown Transaction"
 
             # Parse health score

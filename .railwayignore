@@ -6,7 +6,6 @@ __pycache__/
 .pytest_cache/
 .DS_Store
 *.csv
-!categories.csv
 test-receipts/
 testbench/
 ai/

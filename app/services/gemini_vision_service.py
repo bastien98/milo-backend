@@ -22,7 +22,7 @@ from PIL import Image
 
 from app.core.exceptions import GeminiAPIError
 from app.config import get_settings
-from app.services.categories import CATEGORIES_PROMPT_LIST, GRANULAR_CATEGORIES, get_parent_category
+from app.core.categories import CATEGORIES_PROMPT_LIST, GRANULAR_CATEGORIES, get_parent_category
 
 settings = get_settings()
 logger = logging.getLogger(__name__)
@@ -67,7 +67,7 @@ class GeminiExtractionResult:
 class GeminiVisionService:
     """Gemini Vision integration for receipt OCR and extraction."""
 
-    MODEL = "gemini-2.5-flash-preview-09-2025"
+    MODEL = "gemini-3-pro-preview"
     MAX_TOKENS = 16384
 
     SYSTEM_PROMPT = '''You are a Belgian grocery receipt analyzer. Extract and normalize line items from receipt images.

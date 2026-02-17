@@ -2,7 +2,7 @@ from enum import Enum
 
 
 # Legacy Category enum mapping for database migration.
-# New transactions use string-based categories from CategoryRegistry.
+# New transactions use string-based categories from app.core.categories.
 LEGACY_CATEGORY_MIGRATION_MAP = {
     "MEAT_FISH": "Meat",
     "ALCOHOL": "Alcohol",

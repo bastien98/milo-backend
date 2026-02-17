@@ -15,7 +15,7 @@ from app.schemas.budget import (
     CategoryAllocation,
 )
 from app.services.split_aware_calculation import SplitAwareCalculation
-from app.services.category_registry import get_category_registry
+from app.core.categories import get_category_id
 
 
 class BudgetService:
@@ -87,7 +87,6 @@ class BudgetService:
         days_in_month = calendar.monthrange(today.year, today.month)[1]
 
         category_progress: List[CategoryProgress] = []
-        registry = get_category_registry()
 
         if budget.category_allocations:
             for alloc in budget.category_allocations:
@@ -99,11 +98,11 @@ class BudgetService:
                 is_over_budget = spent_amount > limit_amount
                 over_budget_amount = round(spent_amount - limit_amount, 2) if is_over_budget else None
 
-                category_id = registry.get_category_id(category_name)
+                cat_id = get_category_id(category_name)
 
                 category_progress.append(
                     CategoryProgress(
-                        category_id=category_id,
+                        category_id=cat_id,
                         name=category_name,
                         limit_amount=limit_amount,
                         spent_amount=spent_amount,

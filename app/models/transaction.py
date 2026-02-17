@@ -20,10 +20,10 @@ class Transaction(Base):
         String, primary_key=True, default=lambda: str(uuid.uuid4())
     )
     user_id: Mapped[str] = mapped_column(
-        String, ForeignKey("users.id"), nullable=False, index=True
+        String, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True
     )
     receipt_id: Mapped[Optional[str]] = mapped_column(
-        String, ForeignKey("receipts.id"), nullable=True, index=True
+        String, ForeignKey("receipts.id", ondelete="CASCADE"), nullable=True, index=True
     )
 
     # Item details
@@ -53,7 +53,7 @@ class Transaction(Base):
     weight_or_volume: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
     price_per_unit_measure: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
 
-    # Categorization - sub-category display name from categories.csv
+    # Categorization - parent category name from app.core.categories
     category: Mapped[str] = mapped_column(
         String, nullable=False, index=True
     )
