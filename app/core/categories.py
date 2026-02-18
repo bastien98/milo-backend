@@ -68,7 +68,7 @@ _TREE = [
                 "name": "Fruits",
                 "display": "Fruits",
                 "icon": "apple-logo",
-                "color": "#FF9500",
+                "color": "#34D399",
                 "granular": [
                     "Fruit Apples Pears",
                     "Fruit Citrus",
@@ -86,7 +86,7 @@ _TREE = [
                 "name": "Vegetables",
                 "display": "Vegetables",
                 "icon": "carrot",
-                "color": "#34C759",
+                "color": "#16A34A",
                 "granular": [
                     "Tomatoes",
                     "Salad & Leafy Greens",
@@ -106,8 +106,8 @@ _TREE = [
             {
                 "name": "Meat & Poultry (Raw)",
                 "display": "Meat & Poultry",
-                "icon": "bone",
-                "color": "#FF3B30",
+                "icon": "steak",
+                "color": "#FB923C",
                 "granular": [
                     "Beef",
                     "Pork",
@@ -122,8 +122,8 @@ _TREE = [
             {
                 "name": "Charcuterie & Salads (Preparé/Deli)",
                 "display": "Charcuterie & Salads",
-                "icon": "bowl-food",
-                "color": "#FF2D55",
+                "icon": "sandwich",
+                "color": "#F87171",
                 "granular": [
                     "Ham Cooked",
                     "Ham Dry",
@@ -142,7 +142,7 @@ _TREE = [
                 "name": "Fish & Seafood",
                 "display": "Fish & Seafood",
                 "icon": "fish",
-                "color": "#007AFF",
+                "color": "#22D3EE",
                 "granular": [
                     "Fish Fresh",
                     "Fish Smoked",
@@ -156,7 +156,7 @@ _TREE = [
                 "name": "Dairy, Eggs & Cheese",
                 "display": "Dairy, Eggs & Cheese",
                 "icon": "cheese",
-                "color": "#FFCC00",
+                "color": "#FACC15",
                 "granular": [
                     "Plant Milk",
                     "Milk Fresh",
@@ -188,7 +188,7 @@ _TREE = [
                 "name": "Bakery (Bread, Pistolets)",
                 "display": "Bakery",
                 "icon": "bread",
-                "color": "#A2845E",
+                "color": "#F59E0B",
                 "granular": [
                     "Bread Fresh",
                     "Bread Sliced",
@@ -200,8 +200,8 @@ _TREE = [
             {
                 "name": "Pastries & Koffiekoeken",
                 "display": "Pastries",
-                "icon": "cookie",
-                "color": "#AF52DE",
+                "icon": "cake",
+                "color": "#FB7185",
                 "granular": [
                     "Croissants & Pastries",
                     "Cakes & Tarts",
@@ -221,7 +221,7 @@ _TREE = [
                 "name": "Grains, Pasta & Potatoes",
                 "display": "Grains, Pasta & Potatoes",
                 "icon": "grains",
-                "color": "#999999",
+                "color": "#D97706",
                 "granular": [
                     "Pasta Dry",
                     "Pasta Fresh",
@@ -235,7 +235,7 @@ _TREE = [
                 "name": "Canned & Jarred Goods",
                 "display": "Canned & Jarred Goods",
                 "icon": "jar",
-                "color": "#8E8E93",
+                "color": "#84CC16",
                 "granular": [
                     "Canned Tomatoes",
                     "Canned Vegetables",
@@ -251,8 +251,8 @@ _TREE = [
             {
                 "name": "Sauces, Mayo & Condiments",
                 "display": "Sauces & Condiments",
-                "icon": "drop",
-                "color": "#E63333",
+                "icon": "pepper",
+                "color": "#EA580C",
                 "granular": [
                     "Pasta Sauce",
                     "Tomato Sauce & Ketchup",
@@ -272,8 +272,8 @@ _TREE = [
             {
                 "name": "Breakfast & Cereal (Choco/Jam)",
                 "display": "Breakfast & Cereal",
-                "icon": "sun",
-                "color": "#E69933",
+                "icon": "bowl-food",
+                "color": "#EAB308",
                 "granular": [
                     "Cereals",
                     "Oatmeal",
@@ -287,8 +287,8 @@ _TREE = [
             {
                 "name": "Baking & Flour",
                 "display": "Baking & Flour",
-                "icon": "cooking-pot",
-                "color": "#CCCCCC",
+                "icon": "chef-hat",
+                "color": "#C4A57B",
                 "granular": [
                     "Flour",
                     "Sugar",
@@ -310,7 +310,7 @@ _TREE = [
                 "name": "Frozen Ingredients (Veg/Fruit)",
                 "display": "Frozen Ingredients",
                 "icon": "snowflake",
-                "color": "#5AC8FA",
+                "color": "#0891B2",
                 "granular": [
                     "Frozen Vegetables",
                     "Frozen Fish",
@@ -324,8 +324,8 @@ _TREE = [
             {
                 "name": "Fries & Snacks (Frituur at home)",
                 "display": "Fries & Snacks",
-                "icon": "fire",
-                "color": "#FFCC00",
+                "icon": "french-fries",
+                "color": "#EF4444",
                 "granular": [
                     "Frozen Fries",
                     "Frozen Snacks",
@@ -335,7 +335,7 @@ _TREE = [
                 "name": "Ready Meals & Pizza",
                 "display": "Ready Meals & Pizza",
                 "icon": "pizza",
-                "color": "#FF9500",
+                "color": "#F97316",
                 "granular": [
                     "Frozen Pizza",
                     "Frozen Meals",
@@ -361,8 +361,8 @@ _TREE = [
             {
                 "name": "Water (Bottled)",
                 "display": "Water",
-                "icon": "drop",
-                "color": "#007AFF",
+                "icon": "drop-half-bottom",
+                "color": "#38BDF8",
                 "granular": [
                     "Water Still",
                     "Water Sparkling",
@@ -372,8 +372,8 @@ _TREE = [
             {
                 "name": "Soda & Juices",
                 "display": "Soda & Juices",
-                "icon": "orange-slice",
-                "color": "#FF2D55",
+                "icon": "soda-can",
+                "color": "#F472B6",
                 "granular": [
                     "Cola",
                     "Lemonade & Soda",
@@ -390,7 +390,7 @@ _TREE = [
                 "name": "Coffee & Tea",
                 "display": "Coffee & Tea",
                 "icon": "coffee",
-                "color": "#A2845E",
+                "color": "#A8896C",
                 "granular": [
                     "Coffee Beans Ground",
                     "Coffee Capsules",
@@ -403,7 +403,7 @@ _TREE = [
                 "name": "Alcohol (Beer, Cider, Wine, Whisky, Vodka, Gin, Cava, Champagne)",
                 "display": "Alcohol",
                 "icon": "wine",
-                "color": "#AF52DE",
+                "color": "#DC2626",
                 "granular": [
                     "Beer Pils",
                     "Beer Abbey Trappist",
@@ -435,7 +435,7 @@ _TREE = [
                 "name": "Chips, Nuts & Aperitif",
                 "display": "Chips, Nuts & Aperitif",
                 "icon": "popcorn",
-                "color": "#FFCC00",
+                "color": "#E85D5D",
                 "granular": [
                     "Chips",
                     "Nuts Snack",
@@ -448,8 +448,8 @@ _TREE = [
             {
                 "name": "Chocolate & Sweets (Biscuits)",
                 "display": "Chocolate, Biscuits & Sweets",
-                "icon": "cookie",
-                "color": "#A2845E",
+                "icon": "candy",
+                "color": "#EC4899",
                 "granular": [
                     "Cookies & Biscuits",
                     "Chocolate Bars",
@@ -473,7 +473,7 @@ _TREE = [
                 "name": "Official Waste Bags (PMD/Rest)",
                 "display": "Waste Bags",
                 "icon": "trash",
-                "color": "#8E8E93",
+                "color": "#78909C",
                 "granular": [
                     "Trash Bags",
                 ],
@@ -481,8 +481,8 @@ _TREE = [
             {
                 "name": "Cleaning & Paper Goods",
                 "display": "Cleaning & Paper Goods",
-                "icon": "sparkle",
-                "color": "#00C7BE",
+                "icon": "toilet-paper",
+                "color": "#A855F7",
                 "granular": [
                     "Cleaning All-Purpose",
                     "Cleaning Kitchen",
@@ -514,8 +514,8 @@ _TREE = [
             {
                 "name": "Pharmacy & Hygiene",
                 "display": "Pharmacy & Hygiene",
-                "icon": "pill",
-                "color": "#FF3B30",
+                "icon": "first-aid",
+                "color": "#8B5CF6",
                 "granular": [
                     "Shower Gel",
                     "Soap",
@@ -551,7 +551,7 @@ _TREE = [
                 "name": "Baby & Kids",
                 "display": "Baby & Kids",
                 "icon": "baby",
-                "color": "#30B0C7",
+                "color": "#3B82F6",
                 "granular": [
                     "Baby Milk",
                     "Baby Food",
@@ -564,7 +564,7 @@ _TREE = [
                 "name": "Pet Supplies",
                 "display": "Pet Supplies",
                 "icon": "paw-print",
-                "color": "#FF9500",
+                "color": "#64748B",
                 "granular": [
                     "Pet Food Dog",
                     "Pet Food Cat",
@@ -577,7 +577,7 @@ _TREE = [
                 "name": "Tobacco",
                 "display": "Tobacco",
                 "icon": "cigarette",
-                "color": "#8E8E93",
+                "color": "#B91C1C",
                 "granular": [
                     "Tobacco",
                 ],
@@ -586,7 +586,7 @@ _TREE = [
                 "name": "Lottery & Scratch Cards",
                 "display": "Lottery & Scratch Cards",
                 "icon": "ticket",
-                "color": "#5856D6",
+                "color": "#94A3B8",
                 "granular": [
                     "Lottery & Scratch Cards",
                 ],
@@ -595,7 +595,7 @@ _TREE = [
                 "name": "Promos & Discounts",
                 "display": "Promos & Discounts",
                 "icon": "percent",
-                "color": "#30D158",
+                "color": "#94A3B8",
                 "excluded": True,
                 "granular": [
                     "Discount",
@@ -609,7 +609,7 @@ _TREE = [
                 "name": "Deposits (Statiegeld/Vidange)",
                 "display": "Deposits",
                 "icon": "recycle",
-                "color": "#34C759",
+                "color": "#94A3B8",
                 "excluded": True,
                 "granular": [
                     "Bottle Deposit",
@@ -621,8 +621,8 @@ _TREE = [
             {
                 "name": "Other",
                 "display": "Other",
-                "icon": "tag",
-                "color": "#8E8E93",
+                "icon": "dots-three-circle",
+                "color": "#94A3B8",
                 "granular": [
                     "Batteries",
                     "Lightbulbs",
