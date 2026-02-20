@@ -67,7 +67,7 @@ class GeminiExtractionResult:
 class GeminiVisionService:
     """Gemini Vision integration for receipt OCR and extraction."""
 
-    MODEL = "gemini-2.5-flash-preview-09-2025"
+    MODEL = "gemini-2.5-flash"
     MAX_TOKENS = 16384
 
     SYSTEM_PROMPT = '''You are a Belgian grocery receipt analyzer. Extract and normalize line items from receipt images.
