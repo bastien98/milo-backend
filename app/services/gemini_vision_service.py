@@ -68,7 +68,7 @@ class GeminiVisionService:
     """Gemini Vision integration for receipt OCR and extraction."""
 
     MODEL = "gemini-2.5-flash"
-    MAX_TOKENS = 16384
+    MAX_TOKENS = 65536
 
     SYSTEM_PROMPT = '''You are a Belgian grocery receipt analyzer. Extract and normalize line items from receipt images.
 
@@ -325,6 +325,10 @@ Return a JSON object with this structure:
                     response_mime_type="application/json",
                 ),
             )
+
+            # Check for truncation
+            if response.candidates and response.candidates[0].finish_reason and response.candidates[0].finish_reason.name == "MAX_TOKENS":
+                logger.warning("Gemini response was truncated due to max_output_tokens limit")
 
             # Parse response - JSON mode guarantees valid JSON
             response_text = response.text
