@@ -110,45 +110,44 @@ class GeminiVisionService:
 
 1. **original_description**: Raw text exactly as appears on receipt (including codes, quantities, etc.)
 
-2. **normalized_name**: Clean, generic product name following these rules:
+2. **normalized_name**: Clean, full product name used for product matching. This is the primary field for matching receipt items to product databases (EAN lookup).
    - ALWAYS output in **lowercase**
+   - ALWAYS KEEP the brand/manufacturer name — it is part of the product identity
    - REMOVE quantities (450ml, 1L, 500g, 10st, 6x33cl, etc.)
    - REMOVE packaging types (PET, Blik, Fles, Doos, Brik, etc.)
-   - REMOVE ALL brand/manufacturer names from normalized_name — brands go ONLY in normalized_brand:
-     - Remove store/house brands: Boni, 365, Everyday, Cara, etc.
-     - Remove manufacturer brands: Vandemoortele, Dr. Oetker, Nestlé, Heinz, Devos Lemmens, Lay's, Duyvis, etc.
-   - EXCEPTION: Keep the brand ONLY when it IS the product identity (removing it leaves no meaningful name):
-     - Keep: "jupiler" (without brand = just "bier pils", too generic)
-     - Keep: "coca-cola zero" (without brand = "cola zero", too generic)
-     - Keep: "leffe bruin" (without brand = "abdijbier bruin", nobody says that)
-     - Keep: "nutella" (without brand = "hazelnootpasta", different identity)
-   - Keep the product's natural word order as on the receipt (after removing brand/quantities)
-   - DO NOT reorder product words — strip brand + quantities and keep the remaining order
+   - REMOVE receipt codes, article numbers, and barcodes
+   - Keep the product's natural word order as on the receipt (after removing quantities/packaging)
    - Maintain original language (Dutch/French)
    - **CRITICAL**: The SAME product must ALWAYS produce the SAME normalized_name, regardless of receipt format or OCR variations
    - Examples:
-     - "JUPILER BIER 6X33CL PET" → "jupiler" (brand IS the product)
-     - "BONI VOLLE MELK 1L" → "volle melk" (house brand removed)
-     - "COCA COLA ZERO 1,5L PET" → "coca-cola zero" (brand IS the product)
-     - "VANDEMOORTELE VINAIGRETTE CAESAR 450ML" → "vinaigrette caesar" (manufacturer removed, word order preserved)
-     - "LEFFE BRUIN 6X33CL" → "leffe bruin" (brand IS the product)
-     - "DR. OETKER CASA DI MAMA SALAME 390G" → "casa di mama salame" (manufacturer removed, sub-brand kept)
-     - "LAY'S CHIPS PAPRIKA 250G" → "chips paprika" (manufacturer removed)
-     - "DEVOS LEMMENS MAYONAISE 300ML" → "mayonaise" (manufacturer removed)
-     - "DUYVIS BORRELNOOTJES HOT 275G" → "borrelnootjes hot" (manufacturer removed)
+     - "JUPILER PILS 6X33CL PET" → "jupiler pils"
+     - "BONI VOLLE MELK 1L" → "boni volle melk"
+     - "COCA COLA ZERO 1,5L PET" → "coca-cola zero"
+     - "VANDEMOORTELE VINAIGRETTE CAESAR 450ML" → "vandemoortele vinaigrette caesar"
+     - "LEFFE BRUIN 6X33CL" → "leffe bruin"
+     - "DR. OETKER CASA DI MAMA SALAME 390G" → "dr. oetker casa di mama salame"
+     - "LAY'S CHIPS PAPRIKA 250G" → "lay's chips paprika"
+     - "DEVOS LEMMENS MAYONAISE 300ML" → "devos lemmens mayonaise"
+     - "DUYVIS BORRELNOOTJES HOT 275G" → "duyvis borrelnootjes hot"
+     - "BANANEN 1KG" → "bananen"
+     - "CARA PILS 6X33CL" → "cara pils"
+     - "365 PILS 6X33CL" → "365 pils"
+     - "ABSOLUT VODKA 35CL" → "absolut vodka"
 
-3. **normalized_brand**: The brand/manufacturer name ONLY, in **lowercase**. MUST always be set when a brand is identifiable.
+3. **normalized_brand**: The brand/manufacturer name ONLY, in **lowercase**. Used as a pre-filter for product matching.
    - Extract the product's brand/manufacturer, NOT the store name
    - For store/house brands (Boni, 365, Everyday, Cara, Delhaize brand), use the house brand name
    - If no brand is identifiable, use null
-   - IMPORTANT: normalized_brand must be set even when the brand was kept in normalized_name
    - Examples:
-     - "JUPILER BIER 6X33CL PET" → "jupiler"
+     - "JUPILER PILS 6X33CL PET" → "jupiler"
      - "BONI VOLLE MELK 1L" → "boni"
      - "COCA COLA ZERO 1,5L PET" → "coca-cola"
      - "VANDEMOORTELE VINAIGRETTE CAESAR 450ML" → "vandemoortele"
      - "LEFFE BRUIN 6X33CL" → "leffe"
      - "LAY'S CHIPS PAPRIKA 250G" → "lay's"
+     - "CARA PILS 6X33CL" → "cara"
+     - "365 PILS 6X33CL" → "365"
+     - "ABSOLUT VODKA 35CL" → "absolut"
      - "BANANEN 1KG" → null
 
 4. **is_premium**: Boolean flag for brand tier classification:
