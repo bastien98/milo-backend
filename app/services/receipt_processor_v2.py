@@ -163,6 +163,14 @@ class ReceiptProcessorV2:
                     unit_of_measure=item.unit_of_measure,
                     weight_or_volume=item.weight_or_volume,
                     price_per_unit_measure=item.price_per_unit_measure,
+                    dp_expanded_description=item.dp_expanded_description,
+                    dp_pack_quantity=item.dp_pack_quantity,
+                    dp_pack_size=item.dp_pack_size,
+                    dp_pack_unit=item.dp_pack_unit,
+                    dp_packaging_type=item.dp_packaging_type,
+                    dp_product_variant=item.dp_product_variant,
+                    dp_article_code=item.dp_article_code,
+                    dp_is_bio=item.dp_is_bio,
                 )
                 transactions.append(
                     ExtractedItem(
@@ -183,6 +191,14 @@ class ReceiptProcessorV2:
                         unit_of_measure=item.unit_of_measure,
                         weight_or_volume=item.weight_or_volume,
                         price_per_unit_measure=item.price_per_unit_measure,
+                        dp_expanded_description=item.dp_expanded_description,
+                        dp_pack_quantity=item.dp_pack_quantity,
+                        dp_pack_size=item.dp_pack_size,
+                        dp_pack_unit=item.dp_pack_unit,
+                        dp_packaging_type=item.dp_packaging_type,
+                        dp_product_variant=item.dp_product_variant,
+                        dp_article_code=item.dp_article_code,
+                        dp_is_bio=item.dp_is_bio,
                     )
                 )
             logger.info(f"⏱ create_transactions: {time.monotonic() - t0:.3f}s ({len(transactions)} items)")

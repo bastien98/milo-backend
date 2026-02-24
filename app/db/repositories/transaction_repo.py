@@ -103,6 +103,15 @@ class TransactionRepository:
         unit_of_measure: Optional[str] = None,
         weight_or_volume: Optional[float] = None,
         price_per_unit_measure: Optional[float] = None,
+        # Data Platform fields (dp_)
+        dp_expanded_description: Optional[str] = None,
+        dp_pack_quantity: Optional[int] = None,
+        dp_pack_size: Optional[float] = None,
+        dp_pack_unit: Optional[str] = None,
+        dp_packaging_type: Optional[str] = None,
+        dp_product_variant: Optional[str] = None,
+        dp_article_code: Optional[str] = None,
+        dp_is_bio: bool = False,
     ) -> Transaction:
         """Create a new transaction."""
         transaction = Transaction(
@@ -128,6 +137,15 @@ class TransactionRepository:
             unit_of_measure=unit_of_measure,
             weight_or_volume=weight_or_volume,
             price_per_unit_measure=price_per_unit_measure,
+            # Data Platform fields
+            dp_expanded_description=dp_expanded_description,
+            dp_pack_quantity=dp_pack_quantity,
+            dp_pack_size=dp_pack_size,
+            dp_pack_unit=dp_pack_unit,
+            dp_packaging_type=dp_packaging_type,
+            dp_product_variant=dp_product_variant,
+            dp_article_code=dp_article_code,
+            dp_is_bio=dp_is_bio,
         )
         self.db.add(transaction)
         await self.db.flush()

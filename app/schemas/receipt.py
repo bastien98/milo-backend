@@ -25,6 +25,15 @@ class ExtractedItem(BaseModel):
     unit_of_measure: Optional[str] = None  # kg/g/l/ml/piece
     weight_or_volume: Optional[float] = None
     price_per_unit_measure: Optional[float] = None
+    # Data Platform fields (dp_)
+    dp_expanded_description: Optional[str] = None
+    dp_pack_quantity: Optional[int] = None
+    dp_pack_size: Optional[float] = None
+    dp_pack_unit: Optional[str] = None
+    dp_packaging_type: Optional[str] = None
+    dp_product_variant: Optional[str] = None
+    dp_article_code: Optional[str] = None
+    dp_is_bio: bool = False
 
 
 class ReceiptUploadResponse(BaseModel):
@@ -109,6 +118,15 @@ class GroupedReceiptTransaction(BaseModel):
     unit_of_measure: Optional[str] = None
     weight_or_volume: Optional[float] = None
     price_per_unit_measure: Optional[float] = None
+    # Data Platform fields (dp_)
+    dp_expanded_description: Optional[str] = None
+    dp_pack_quantity: Optional[int] = None
+    dp_pack_size: Optional[float] = None
+    dp_pack_unit: Optional[str] = None
+    dp_packaging_type: Optional[str] = None
+    dp_product_variant: Optional[str] = None
+    dp_article_code: Optional[str] = None
+    dp_is_bio: bool = False
 
 
 class GroupedReceipt(BaseModel):

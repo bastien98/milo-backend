@@ -43,10 +43,19 @@ class ExtractedLineItem:
     is_deposit: bool
     granular_category: str  # Detailed category
     parent_category: str  # Broad category
-    health_score: Optional[int]  # 0-5, None for non-foobrandd
+    health_score: Optional[int]  # 0-5, None for non-food
     unit_of_measure: Optional[str]  # kg/g/l/ml/piece
     weight_or_volume: Optional[float]  # actual weight/volume
     price_per_unit_measure: Optional[float]  # price per kg/liter
+    # Data Platform fields (dp_) — for EAN matching & Pinecone vector search
+    dp_expanded_description: Optional[str]  # Full product text for vector search embedding
+    dp_pack_quantity: Optional[int]  # Multi-pack count (6 from "6x33cl"), 1 for singles
+    dp_pack_size: Optional[float]  # TOTAL pack size in ml or g (matches Daltix pack_size)
+    dp_pack_unit: Optional[str]  # "ml" or "g" (matches Daltix pack_unit)
+    dp_packaging_type: Optional[str]  # blik/pet/fles/doos/brik/glas
+    dp_product_variant: Optional[str]  # flavor/style/sub-type (zero, bruin, paprika)
+    dp_article_code: Optional[str]  # Article/PLU/barcode code from receipt
+    dp_is_bio: bool  # True if organic (bio/biologisch/biologique)
 
 
 @dataclass
@@ -194,6 +203,348 @@ class GeminiVisionService:
     - Parse from lines like "5.99/kg", "1.29/l"
     - Return null if not shown on receipt
 
+### Data Platform Fields (dp_ prefix) — for EAN matching & product search
+
+These fields help match receipt items to a product catalog (Daltix) containing EAN codes, pack sizes, and brand data. Extract as much detail as possible from the receipt text.
+
+13. **dp_expanded_description**: Full product description for vector similarity search. Reconstruct the complete product identity from the receipt line.
+    - Include: brand, product name, variant/flavor, pack quantity, per-item volume, packaging type
+    - Always **lowercase**
+    - Keep original language (Dutch/French)
+    - Normalize OCR artifacts but keep ALL product-identifying information (unlike normalized_name which strips quantities)
+    - This is the PRIMARY field used for embedding-based product matching in Pinecone
+
+14. **dp_pack_quantity**: Number of individual items in the multi-pack.
+    - Parse from patterns: "6X33CL" → 6, "4x125g" → 4, "12x25cl" → 12, "24X33CL" → 24
+    - Default to 1 for single items (e.g., "MELK 1L" → 1, "CHIPS 250G" → 1)
+
+15. **dp_pack_size**: TOTAL pack size converted to the smallest metric unit (ml for liquids, g for solids). This must match the Daltix product catalog convention where pack_size is the total.
+    - Convert to ml: "6X33CL" → 1980.0 (6×330), "1,5L" → 1500.0, "25CL" → 250.0, "33CL" → 330.0
+    - Convert to g: "250G" → 250.0, "1KG" → 1000.0, "500G" → 500.0, "4x125g" → 500.0 (4×125)
+    - For multi-packs: MULTIPLY quantity × per-item size (e.g., "6X33CL" = 6×330ml = 1980ml)
+    - Return null if no size/volume/weight information on receipt
+
+16. **dp_pack_unit**: The base unit for dp_pack_size.
+    - Use "ml" for all liquids (beer, water, soft drinks, milk, sauces, oils, cleaning products)
+    - Use "g" for all solids (chips, chocolate, pasta, rice, meat, cheese, coffee)
+    - Return null if no size information
+
+17. **dp_packaging_type**: The physical container type, critical for EAN disambiguation (same product in different packaging = different EAN).
+    - Normalize to lowercase: "blik" (can/tin), "pet" (plastic bottle), "fles" (glass bottle), "doos" (box/carton), "brik" (tetra pak/carton drink), "glas" (glass jar), "zak" (bag/pouch)
+    - Parse from receipt text: "PET", "BLIK", "BL.", "FLES", "FL.", "DOOS", "BRIK"
+    - Return null if not mentioned on receipt
+
+18. **dp_product_variant**: The specific flavor, style, or sub-type that distinguishes products within a brand line.
+    - Examples: "zero" (from Coca-Cola Zero), "bruin" (from Leffe Bruin), "paprika" (from Lay's Paprika), "pils" (from Jupiler Pils), "blond" (from Leffe Blond), "original" (from Dreft Original)
+    - For wines: grape variety or color ("chardonnay", "bordeaux", "rosé")
+    - For spirits: style or age ("single malt", "12 years")
+    - Always lowercase
+    - Return null if no variant (generic/base product)
+
+19. **dp_article_code**: Article number, PLU code, or barcode printed on the receipt line.
+    - Look for numeric codes that appear before or after the product description
+    - Common formats: "ART 123456", "PLU 4011", standalone 6-13 digit numbers near item
+    - Return null if no code is visible
+
+20. **dp_is_bio**: Boolean flag for organic products.
+    - `true` if the receipt text contains: "BIO", "BIOLOGISCH", "BIOLOGIQUE", "ORGANIC", "ÖKO"
+    - Also `true` if the product brand is a known organic brand (e.g., "Bioland")
+    - `false` for all other products
+
+## FEW-SHOT EXAMPLES
+
+Below are complete extraction examples from real Belgian receipt lines. Use these as reference for consistent output.
+
+### Example 1: Beer multi-pack with packaging
+Receipt line: "JUPILER PILS 6X33CL PET  8,99"
+```json
+{
+  "original_description": "JUPILER PILS 6X33CL PET  8,99",
+  "normalized_name": "jupiler pils",
+  "normalized_brand": "jupiler",
+  "is_premium": true,
+  "quantity": 1,
+  "unit_price": null,
+  "total_price": 8.99,
+  "is_discount": false,
+  "is_deposit": false,
+  "granular_category": "Beer Pils & Lager",
+  "health_score": 0,
+  "unit_of_measure": null,
+  "weight_or_volume": null,
+  "price_per_unit_measure": null,
+  "dp_expanded_description": "jupiler pils 6x33cl pet",
+  "dp_pack_quantity": 6,
+  "dp_pack_size": 1980.0,
+  "dp_pack_unit": "ml",
+  "dp_packaging_type": "pet",
+  "dp_product_variant": "pils",
+  "dp_article_code": null,
+  "dp_is_bio": false
+}
+```
+
+### Example 2: Soft drink with volume
+Receipt line: "COCA COLA ZERO 1,5L PET  2,19"
+```json
+{
+  "original_description": "COCA COLA ZERO 1,5L PET  2,19",
+  "normalized_name": "coca-cola zero",
+  "normalized_brand": "coca-cola",
+  "is_premium": true,
+  "quantity": 1,
+  "unit_price": null,
+  "total_price": 2.19,
+  "is_discount": false,
+  "is_deposit": false,
+  "granular_category": "Soft Drinks Cola",
+  "health_score": 1,
+  "unit_of_measure": null,
+  "weight_or_volume": null,
+  "price_per_unit_measure": null,
+  "dp_expanded_description": "coca-cola zero 1.5l pet",
+  "dp_pack_quantity": 1,
+  "dp_pack_size": 1500.0,
+  "dp_pack_unit": "ml",
+  "dp_packaging_type": "pet",
+  "dp_product_variant": "zero",
+  "dp_article_code": null,
+  "dp_is_bio": false
+}
+```
+
+### Example 3: Chips with weight
+Receipt line: "LAY'S CHIPS PAPRIKA 250G  1,99"
+```json
+{
+  "original_description": "LAY'S CHIPS PAPRIKA 250G  1,99",
+  "normalized_name": "lay's chips paprika",
+  "normalized_brand": "lay's",
+  "is_premium": true,
+  "quantity": 1,
+  "unit_price": null,
+  "total_price": 1.99,
+  "is_discount": false,
+  "is_deposit": false,
+  "granular_category": "Potato Chips",
+  "health_score": 1,
+  "unit_of_measure": null,
+  "weight_or_volume": null,
+  "price_per_unit_measure": null,
+  "dp_expanded_description": "lay's chips paprika 250g",
+  "dp_pack_quantity": 1,
+  "dp_pack_size": 250.0,
+  "dp_pack_unit": "g",
+  "dp_packaging_type": "zak",
+  "dp_product_variant": "paprika",
+  "dp_article_code": null,
+  "dp_is_bio": false
+}
+```
+
+### Example 4: Store brand beer
+Receipt line: "CARA PILS 6X33CL BL.  4,99"
+```json
+{
+  "original_description": "CARA PILS 6X33CL BL.  4,99",
+  "normalized_name": "cara pils",
+  "normalized_brand": "cara",
+  "is_premium": false,
+  "quantity": 1,
+  "unit_price": null,
+  "total_price": 4.99,
+  "is_discount": false,
+  "is_deposit": false,
+  "granular_category": "Beer Pils & Lager",
+  "health_score": 0,
+  "unit_of_measure": null,
+  "weight_or_volume": null,
+  "price_per_unit_measure": null,
+  "dp_expanded_description": "cara pils 6x33cl blik",
+  "dp_pack_quantity": 6,
+  "dp_pack_size": 1980.0,
+  "dp_pack_unit": "ml",
+  "dp_packaging_type": "blik",
+  "dp_product_variant": "pils",
+  "dp_article_code": null,
+  "dp_is_bio": false
+}
+```
+
+### Example 5: Unbranded fresh produce by weight
+Receipt line: "BANANEN  1.234 kg x 1,99/kg  2,46"
+```json
+{
+  "original_description": "BANANEN  1.234 kg x 1,99/kg  2,46",
+  "normalized_name": "bananen",
+  "normalized_brand": null,
+  "is_premium": false,
+  "quantity": 1,
+  "unit_price": null,
+  "total_price": 2.46,
+  "is_discount": false,
+  "is_deposit": false,
+  "granular_category": "Fruit Bananas",
+  "health_score": 5,
+  "unit_of_measure": "kg",
+  "weight_or_volume": 1.234,
+  "price_per_unit_measure": 1.99,
+  "dp_expanded_description": "bananen",
+  "dp_pack_quantity": 1,
+  "dp_pack_size": 1234.0,
+  "dp_pack_unit": "g",
+  "dp_packaging_type": null,
+  "dp_product_variant": null,
+  "dp_article_code": null,
+  "dp_is_bio": false
+}
+```
+
+### Example 6: Organic product
+Receipt line: "BIO VOLLE MELK BONI 1L  1,39"
+```json
+{
+  "original_description": "BIO VOLLE MELK BONI 1L  1,39",
+  "normalized_name": "boni volle melk",
+  "normalized_brand": "boni",
+  "is_premium": false,
+  "quantity": 1,
+  "unit_price": null,
+  "total_price": 1.39,
+  "is_discount": false,
+  "is_deposit": false,
+  "granular_category": "Milk Fresh",
+  "health_score": 4,
+  "unit_of_measure": null,
+  "weight_or_volume": null,
+  "price_per_unit_measure": null,
+  "dp_expanded_description": "boni bio volle melk 1l",
+  "dp_pack_quantity": 1,
+  "dp_pack_size": 1000.0,
+  "dp_pack_unit": "ml",
+  "dp_packaging_type": null,
+  "dp_product_variant": null,
+  "dp_article_code": null,
+  "dp_is_bio": true
+}
+```
+
+### Example 7: Deposit line
+Receipt line: "LEEGGOED  0,78"
+```json
+{
+  "original_description": "LEEGGOED  0,78",
+  "normalized_name": "leeggoed",
+  "normalized_brand": null,
+  "is_premium": false,
+  "quantity": 1,
+  "unit_price": null,
+  "total_price": 0.78,
+  "is_discount": false,
+  "is_deposit": true,
+  "granular_category": "Other",
+  "health_score": null,
+  "unit_of_measure": null,
+  "weight_or_volume": null,
+  "price_per_unit_measure": null,
+  "dp_expanded_description": "leeggoed",
+  "dp_pack_quantity": null,
+  "dp_pack_size": null,
+  "dp_pack_unit": null,
+  "dp_packaging_type": null,
+  "dp_product_variant": null,
+  "dp_article_code": null,
+  "dp_is_bio": false
+}
+```
+
+### Example 8: Discount line
+Receipt line: "HOEVEELHEIDSVOORDEEL  -1,50"
+```json
+{
+  "original_description": "HOEVEELHEIDSVOORDEEL  -1,50",
+  "normalized_name": "korting hoeveelheidsvoordeel",
+  "normalized_brand": null,
+  "is_premium": false,
+  "quantity": 1,
+  "unit_price": null,
+  "total_price": -1.50,
+  "is_discount": true,
+  "is_deposit": false,
+  "granular_category": "Other",
+  "health_score": null,
+  "unit_of_measure": null,
+  "weight_or_volume": null,
+  "price_per_unit_measure": null,
+  "dp_expanded_description": "hoeveelheidsvoordeel",
+  "dp_pack_quantity": null,
+  "dp_pack_size": null,
+  "dp_pack_unit": null,
+  "dp_packaging_type": null,
+  "dp_product_variant": null,
+  "dp_article_code": null,
+  "dp_is_bio": false
+}
+```
+
+### Example 9: Sauce with article code
+Receipt line: "ART 541014  DEVOS LEMMENS MAYO 300ML  2,49"
+```json
+{
+  "original_description": "ART 541014  DEVOS LEMMENS MAYO 300ML  2,49",
+  "normalized_name": "devos lemmens mayonaise",
+  "normalized_brand": "devos lemmens",
+  "is_premium": true,
+  "quantity": 1,
+  "unit_price": null,
+  "total_price": 2.49,
+  "is_discount": false,
+  "is_deposit": false,
+  "granular_category": "Mayonnaise",
+  "health_score": 2,
+  "unit_of_measure": null,
+  "weight_or_volume": null,
+  "price_per_unit_measure": null,
+  "dp_expanded_description": "devos lemmens mayonaise 300ml",
+  "dp_pack_quantity": 1,
+  "dp_pack_size": 300.0,
+  "dp_pack_unit": "ml",
+  "dp_packaging_type": null,
+  "dp_product_variant": null,
+  "dp_article_code": "541014",
+  "dp_is_bio": false
+}
+```
+
+### Example 10: Abbey beer multi-pack
+Receipt line: "LEFFE BRUIN 6X33CL  7,49"
+```json
+{
+  "original_description": "LEFFE BRUIN 6X33CL  7,49",
+  "normalized_name": "leffe bruin",
+  "normalized_brand": "leffe",
+  "is_premium": true,
+  "quantity": 1,
+  "unit_price": null,
+  "total_price": 7.49,
+  "is_discount": false,
+  "is_deposit": false,
+  "granular_category": "Beer Abbey & Trappist",
+  "health_score": 0,
+  "unit_of_measure": null,
+  "weight_or_volume": null,
+  "price_per_unit_measure": null,
+  "dp_expanded_description": "leffe bruin 6x33cl",
+  "dp_pack_quantity": 6,
+  "dp_pack_size": 1980.0,
+  "dp_pack_unit": "ml",
+  "dp_packaging_type": null,
+  "dp_product_variant": "bruin",
+  "dp_article_code": null,
+  "dp_is_bio": false
+}
+```
+
 ### IMPORTANT RULES
 - INCLUDE discount/bonus lines with NEGATIVE total_price values (these reduce the receipt total)
 - Skip subtotals, totals, payment lines
@@ -236,7 +587,15 @@ Return a JSON object with this structure:
   - "health_score": integer 0-5 or null
   - "unit_of_measure": string or null (kg/g/l/ml/piece)
   - "weight_or_volume": number or null
-  - "price_per_unit_measure": number or null'''
+  - "price_per_unit_measure": number or null
+  - "dp_expanded_description": string or null (full product text for vector search)
+  - "dp_pack_quantity": integer or null (multi-pack count, 1 for singles)
+  - "dp_pack_size": number or null (total pack size in ml or g)
+  - "dp_pack_unit": string or null ("ml" or "g")
+  - "dp_packaging_type": string or null (blik/pet/fles/doos/brik/glas/zak)
+  - "dp_product_variant": string or null (flavor/style/sub-type)
+  - "dp_article_code": string or null (article/PLU code from receipt)
+  - "dp_is_bio": boolean (true if organic)'''
 
     # Image compression settings (for large images only)
     MAX_IMAGE_SIZE = (1600, 2400)  # Max dimensions for compressed image
@@ -435,6 +794,50 @@ Return a JSON object with this structure:
                 except (ValueError, TypeError):
                     price_per_unit_measure = None
 
+            # Parse dp_ fields
+            dp_expanded_description = item.get("dp_expanded_description")
+            if dp_expanded_description:
+                dp_expanded_description = dp_expanded_description.lower().strip()
+
+            dp_pack_quantity = item.get("dp_pack_quantity")
+            if dp_pack_quantity is not None:
+                try:
+                    dp_pack_quantity = int(dp_pack_quantity)
+                except (ValueError, TypeError):
+                    dp_pack_quantity = None
+
+            dp_pack_size = item.get("dp_pack_size")
+            if dp_pack_size is not None:
+                try:
+                    dp_pack_size = float(dp_pack_size)
+                except (ValueError, TypeError):
+                    dp_pack_size = None
+
+            dp_pack_unit = item.get("dp_pack_unit")
+            if dp_pack_unit and dp_pack_unit.lower() not in ("ml", "g"):
+                dp_pack_unit = None
+            elif dp_pack_unit:
+                dp_pack_unit = dp_pack_unit.lower()
+
+            dp_packaging_type = item.get("dp_packaging_type")
+            valid_packaging = {"blik", "pet", "fles", "doos", "brik", "glas", "zak"}
+            if dp_packaging_type and dp_packaging_type.lower() not in valid_packaging:
+                dp_packaging_type = None
+            elif dp_packaging_type:
+                dp_packaging_type = dp_packaging_type.lower()
+
+            dp_product_variant = item.get("dp_product_variant")
+            if dp_product_variant:
+                dp_product_variant = dp_product_variant.lower().strip()
+                if not dp_product_variant:
+                    dp_product_variant = None
+
+            dp_article_code = item.get("dp_article_code")
+            if dp_article_code:
+                dp_article_code = dp_article_code.strip()
+                if not dp_article_code:
+                    dp_article_code = None
+
             line_items.append(
                 ExtractedLineItem(
                     original_description=item.get("original_description", ""),
@@ -452,6 +855,14 @@ Return a JSON object with this structure:
                     unit_of_measure=unit_of_measure,
                     weight_or_volume=weight_or_volume,
                     price_per_unit_measure=price_per_unit_measure,
+                    dp_expanded_description=dp_expanded_description,
+                    dp_pack_quantity=dp_pack_quantity,
+                    dp_pack_size=dp_pack_size,
+                    dp_pack_unit=dp_pack_unit,
+                    dp_packaging_type=dp_packaging_type,
+                    dp_product_variant=dp_product_variant,
+                    dp_article_code=dp_article_code,
+                    dp_is_bio=bool(item.get("dp_is_bio", False)),
                 )
             )
 
