@@ -14,33 +14,36 @@ FastAPI backend for a receipt scanning and expense tracking app. Python 3.11, Po
 
 ## Infrastructure Access
 
+> **Important:** Store actual tokens and connection strings in environment
+> variables or a local `.env` file — never commit secrets to version control.
+
 ### Railway Logs
 ```bash
 # Production logs
-RAILWAY_TOKEN=a5fd4542-cbf4-405d-9df2-9a1abf680ad3 railway logs --service scandalicious-api
+RAILWAY_TOKEN=$RAILWAY_PROD_TOKEN railway logs --service scandalicious-api
 
 # Non-prod logs
-RAILWAY_TOKEN=2f4b2fe6-4d49-4588-a77f-e679f78861ca railway logs --service scandalicious-api
+RAILWAY_TOKEN=$RAILWAY_NONPROD_TOKEN railway logs --service scandalicious-api
 ```
 
 ### Railway Variables / Status
 ```bash
 # Production
-RAILWAY_TOKEN=a5fd4542-cbf4-405d-9df2-9a1abf680ad3 railway variables --service scandalicious-api
-RAILWAY_TOKEN=a5fd4542-cbf4-405d-9df2-9a1abf680ad3 railway status
+RAILWAY_TOKEN=$RAILWAY_PROD_TOKEN railway variables --service scandalicious-api
+RAILWAY_TOKEN=$RAILWAY_PROD_TOKEN railway status
 
 # Non-prod
-RAILWAY_TOKEN=2f4b2fe6-4d49-4588-a77f-e679f78861ca railway variables --service scandalicious-api
-RAILWAY_TOKEN=2f4b2fe6-4d49-4588-a77f-e679f78861ca railway status
+RAILWAY_TOKEN=$RAILWAY_NONPROD_TOKEN railway variables --service scandalicious-api
+RAILWAY_TOKEN=$RAILWAY_NONPROD_TOKEN railway status
 ```
 
 ### Database Queries (via psql)
 ```bash
 # Production DB
-/opt/homebrew/opt/libpq/bin/psql "postgresql://postgres:hrGaUOZtYDDNPUDPmXlzpnVAReIgxlkx@switchback.proxy.rlwy.net:45896/railway"
+/opt/homebrew/opt/libpq/bin/psql "$PROD_DATABASE_URL"
 
 # Non-prod DB
-/opt/homebrew/opt/libpq/bin/psql "postgresql://postgres:tBKODGAPzROEyTeTYDKVjtbdhBhEwkgc@shortline.proxy.rlwy.net:33385/railway"
+/opt/homebrew/opt/libpq/bin/psql "$NONPROD_DATABASE_URL"
 ```
 
 Use `-c "SQL"` flag for one-off queries.
