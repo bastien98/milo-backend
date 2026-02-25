@@ -1,4 +1,5 @@
 from fastapi import APIRouter, Depends
+from fastapi.responses import JSONResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import text
 
@@ -13,5 +14,8 @@ async def readiness_check(db: AsyncSession = Depends(get_db)):
     try:
         await db.execute(text("SELECT 1"))
         return {"status": "ready", "database": "connected"}
-    except Exception as e:
-        return {"status": "not_ready", "database": "disconnected", "error": str(e)}
+    except Exception:
+        return JSONResponse(
+            status_code=503,
+            content={"status": "not_ready", "database": "disconnected"},
+        )
