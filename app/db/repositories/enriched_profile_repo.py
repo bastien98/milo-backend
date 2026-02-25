@@ -1,4 +1,4 @@
-from datetime import datetime, date
+from datetime import datetime, date, timezone
 from typing import Optional, Any
 
 from sqlalchemy import select
@@ -36,7 +36,7 @@ class EnrichedProfileRepository:
                 data_period_start=data_period_start,
                 data_period_end=data_period_end,
                 receipts_analyzed=receipts_analyzed,
-                last_rebuilt_at=datetime.now(),
+                last_rebuilt_at=datetime.now(timezone.utc),
             )
             self.db.add(profile)
         else:
@@ -45,7 +45,7 @@ class EnrichedProfileRepository:
             profile.data_period_start = data_period_start
             profile.data_period_end = data_period_end
             profile.receipts_analyzed = receipts_analyzed
-            profile.last_rebuilt_at = datetime.now()
+            profile.last_rebuilt_at = datetime.now(timezone.utc)
 
         await self.db.flush()
         await self.db.refresh(profile)

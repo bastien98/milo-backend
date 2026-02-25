@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Optional, List
 
 from sqlalchemy import select, and_, delete
@@ -177,7 +177,7 @@ class ExpenseSplitRepository:
         if assignment:
             # Update existing
             assignment.participant_ids = participant_ids
-            assignment.updated_at = datetime.utcnow()
+            assignment.updated_at = datetime.now(timezone.utc)
         else:
             # Create new
             assignment = SplitAssignment(
@@ -255,7 +255,7 @@ class ExpenseSplitRepository:
         if friend:
             # Update existing
             friend.color = color
-            friend.last_used_at = datetime.utcnow()
+            friend.last_used_at = datetime.now(timezone.utc)
             friend.use_count += 1
         else:
             # Create new

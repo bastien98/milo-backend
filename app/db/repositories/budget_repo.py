@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Optional, List, Any
 
 from sqlalchemy import select, delete
@@ -96,7 +96,7 @@ class BudgetRepository:
             budget.is_smart_budget = is_smart_budget
 
         # Update the updated_at timestamp
-        budget.updated_at = datetime.utcnow()
+        budget.updated_at = datetime.now(timezone.utc)
 
         await self.db.flush()
         await self.db.refresh(budget)
