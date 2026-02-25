@@ -51,9 +51,9 @@ class ReceiptProcessorV2:
 
         Steps:
         1. Validate file type and size
-        2. Create receipt record (status: processing)
-        3. Validate image quality
-        4. Check for duplicate receipt (content hash)
+        2. Check for duplicate receipt (content hash in DB)
+        3. Create receipt record (status: processing)
+        4. Validate image quality
         5. Call Gemini Vision for OCR + normalization + categorization
         6. Create transaction records
         7. Update receipt record (status: completed)
@@ -76,7 +76,26 @@ class ReceiptProcessorV2:
             f"type={file_type}, size={len(file_content)} bytes"
         )
 
-        # Step 2: Create receipt record
+        # Step 2: Check for duplicate before creating receipt
+        content_hash = self._compute_content_hash(file_content)
+        is_duplicate = await self.receipt_repo.exists_by_content_hash(user_id, content_hash)
+
+        if is_duplicate:
+            logger.info(f"Duplicate receipt detected: user_id={user_id}, hash={content_hash[:16]}...")
+            return ReceiptUploadResponse(
+                receipt_id="",
+                status=ReceiptStatus.COMPLETED,
+                store_name=None,
+                receipt_date=None,
+                total_amount=None,
+                items_count=0,
+                transactions=[],
+                warnings=["Duplicate receipt detected - not saved"],
+                is_duplicate=True,
+                duplicate_score=1.0,
+            )
+
+        # Step 3: Create receipt record with content_hash
         t0 = time.monotonic()
         receipt = await self.receipt_repo.create(
             user_id=user_id,
@@ -84,41 +103,18 @@ class ReceiptProcessorV2:
             file_type=file_type,
             file_size=len(file_content),
             status=ReceiptStatus.PROCESSING,
+            content_hash=content_hash,
         )
         logger.info(f"⏱ create_receipt_record: {time.monotonic() - t0:.3f}s")
 
         try:
-            # Step 3: Validate image quality
+            # Step 4: Validate image quality
             t0 = time.monotonic()
             validation_warnings = self.image_validator.raise_if_invalid(
                 file_content, content_type
             )
             warnings.extend(validation_warnings)
             logger.info(f"⏱ image_validation: {time.monotonic() - t0:.3f}s")
-
-            # Step 4: Check for duplicate (simple content hash)
-            content_hash = self._compute_content_hash(file_content)
-            is_duplicate = await self._check_duplicate_hash(user_id, content_hash)
-
-            if is_duplicate:
-                # Delete the receipt record we created
-                await self.receipt_repo.delete(receipt.id)
-                logger.info(f"Duplicate receipt detected: user_id={user_id}, hash={content_hash[:16]}...")
-
-                warning_msg = "Duplicate receipt detected - not saved"
-
-                return ReceiptUploadResponse(
-                    receipt_id="",
-                    status=ReceiptStatus.COMPLETED,
-                    store_name=None,
-                    receipt_date=None,
-                    total_amount=None,
-                    items_count=0,
-                    transactions=[],
-                    warnings=[warning_msg],
-                    is_duplicate=True,
-                    duplicate_score=1.0,
-                )
 
             # Step 5: Extract + normalize + categorize via Gemini Vision (single call)
             t0 = time.monotonic()
@@ -248,18 +244,6 @@ class ReceiptProcessorV2:
     def _compute_content_hash(self, content: bytes) -> str:
         """Compute SHA-256 hash of file content for duplicate detection."""
         return hashlib.sha256(content).hexdigest()
-
-    async def _check_duplicate_hash(self, user_id: str, content_hash: str) -> bool:
-        """Check if a receipt with the same content hash already exists.
-
-        Note: This is a simple implementation. For production, you may want to
-        store the hash in the receipts table and query it directly.
-        """
-        # For now, we don't persist the hash. This means we can't detect
-        # duplicates across sessions. A more robust implementation would
-        # add a content_hash column to the receipts table.
-        # TODO: Add content_hash column to receipts table for persistent duplicate detection
-        return False
 
     def _get_file_type(self, content_type: str) -> str:
         """Get file type from content type."""

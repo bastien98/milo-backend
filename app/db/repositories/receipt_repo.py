@@ -70,6 +70,19 @@ class ReceiptRepository:
 
         return receipts, total
 
+    async def exists_by_content_hash(
+        self, user_id: str, content_hash: str
+    ) -> bool:
+        """Check if a receipt with this content hash already exists for the user."""
+        result = await self.db.execute(
+            select(func.count(Receipt.id)).where(
+                Receipt.user_id == user_id,
+                Receipt.content_hash == content_hash,
+                Receipt.status != ReceiptStatus.FAILED,
+            )
+        )
+        return (result.scalar() or 0) > 0
+
     async def create(
         self,
         user_id: str,
@@ -77,6 +90,7 @@ class ReceiptRepository:
         file_type: str,
         file_size: int,
         status: ReceiptStatus = ReceiptStatus.PENDING,
+        content_hash: Optional[str] = None,
     ) -> Receipt:
         """Create a new receipt."""
         receipt = Receipt(
@@ -86,6 +100,7 @@ class ReceiptRepository:
             file_size_bytes=file_size,
             status=status,
             source=ReceiptSource.RECEIPT_UPLOAD,
+            content_hash=content_hash,
         )
         self.db.add(receipt)
         await self.db.flush()

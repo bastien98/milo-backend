@@ -2,7 +2,7 @@ import uuid
 from datetime import datetime, date, time
 from typing import TYPE_CHECKING, Optional, List
 
-from sqlalchemy import String, DateTime, Integer, Float, ForeignKey, Text, Enum, Date, Time, func
+from sqlalchemy import String, DateTime, Integer, Float, ForeignKey, Text, Enum, Date, Time, Index, func
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db.base import Base
@@ -45,6 +45,9 @@ class Receipt(Base):
     receipt_date: Mapped[Optional[date]] = mapped_column(Date, nullable=True)
     total_amount: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
 
+    # Content hash for duplicate detection (SHA-256 of file bytes)
+    content_hash: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
+
     # New insights fields
     receipt_time: Mapped[Optional[time]] = mapped_column(Time, nullable=True)
     payment_method: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)
@@ -66,4 +69,8 @@ class Receipt(Base):
     )
     expense_split: Mapped[Optional["ExpenseSplit"]] = relationship(
         "ExpenseSplit", back_populates="receipt", cascade="all, delete-orphan", uselist=False
+    )
+
+    __table_args__ = (
+        Index("ix_receipts_user_content_hash", "user_id", "content_hash"),
     )
