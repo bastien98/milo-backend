@@ -3,6 +3,8 @@
 # API endpoints for Apple Wallet pass creation
 #
 
+import re
+
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import Response
 
@@ -60,10 +62,15 @@ async def create_wallet_pass_download(
     if not success:
         raise HTTPException(status_code=400, detail=error or "Failed to create pass")
 
+    # Sanitize store_name for use in Content-Disposition filename
+    safe_name = re.sub(r'[^\w\-]', '_', request.store_name)[:50]
+    if not safe_name:
+        safe_name = "store"
+
     return Response(
         content=pass_data,
         media_type="application/vnd.apple.pkpass",
         headers={
-            "Content-Disposition": f"attachment; filename={request.store_name.replace(' ', '_')}_pass.pkpass"
+            "Content-Disposition": f'attachment; filename="{safe_name}_pass.pkpass"'
         }
     )
