@@ -1,6 +1,7 @@
 import json
 from typing import AsyncGenerator, Optional
 
+import structlog
 from fastapi import APIRouter, Depends, HTTPException, Query, Response
 from fastapi.responses import StreamingResponse
 from sqlalchemy import select
@@ -17,6 +18,7 @@ from app.core.exceptions import GeminiAPIError, RateLimitExceededError
 
 router = APIRouter()
 settings = get_settings()
+logger = structlog.get_logger(__name__)
 
 
 def build_rate_limit_headers(status: RateLimitStatus, account_for_current: bool = True) -> dict:
@@ -62,6 +64,13 @@ async def chat(
     rate_status = await rate_limit_service.check_rate_limit(current_user.firebase_uid)
 
     if not rate_status.allowed:
+        logger.warning(
+            "rate_limit_hit",
+            user_id=str(current_user.id),
+            limit_type="chat_messages",
+            messages_used=rate_status.messages_used,
+            messages_limit=rate_status.messages_limit,
+        )
         raise RateLimitExceededError(
             message="You've reached your message limit for this period",
             details={

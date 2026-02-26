@@ -5,6 +5,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
 from app.config import get_settings
+from app.core.logging import setup_logging
 from app.core.exceptions import (
     ReceiptProcessingError,
     ImageValidationError,
@@ -16,8 +17,12 @@ from app.core.exceptions import (
 )
 from app.api.v2.router import api_router as api_router_v2
 from app.db.session import init_db
+from app.middleware.request_logging import RequestLoggingMiddleware
 
 settings = get_settings()
+
+# Initialize structured logging before anything else
+setup_logging()
 
 
 @asynccontextmanager
@@ -66,7 +71,7 @@ Authorization: Bearer <firebase_id_token>
     ],
 )
 
-# CORS middleware
+# Middleware (order matters: first added = outermost)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=settings.CORS_ORIGINS,
@@ -74,6 +79,7 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+app.add_middleware(RequestLoggingMiddleware)
 
 
 # Exception handlers

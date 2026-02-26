@@ -34,5 +34,12 @@ httpx==0.26.0
 # Pinecone vector database
 pinecone>=8.0.0
 
+# Structured logging
+structlog>=24.1.0
+
+# Observability
+axiom-py>=1.0.0
+sentry-sdk[fastapi]>=1.40.0
+
 # Apple Wallet pass signing
 cryptography>=41.0.0

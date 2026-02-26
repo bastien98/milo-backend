@@ -5,11 +5,12 @@ Called via FastAPI BackgroundTasks from the upload endpoint.
 """
 
 import hashlib
-import logging
 import time
 from datetime import date, datetime, timezone
 from datetime import time as dt_time
 from typing import Optional
+
+import structlog
 
 from app.db.session import async_session_maker
 from app.db.repositories.receipt_repo import ReceiptRepository
@@ -19,7 +20,7 @@ from app.services.image_validator import ImageValidator
 from app.services.gemini_vision_service import GeminiVisionService
 from app.services.enriched_profile_service import EnrichedProfileService
 
-logger = logging.getLogger(__name__)
+logger = structlog.get_logger(__name__)
 
 
 async def process_receipt_background(
@@ -37,10 +38,8 @@ async def process_receipt_background(
     by the time this runs. All exceptions are caught and recorded
     as FAILED status on the receipt.
     """
-    logger.info(
-        f"Background processing started: receipt_id={receipt_id}, "
-        f"user_id={user_id}, filename={filename}"
-    )
+    log = logger.bind(receipt_id=receipt_id, user_id=user_id)
+    log.info("receipt_uploaded", filename=filename, file_type=file_type, file_size_bytes=len(file_content))
 
     async with async_session_maker() as session:
         try:
@@ -58,18 +57,22 @@ async def process_receipt_background(
             t0 = time.monotonic()
             image_validator = ImageValidator()
             image_validator.raise_if_invalid(file_content, content_type)
-            logger.info(f"⏱ bg_image_validation: {time.monotonic() - t0:.3f}s")
+            log.info("image_validated", duration_ms=round((time.monotonic() - t0) * 1000, 1))
 
             # Step 3: Extract via Gemini Vision
             t0 = time.monotonic()
+            log.info("ocr_started", provider="gemini_vision")
             gemini_service = GeminiVisionService()
             extraction_result = await gemini_service.extract_receipt(
                 file_content, content_type
             )
-            logger.info(
-                f"⏱ bg_gemini_extraction: {time.monotonic() - t0:.3f}s - "
-                f"vendor={extraction_result.vendor_name}, "
-                f"items={len(extraction_result.line_items)}"
+            ocr_duration_ms = round((time.monotonic() - t0) * 1000, 1)
+            log.info(
+                "ocr_completed",
+                provider="gemini_vision",
+                duration_ms=ocr_duration_ms,
+                vendor_name=extraction_result.vendor_name,
+                items_count=len(extraction_result.line_items),
             )
 
             # Step 4: Create transactions
@@ -100,9 +103,10 @@ async def process_receipt_background(
                     weight_or_volume=item.weight_or_volume,
                     price_per_unit_measure=item.price_per_unit_measure,
                 )
-            logger.info(
-                f"⏱ bg_create_transactions: {time.monotonic() - t0:.3f}s "
-                f"({len(extraction_result.line_items)} items)"
+            log.info(
+                "transactions_created",
+                count=len(extraction_result.line_items),
+                duration_ms=round((time.monotonic() - t0) * 1000, 1),
             )
 
             # Step 5: Compute final total
@@ -137,9 +141,11 @@ async def process_receipt_background(
             )
             await session.commit()
 
-            logger.info(
-                f"Background processing completed: receipt_id={receipt_id}, "
-                f"store={cleaned_store_name}, items={len(extraction_result.line_items)}"
+            log.info(
+                "receipt_completed",
+                store_name=cleaned_store_name,
+                items_count=len(extraction_result.line_items),
+                total_amount=final_total,
             )
 
             # Step 7: Rebuild enriched profile
@@ -147,18 +153,11 @@ async def process_receipt_background(
                 await EnrichedProfileService.rebuild_profile(user_id, session)
                 await session.commit()
             except Exception as profile_err:
-                logger.warning(
-                    f"Failed to rebuild enriched profile after receipt {receipt_id}: "
-                    f"{profile_err}"
-                )
+                log.warning("enriched_profile_rebuild_failed", error=str(profile_err))
                 await session.rollback()
 
         except Exception as e:
-            logger.error(
-                f"Background processing failed: receipt_id={receipt_id}, "
-                f"error={e}",
-                exc_info=True,
-            )
+            log.error("ocr_failed", error=str(e), exc_info=True)
             await session.rollback()
             try:
                 await receipt_repo.update(
@@ -168,8 +167,5 @@ async def process_receipt_background(
                 )
                 await session.commit()
             except Exception as update_err:
-                logger.error(
-                    f"Failed to update receipt status to FAILED: "
-                    f"receipt_id={receipt_id}, error={update_err}"
-                )
+                log.error("receipt_status_update_failed", error=str(update_err))
                 await session.rollback()

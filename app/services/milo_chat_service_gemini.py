@@ -1,7 +1,9 @@
+import time
 from datetime import date, timedelta
 from typing import List, Optional, AsyncGenerator
 from collections import defaultdict
 
+import structlog
 from google import genai
 from google.genai import types
 from sqlalchemy import select, and_
@@ -15,6 +17,7 @@ from app.models.user_profile import UserProfile
 from app.schemas.chat import ChatMessage
 
 settings = get_settings()
+logger = structlog.get_logger(__name__)
 
 
 class MiloChatServiceGemini:
@@ -257,15 +260,22 @@ My question: {message}"""
             contents.append(types.Content(role="user", parts=[types.Part.from_text(text=user_content)]))
 
             # Call Gemini API
+            t0 = time.monotonic()
+            logger.info("gemini_api_call_started", model=self.MODEL, purpose="chat")
             response = self.client.models.generate_content(
                 model=self.MODEL,
                 contents=contents,
                 config=self._build_config(system_prompt),
             )
+            api_duration_ms = round((time.monotonic() - t0) * 1000, 1)
+            logger.info("gemini_api_call_completed", model=self.MODEL, purpose="chat", duration_ms=api_duration_ms, success=True)
 
             return response.text
 
+        except GeminiAPIError:
+            raise
         except Exception as e:
+            logger.error("gemini_api_call_completed", model=self.MODEL, purpose="chat", success=False, error=str(e))
             raise GeminiAPIError(
                 f"Gemini API error: {str(e)}",
                 details={"error_type": "api_error", "api_error": str(e)},
@@ -316,6 +326,8 @@ My question: {message}"""
             contents.append(types.Content(role="user", parts=[types.Part.from_text(text=user_content)]))
 
             # Call Gemini API with streaming
+            t0 = time.monotonic()
+            logger.info("gemini_api_call_started", model=self.MODEL, purpose="chat_stream")
             response = self.client.models.generate_content_stream(
                 model=self.MODEL,
                 contents=contents,
@@ -326,7 +338,13 @@ My question: {message}"""
                 if chunk.text:
                     yield chunk.text
 
+            api_duration_ms = round((time.monotonic() - t0) * 1000, 1)
+            logger.info("gemini_api_call_completed", model=self.MODEL, purpose="chat_stream", duration_ms=api_duration_ms, success=True)
+
+        except GeminiAPIError:
+            raise
         except Exception as e:
+            logger.error("gemini_api_call_completed", model=self.MODEL, purpose="chat_stream", success=False, error=str(e))
             raise GeminiAPIError(
                 f"Gemini API error: {str(e)}",
                 details={"error_type": "api_error", "api_error": str(e)},

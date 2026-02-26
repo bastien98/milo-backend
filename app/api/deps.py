@@ -1,6 +1,7 @@
 from typing import AsyncGenerator
 
-from fastapi import Depends
+import structlog
+from fastapi import Depends, Request
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -22,6 +23,7 @@ async def get_db() -> AsyncGenerator[AsyncSession, None]:
 
 
 async def get_current_db_user(
+    request: Request,
     firebase_user: FirebaseUser = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> User:
@@ -49,5 +51,9 @@ async def get_current_db_user(
         except IntegrityError:
             await db.rollback()
             user = await user_repo.get_by_firebase_uid(firebase_user.uid)
+
+    # Expose user_id for request logging middleware and bind to structlog context
+    request.state.user_id = str(user.id)
+    structlog.contextvars.bind_contextvars(user_id=str(user.id))
 
     return user

@@ -1,15 +1,15 @@
 import hashlib
-import logging
 import time
 from datetime import date, datetime, timezone
 from datetime import time as dt_time
 from typing import Optional
 
+import structlog
 from fastapi import UploadFile
 
 from app.models.enums import ReceiptStatus
 
-logger = logging.getLogger(__name__)
+logger = structlog.get_logger(__name__)
 from app.schemas.receipt import ReceiptUploadResponse, ExtractedItem
 from app.services.image_validator import ImageValidator
 from app.services.gemini_vision_service import GeminiVisionService
@@ -69,11 +69,14 @@ class ReceiptProcessorV2:
         file_content = await file.read()
         file_type = self._get_file_type(content_type)
         filename = file.filename or "receipt"
-        logger.info(f"⏱ file_read_and_validate: {time.monotonic() - t0:.3f}s ({len(file_content)} bytes)")
-
         logger.info(
-            f"Processing receipt: user_id={user_id}, filename={filename}, "
-            f"type={file_type}, size={len(file_content)} bytes"
+            "receipt_uploaded",
+            user_id=user_id,
+            filename=filename,
+            file_type=file_type,
+            file_size_bytes=len(file_content),
+            step="file_read_and_validate",
+            duration_ms=round((time.monotonic() - t0) * 1000, 1),
         )
 
         # Step 2: Create receipt record
@@ -85,7 +88,7 @@ class ReceiptProcessorV2:
             file_size=len(file_content),
             status=ReceiptStatus.PROCESSING,
         )
-        logger.info(f"⏱ create_receipt_record: {time.monotonic() - t0:.3f}s")
+        logger.info("receipt_record_created", receipt_id=receipt.id, duration_ms=round((time.monotonic() - t0) * 1000, 1))
 
         try:
             # Step 3: Validate image quality
@@ -94,7 +97,7 @@ class ReceiptProcessorV2:
                 file_content, content_type
             )
             warnings.extend(validation_warnings)
-            logger.info(f"⏱ image_validation: {time.monotonic() - t0:.3f}s")
+            logger.info("image_validated", receipt_id=receipt.id, duration_ms=round((time.monotonic() - t0) * 1000, 1))
 
             # Step 4: Check for duplicate (simple content hash)
             content_hash = self._compute_content_hash(file_content)
@@ -103,7 +106,7 @@ class ReceiptProcessorV2:
             if is_duplicate:
                 # Delete the receipt record we created
                 await self.receipt_repo.delete(receipt.id)
-                logger.info(f"Duplicate receipt detected: user_id={user_id}, hash={content_hash[:16]}...")
+                logger.info("duplicate_receipt_detected", user_id=user_id, content_hash=content_hash[:16])
 
                 warning_msg = "Duplicate receipt detected - not saved"
 
@@ -122,14 +125,19 @@ class ReceiptProcessorV2:
 
             # Step 5: Extract + normalize + categorize via Gemini Vision (single call)
             t0 = time.monotonic()
-            logger.info(f"Calling Gemini Vision for extraction: receipt_id={receipt.id}")
+            logger.info("ocr_started", receipt_id=receipt.id, user_id=user_id, provider="gemini_vision")
             extraction_result = await self.gemini_vision_service.extract_receipt(
                 file_content, content_type
             )
-            gemini_time = time.monotonic() - t0
+            ocr_duration_ms = round((time.monotonic() - t0) * 1000, 1)
             logger.info(
-                f"⏱ gemini_extraction: {gemini_time:.3f}s - "
-                f"vendor={extraction_result.vendor_name}, items={len(extraction_result.line_items)}"
+                "ocr_completed",
+                receipt_id=receipt.id,
+                user_id=user_id,
+                provider="gemini_vision",
+                duration_ms=ocr_duration_ms,
+                vendor_name=extraction_result.vendor_name,
+                items_count=len(extraction_result.line_items),
             )
 
             # Use cleaned store name (always lowercase for consistency)
@@ -185,7 +193,13 @@ class ReceiptProcessorV2:
                         price_per_unit_measure=item.price_per_unit_measure,
                     )
                 )
-            logger.info(f"⏱ create_transactions: {time.monotonic() - t0:.3f}s ({len(transactions)} items)")
+            logger.info(
+                "transactions_created",
+                receipt_id=receipt.id,
+                user_id=user_id,
+                count=len(transactions),
+                duration_ms=round((time.monotonic() - t0) * 1000, 1),
+            )
 
             # Use extracted total if available, otherwise calculate from items
             if extraction_result.total and extraction_result.total > 0:
@@ -216,7 +230,7 @@ class ReceiptProcessorV2:
                 total_savings=extraction_result.total_savings,
                 store_branch=extraction_result.store_branch,
             )
-            logger.info(f"⏱ update_receipt: {time.monotonic() - t0:.3f}s")
+            logger.info("receipt_completed", receipt_id=receipt.id, user_id=user_id, duration_ms=round((time.monotonic() - t0) * 1000, 1))
 
             # Step 8: Return results
             return ReceiptUploadResponse(

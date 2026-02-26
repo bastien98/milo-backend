@@ -1,10 +1,10 @@
-import logging
 import time
 from collections import defaultdict
 from datetime import date
 from math import ceil
 from typing import Optional
 
+import structlog
 from fastapi import APIRouter, BackgroundTasks, Depends, UploadFile, File, Query
 from fastapi.responses import JSONResponse
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -13,7 +13,7 @@ from app.api.deps import get_db, get_current_db_user
 from app.models.enums import ReceiptStatus
 from app.models.user import User
 
-logger = logging.getLogger(__name__)
+logger = structlog.get_logger(__name__)
 from app.schemas.receipt import (
     ReceiptUploadAcceptedResponse,
     ReceiptStatusResponse,
@@ -66,8 +66,11 @@ async def upload_receipt(
     file_type = file_type_mapping.get(content_type, "unknown")
 
     logger.info(
-        f"Receipt upload accepted: user_id={current_user.id}, "
-        f"filename={filename}, type={file_type}, size={len(file_content)} bytes"
+        "receipt_upload_accepted",
+        user_id=str(current_user.id),
+        filename=filename,
+        file_type=file_type,
+        file_size_bytes=len(file_content),
     )
 
     # Create receipt record with PENDING status

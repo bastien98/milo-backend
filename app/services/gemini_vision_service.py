@@ -11,11 +11,12 @@ Replaces Veryfi for OCR extraction and handles:
 
 import io
 import json
-import logging
+import time
 from dataclasses import dataclass
 from datetime import date
 from typing import Optional
 
+import structlog
 from google import genai
 from google.genai import types
 from PIL import Image
@@ -25,7 +26,7 @@ from app.config import get_settings
 from app.services.categories import CATEGORIES_PROMPT_LIST, GRANULAR_CATEGORIES, get_parent_category
 
 settings = get_settings()
-logger = logging.getLogger(__name__)
+logger = structlog.get_logger(__name__)
 
 
 @dataclass
@@ -275,14 +276,16 @@ Return a JSON object with this structure:
             compressed_bytes = output.getvalue()
 
             logger.info(
-                f"Image compressed: {len(image_content)} bytes → {len(compressed_bytes)} bytes "
-                f"({len(compressed_bytes) / len(image_content) * 100:.1f}%)"
+                "image_compressed",
+                original_bytes=len(image_content),
+                compressed_bytes=len(compressed_bytes),
+                ratio_pct=round(len(compressed_bytes) / len(image_content) * 100, 1),
             )
 
             return compressed_bytes, "image/jpeg"
 
         except Exception as e:
-            logger.warning(f"Image compression failed, using original: {e}")
+            logger.warning("image_compression_failed", error=str(e))
             return image_content, mime_type
 
     async def extract_receipt(
@@ -298,7 +301,7 @@ Return a JSON object with this structure:
         system_prompt = self.SYSTEM_PROMPT.format(categories=CATEGORIES_PROMPT_LIST)
 
         # Log input details for debugging
-        logger.info(f"Gemini extraction: mime_type={mime_type}, content_size={len(file_content)} bytes")
+        logger.info("gemini_api_call_started", model=self.MODEL, mime_type=mime_type, content_size=len(file_content))
 
         # Pass PDFs directly to Gemini, compress large images only
         if mime_type == "application/pdf":
@@ -308,6 +311,7 @@ Return a JSON object with this structure:
 
         extract_prompt = "Extract all line items from this receipt image. Return JSON only."
 
+        t0 = time.monotonic()
         try:
             response = self.client.models.generate_content(
                 model=self.MODEL,
@@ -325,42 +329,45 @@ Return a JSON object with this structure:
                     response_mime_type="application/json",
                 ),
             )
+            api_duration_ms = round((time.monotonic() - t0) * 1000, 1)
 
             # Check for truncation
             if response.candidates and response.candidates[0].finish_reason and response.candidates[0].finish_reason.name == "MAX_TOKENS":
-                logger.warning("Gemini response was truncated due to max_output_tokens limit")
+                logger.warning("gemini_response_truncated", model=self.MODEL)
 
             # Parse response - JSON mode guarantees valid JSON
             response_text = response.text
             if not response_text:
-                logger.error(f"Gemini returned empty response. Candidates: {getattr(response, 'candidates', 'N/A')}")
-                if hasattr(response, 'prompt_feedback'):
-                    logger.error(f"Prompt feedback: {response.prompt_feedback}")
+                logger.error("gemini_empty_response", model=self.MODEL, candidates=str(getattr(response, 'candidates', 'N/A')))
                 raise GeminiAPIError(
                     "Gemini returned empty response",
                     details={"error_type": "empty_response"},
                 )
             data = json.loads(response_text)
 
-            # Debug logging to see what Gemini returned
-            logger.info(f"Gemini response parsed: vendor={data.get('vendor_name')}, items={len(data.get('line_items', []))}")
-            if data.get('line_items'):
-                first_item = data['line_items'][0]
-                logger.info(f"First item sample: original_desc={first_item.get('original_description')}, "
-                           f"normalized={first_item.get('normalized_name')}, "
-                           f"granular_cat={first_item.get('granular_category')}")
+            logger.info(
+                "gemini_api_call_completed",
+                model=self.MODEL,
+                duration_ms=api_duration_ms,
+                success=True,
+                vendor_name=data.get("vendor_name"),
+                items_count=len(data.get("line_items", [])),
+            )
 
             return self._build_result(data)
 
         except json.JSONDecodeError as e:
-            logger.error(f"Failed to parse Gemini response: {e}")
-            logger.error(f"Raw response: {response_text[:500] if response_text else 'empty'}")
+            api_duration_ms = round((time.monotonic() - t0) * 1000, 1)
+            logger.error("gemini_api_call_completed", model=self.MODEL, duration_ms=api_duration_ms, success=False, error_type="parse_error", error=str(e))
             raise GeminiAPIError(
                 "Failed to parse extraction response",
                 details={"error_type": "parse_error", "parse_error": str(e)},
             )
+        except GeminiAPIError:
+            raise
         except Exception as e:
-            logger.exception(f"Extraction failed: {e}")
+            api_duration_ms = round((time.monotonic() - t0) * 1000, 1)
+            logger.error("gemini_api_call_completed", model=self.MODEL, duration_ms=api_duration_ms, success=False, error_type="unexpected", error=str(e), exc_info=True)
             raise GeminiAPIError(
                 f"Extraction failed: {str(e)}",
                 details={"error_type": "unexpected", "error": str(e)},
@@ -374,7 +381,7 @@ Return a JSON object with this structure:
             try:
                 receipt_date = date.fromisoformat(data["receipt_date"])
             except ValueError:
-                logger.warning(f"Could not parse date: {data.get('receipt_date')}")
+                logger.warning("gemini_date_parse_failed", raw_date=data.get("receipt_date"))
 
         # Build line items
         line_items = []
@@ -382,7 +389,7 @@ Return a JSON object with this structure:
             granular = item.get("granular_category", "Other")
             # Validate granular category, fallback to "Other"
             if granular not in GRANULAR_CATEGORIES:
-                logger.warning(f"Unknown granular category: {granular}, using 'Other'")
+                logger.warning("unknown_granular_category", category=granular)
                 granular = "Other"
             parent = get_parent_category(granular)
 
@@ -401,7 +408,7 @@ Return a JSON object with this structure:
             try:
                 total_price = float(total_price)
             except (ValueError, TypeError):
-                logger.warning(f"Invalid total_price: {total_price}, skipping item")
+                logger.warning("invalid_total_price", total_price=total_price)
                 continue
 
             unit_price = item.get("unit_price")
