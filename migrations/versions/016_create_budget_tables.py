@@ -8,13 +8,14 @@ Creates the budgets and budget_history tables that the budget
 endpoints depend on. Uses IF NOT EXISTS since these tables may
 already exist from a prior create_all() run.
 """
+
 from typing import Sequence, Union
 
 from alembic import op
 
 # revision identifiers, used by Alembic.
-revision: str = '016_create_budget_tables'
-down_revision: Union[str, None] = '015_drop_ai_tables'
+revision: str = "016_create_budget_tables"
+down_revision: Union[str, None] = "015_drop_ai_tables"
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 
@@ -52,7 +53,9 @@ def upgrade() -> None:
             UNIQUE (user_id, month)
         )
     """)
-    op.execute("CREATE INDEX IF NOT EXISTS idx_budget_history_user_month ON budget_history(user_id, month)")
+    op.execute(
+        "CREATE INDEX IF NOT EXISTS idx_budget_history_user_month ON budget_history(user_id, month)"
+    )
 
 
 def downgrade() -> None:

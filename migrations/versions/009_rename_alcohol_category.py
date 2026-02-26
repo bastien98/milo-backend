@@ -6,6 +6,7 @@ Create Date: 2026-02-08
 
 Updates existing transactions to use the new broader category name.
 """
+
 from typing import Sequence, Union
 
 from alembic import op

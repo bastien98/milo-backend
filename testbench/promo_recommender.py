@@ -82,9 +82,7 @@ RERANK_SCORE_THRESHOLD = 0.55  # Min relevance score to keep
 GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "")
 ANTHROPIC_API_KEY = os.environ.get("ANTHROPIC_API_KEY", "")
 
-logging.basicConfig(
-    level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s"
-)
+logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 logger = logging.getLogger(__name__)
 
 
@@ -118,8 +116,12 @@ async def fetch_enriched_profile(user_id: str) -> dict:
         return {
             "shopping_habits": shopping_habits,
             "promo_interest_items": promo_interest_items,
-            "data_period_start": str(row["data_period_start"]) if row["data_period_start"] else None,
-            "data_period_end": str(row["data_period_end"]) if row["data_period_end"] else None,
+            "data_period_start": str(row["data_period_start"])
+            if row["data_period_start"]
+            else None,
+            "data_period_end": str(row["data_period_end"])
+            if row["data_period_end"]
+            else None,
             "receipts_analyzed": row["receipts_analyzed"],
         }
     finally:
@@ -168,7 +170,9 @@ def search_promos_for_item(pc: Pinecone, index, item: dict) -> list[dict]:
     expiry_filter = {"validity_end_epoch": {"$gte": _today_epoch()}}
 
     if granular_category:
-        filter_dict = {"$and": [{"granular_category": {"$eq": granular_category}}, expiry_filter]}
+        filter_dict = {
+            "$and": [{"granular_category": {"$eq": granular_category}}, expiry_filter]
+        }
     else:
         filter_dict = expiry_filter
 
@@ -192,8 +196,12 @@ def search_promos_for_item(pc: Pinecone, index, item: dict) -> list[dict]:
 
         # Fallback without category filter (still enforce expiry)
         if not hits and granular_category:
-            logger.info(f"    No results with category filter for '{query_text}', retrying without category...")
-            hits = _pinecone_search_and_rerank(index, query_text, filter_dict=expiry_filter)
+            logger.info(
+                f"    No results with category filter for '{query_text}', retrying without category..."
+            )
+            hits = _pinecone_search_and_rerank(
+                index, query_text, filter_dict=expiry_filter
+            )
 
         # Deduplicate across brand queries
         for hit in hits:
@@ -217,10 +225,16 @@ def search_promos_for_item(pc: Pinecone, index, item: dict) -> list[dict]:
     # --- Fallback: if no results above threshold, try broader category search ---
     if not relevant and granular_category and interest_category != "category_fallback":
         # Use category name as a broader search term (e.g., "salami" from "Salami & Sausage")
-        category_term = granular_category.split(" & ")[0].lower()  # "Salami & Sausage" -> "salami"
+        category_term = granular_category.split(" & ")[
+            0
+        ].lower()  # "Salami & Sausage" -> "salami"
         if category_term != normalized_name:
-            logger.info(f"    No high-relevance matches, trying broader search with '{category_term}'...")
-            fallback_hits = _pinecone_search_and_rerank(index, f"{category_term}{cat_suffix}", filter_dict)
+            logger.info(
+                f"    No high-relevance matches, trying broader search with '{category_term}'..."
+            )
+            fallback_hits = _pinecone_search_and_rerank(
+                index, f"{category_term}{cat_suffix}", filter_dict
+            )
             for hit in fallback_hits:
                 score = hit.get("_score", 0)
                 if score >= RERANK_SCORE_THRESHOLD:
@@ -253,7 +267,9 @@ def _is_valid_promo(promo: dict) -> bool:
     return True
 
 
-def _pinecone_search_and_rerank(index, query_text: str, filter_dict: dict | None) -> list[dict]:
+def _pinecone_search_and_rerank(
+    index, query_text: str, filter_dict: dict | None
+) -> list[dict]:
     """Execute integrated search + rerank in a single Pinecone API call.
 
     This matches the Pinecone console behavior — the reranker runs server-side
@@ -277,7 +293,9 @@ def _pinecone_search_and_rerank(index, query_text: str, filter_dict: dict | None
 
     hits = []
     try:
-        results = index.search_records(namespace="__default__", query=query, rerank=rerank)
+        results = index.search_records(
+            namespace="__default__", query=query, rerank=rerank
+        )
         hits = _extract_hits(results)
     except (AttributeError, TypeError):
         try:
@@ -297,18 +315,18 @@ def _pinecone_search_and_rerank(index, query_text: str, filter_dict: dict | None
         )
     logger.info(f"    [search+rerank] {len(hits)} results returned")
 
-    print(f"\n{'─'*60}")
+    print(f"\n{'─' * 60}")
     print(f"SEARCH+RERANK RESULTS for query: '{query_text}'")
-    print(f"{'─'*60}")
+    print(f"{'─' * 60}")
     for i, h in enumerate(hits):
         fields = h.get("fields", {})
         status = "KEEP" if h.get("_score", 0) >= RERANK_SCORE_THRESHOLD else "DROP"
-        print(f"\n  #{i+1}  score={h.get('_score', '?'):.4f}  [{status}]")
+        print(f"\n  #{i + 1}  score={h.get('_score', '?'):.4f}  [{status}]")
         for k, v in sorted(fields.items()):
             print(f"    {k}: {v}")
     if not hits:
         print("  (no results)")
-    print(f"{'─'*60}\n")
+    print(f"{'─' * 60}\n")
 
     return hits
 
@@ -369,9 +387,13 @@ def _normalize_hit(hit) -> dict:
         "_score": getattr(hit, "_score", getattr(hit, "score", 0)),
     }
     if hasattr(hit, "fields"):
-        d["fields"] = dict(hit.fields) if not isinstance(hit.fields, dict) else hit.fields
+        d["fields"] = (
+            dict(hit.fields) if not isinstance(hit.fields, dict) else hit.fields
+        )
     elif hasattr(hit, "metadata"):
-        d["fields"] = dict(hit.metadata) if not isinstance(hit.metadata, dict) else hit.metadata
+        d["fields"] = (
+            dict(hit.metadata) if not isinstance(hit.metadata, dict) else hit.metadata
+        )
     else:
         d["fields"] = {}
     return d
@@ -519,7 +541,9 @@ Items marked [CATEGORY FALLBACK] represent broader category interests — person
 - Respond with ONLY valid JSON. No markdown, no code blocks, no extra text."""
 
 
-def generate_recommendations(profile: dict, promo_results: dict[str, list[dict]]) -> dict:
+def generate_recommendations(
+    profile: dict, promo_results: dict[str, list[dict]]
+) -> dict:
     """Send the full user context + matched promos to an LLM for expert analysis.
 
     Returns a structured dict with keys: weekly_savings, top_picks, stores, smart_switch, summary.
@@ -565,8 +589,12 @@ def _call_gemini(user_message: str) -> str:
         logger.warning(f"Gemini returned None text. Candidates: {response.candidates}")
         if response.candidates:
             for c in response.candidates:
-                logger.warning(f"  finish_reason={c.finish_reason}, safety={c.safety_ratings}")
-        raise ValueError("Gemini returned empty response — likely blocked by safety filters")
+                logger.warning(
+                    f"  finish_reason={c.finish_reason}, safety={c.safety_ratings}"
+                )
+        raise ValueError(
+            "Gemini returned empty response — likely blocked by safety filters"
+        )
     return response.text
 
 
@@ -689,53 +717,80 @@ def _build_llm_context(profile: dict, promo_results: dict[str, list[dict]]) -> s
 
     # ── Section 1: Compact user profile ──
     parts.append("## USER PROFILE")
-    parts.append(f"Receipts: {profile['receipts_analyzed']} ({profile['data_period_start']} to {profile['data_period_end']})")
-    parts.append(f"Total spend: €{habits.get('total_spend', 0):.2f} | Avg receipt: €{habits.get('avg_receipt_total', 0):.2f} | {habits.get('shopping_frequency_per_week', 0)}x/week")
+    parts.append(
+        f"Receipts: {profile['receipts_analyzed']} ({profile['data_period_start']} to {profile['data_period_end']})"
+    )
+    parts.append(
+        f"Total spend: €{habits.get('total_spend', 0):.2f} | Avg receipt: €{habits.get('avg_receipt_total', 0):.2f} | {habits.get('shopping_frequency_per_week', 0)}x/week"
+    )
 
     # Stores
     stores = habits.get("preferred_stores", [])
     if stores:
-        store_lines = [f"  {s['name']}: €{s['spend']:.2f} ({s['pct']}%, {s['visits']} visits)" for s in stores[:5]]
+        store_lines = [
+            f"  {s['name']}: €{s['spend']:.2f} ({s['pct']}%, {s['visits']} visits)"
+            for s in stores[:5]
+        ]
         parts.append("Stores:\n" + "\n".join(store_lines))
 
     # Health
     if habits.get("avg_health_score") is not None:
-        parts.append(f"Health score: {habits['avg_health_score']}/5 | Premium ratio: {habits.get('premium_brand_ratio', 0):.0%}")
+        parts.append(
+            f"Health score: {habits['avg_health_score']}/5 | Premium ratio: {habits.get('premium_brand_ratio', 0):.0%}"
+        )
 
     # Health trend (new)
     ht = habits.get("health_trend")
     if ht and ht.get("trend"):
-        parts.append(f"Health trend: {ht['trend']} (4w avg: {ht.get('current_4w_avg', '?')} vs prev: {ht.get('previous_4w_avg', '?')})")
-        parts.append(f"Fresh produce: {ht.get('fresh_produce_pct', 0)}% of food | Ready meals: {ht.get('ready_meals_pct', 0)}%")
+        parts.append(
+            f"Health trend: {ht['trend']} (4w avg: {ht.get('current_4w_avg', '?')} vs prev: {ht.get('previous_4w_avg', '?')})"
+        )
+        parts.append(
+            f"Fresh produce: {ht.get('fresh_produce_pct', 0)}% of food | Ready meals: {ht.get('ready_meals_pct', 0)}%"
+        )
 
     # Savings (new)
     ss = habits.get("savings_summary")
     if ss:
-        parts.append(f"Current savings: €{ss['total_saved']:.2f} total ({ss['savings_rate_pct']}% rate, ~€{ss['monthly_savings_avg']:.2f}/mo)")
+        parts.append(
+            f"Current savings: €{ss['total_saved']:.2f} total ({ss['savings_rate_pct']}% rate, ~€{ss['monthly_savings_avg']:.2f}/mo)"
+        )
 
     # Brand savings potential (new)
     bsp = habits.get("brand_savings_potential")
     if bsp:
-        parts.append(f"Brand split: €{bsp['premium_spend']:.2f} premium / €{bsp['house_brand_spend']:.2f} house brand / €{bsp['unbranded_spend']:.2f} unbranded")
-        if bsp['estimated_monthly_savings_if_switch'] > 0:
-            parts.append(f"Potential savings switching to house brands: €{bsp['estimated_monthly_savings_if_switch']:.2f}/mo")
+        parts.append(
+            f"Brand split: €{bsp['premium_spend']:.2f} premium / €{bsp['house_brand_spend']:.2f} house brand / €{bsp['unbranded_spend']:.2f} unbranded"
+        )
+        if bsp["estimated_monthly_savings_if_switch"] > 0:
+            parts.append(
+                f"Potential savings switching to house brands: €{bsp['estimated_monthly_savings_if_switch']:.2f}/mo"
+            )
 
     # Indulgence (new)
     ind = habits.get("indulgence_tracker")
     if ind and ind.get("total_indulgence", 0) > 0:
-        parts.append(f"Indulgence: €{ind['total_indulgence']:.2f} ({ind['indulgence_pct']}%) — ~€{ind['estimated_yearly']:.0f}/yr")
+        parts.append(
+            f"Indulgence: €{ind['total_indulgence']:.2f} ({ind['indulgence_pct']}%) — ~€{ind['estimated_yearly']:.0f}/yr"
+        )
 
     # Store loyalty (new)
     sl = habits.get("store_loyalty")
     if sl:
-        parts.append(f"Store concentration: {sl['concentration_score']:.2f} HHI | {sl['stores_visited_count']} stores visited")
+        parts.append(
+            f"Store concentration: {sl['concentration_score']:.2f} HHI | {sl['stores_visited_count']} stores visited"
+        )
 
     # Shopping efficiency (new)
     se = habits.get("shopping_efficiency")
     if se:
-        parts.append(f"Small trips (<5 items): {se['small_trips_count']} ({se['small_trips_pct']}%), avg €{se['small_trips_avg_cost']:.2f}")
+        parts.append(
+            f"Small trips (<5 items): {se['small_trips_count']} ({se['small_trips_pct']}%), avg €{se['small_trips_avg_cost']:.2f}"
+        )
         if se.get("weekend_premium_pct", 0) != 0:
-            parts.append(f"Weekend premium: {se['weekend_premium_pct']:+.1f}% vs weekday")
+            parts.append(
+                f"Weekend premium: {se['weekend_premium_pct']:+.1f}% vs weekday"
+            )
 
     # ── Section 2: Interest items with metrics ──
     parts.append("\n## ITEMS TO FIND DEALS FOR")
@@ -804,7 +859,11 @@ def _build_llm_context(profile: dict, promo_results: dict[str, list[dict]]) -> s
 
             # Include page_number and promo_folder_url for passthrough
             page_str = f" | page={p['page_number']}" if p.get("page_number") else ""
-            folder_str = f" | folder_url={p['promo_folder_url']}" if p.get("promo_folder_url") else ""
+            folder_str = (
+                f" | folder_url={p['promo_folder_url']}"
+                if p.get("promo_folder_url")
+                else ""
+            )
 
             parts.append(
                 f"- {p.get('brand', '?')} · {p.get('original_description', p.get('normalized_name', '?'))}\n"
@@ -812,7 +871,9 @@ def _build_llm_context(profile: dict, promo_results: dict[str, list[dict]]) -> s
                 f"  {p.get('source_retailer', '?')} | {p.get('unit_info') or '?'} | {p.get('validity_start', '?')} to {p.get('validity_end', '?')}{page_str}{folder_str}"
             )
 
-    parts.append(f"\n**{total_promos} promos matched across {items_with_promos}/{len(promo_results)} items.**")
+    parts.append(
+        f"\n**{total_promos} promos matched across {items_with_promos}/{len(promo_results)} items.**"
+    )
     parts.append("\nGenerate the weekly promo briefing now.")
 
     return "\n".join(parts)
@@ -888,7 +949,9 @@ def main():
     llm_provider = (
         "Gemini" if GEMINI_API_KEY else "Claude" if ANTHROPIC_API_KEY else "None"
     )
-    logger.info(f"\nStep 3: Generating personalized recommendations via {llm_provider}...")
+    logger.info(
+        f"\nStep 3: Generating personalized recommendations via {llm_provider}..."
+    )
 
     recommendations = generate_recommendations(profile, all_promo_results)
 
@@ -906,12 +969,16 @@ def main():
     if top_picks:
         print(f"Top picks ({len(top_picks)}):")
         for i, pick in enumerate(top_picks, 1):
-            print(f"  {i}. {pick.get('brand', '?')} {pick.get('product_name', '?')} — €{pick.get('promo_price', 0):.2f} (save €{pick.get('savings', 0):.2f}) at {pick.get('store', '?')}")
+            print(
+                f"  {i}. {pick.get('brand', '?')} {pick.get('product_name', '?')} — €{pick.get('promo_price', 0):.2f} (save €{pick.get('savings', 0):.2f}) at {pick.get('store', '?')}"
+            )
     stores = recommendations.get("stores", [])
     if stores:
         print(f"Stores ({len(stores)}):")
         for store in stores:
-            print(f"  {store.get('store_color', '⬜')} {store.get('store_name', '?')} — {len(store.get('items', []))} items, save €{store.get('total_savings', 0):.2f}")
+            print(
+                f"  {store.get('store_color', '⬜')} {store.get('store_name', '?')} — {len(store.get('items', []))} items, save €{store.get('total_savings', 0):.2f}"
+            )
 
 
 if __name__ == "__main__":

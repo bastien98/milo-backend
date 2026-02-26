@@ -105,7 +105,9 @@ def upload_receipt(
 
     return {
         "status_code": response.status_code,
-        "response": response.json() if response.headers.get("content-type", "").startswith("application/json") else response.text,
+        "response": response.json()
+        if response.headers.get("content-type", "").startswith("application/json")
+        else response.text,
     }
 
 
@@ -169,9 +171,9 @@ Environment Variables:
     # Determine API URL
     api_url = args.api_url if args.api_url else API_URLS[args.env]
 
-    print(f"\n{'='*60}")
+    print(f"\n{'=' * 60}")
     print("PDF Receipt Ingestion Script")
-    print(f"{'='*60}")
+    print(f"{'=' * 60}")
     print(f"Target API: {api_url}")
     print(f"Directory:  {args.directory}")
     if args.date:
@@ -207,9 +209,9 @@ Environment Variables:
         sys.exit(1)
 
     # Upload each file
-    print(f"\n{'='*60}")
+    print(f"\n{'=' * 60}")
     print("Starting uploads...")
-    print(f"{'='*60}\n")
+    print(f"{'=' * 60}\n")
 
     results = {
         "success": [],
@@ -230,37 +232,65 @@ Environment Variables:
                     print("  ⚠ Duplicate receipt detected (skipped)")
                     results["duplicates"].append(pdf_file.name)
                 else:
-                    receipt_id = response.get("receipt_id", "N/A") if isinstance(response, dict) else "N/A"
-                    store = response.get("store_name", "Unknown") if isinstance(response, dict) else "Unknown"
-                    items = response.get("items_count", 0) if isinstance(response, dict) else 0
-                    total = response.get("total_amount", 0) if isinstance(response, dict) else 0
+                    receipt_id = (
+                        response.get("receipt_id", "N/A")
+                        if isinstance(response, dict)
+                        else "N/A"
+                    )
+                    store = (
+                        response.get("store_name", "Unknown")
+                        if isinstance(response, dict)
+                        else "Unknown"
+                    )
+                    items = (
+                        response.get("items_count", 0)
+                        if isinstance(response, dict)
+                        else 0
+                    )
+                    total = (
+                        response.get("total_amount", 0)
+                        if isinstance(response, dict)
+                        else 0
+                    )
                     print("  ✓ Success!")
                     print(f"    Receipt ID: {receipt_id}")
                     print(f"    Store: {store}")
                     print(f"    Items: {items}, Total: €{total:.2f}")
-                    results["success"].append({
-                        "file": pdf_file.name,
-                        "receipt_id": receipt_id,
-                        "store": store,
-                        "items": items,
-                        "total": total,
-                    })
+                    results["success"].append(
+                        {
+                            "file": pdf_file.name,
+                            "receipt_id": receipt_id,
+                            "store": store,
+                            "items": items,
+                            "total": total,
+                        }
+                    )
             elif status_code == 401:
                 print("  ✗ Authentication failed - check your Firebase token")
-                results["failed"].append({"file": pdf_file.name, "error": "Authentication failed"})
+                results["failed"].append(
+                    {"file": pdf_file.name, "error": "Authentication failed"}
+                )
                 if not args.continue_on_error:
                     print("\nStopping due to authentication error.")
                     break
             elif status_code == 429:
                 print("  ✗ Rate limit exceeded")
                 if isinstance(response, dict):
-                    print(f"    Used: {response.get('receipts_used')}/{response.get('receipts_limit')}")
-                results["failed"].append({"file": pdf_file.name, "error": "Rate limit exceeded"})
+                    print(
+                        f"    Used: {response.get('receipts_used')}/{response.get('receipts_limit')}"
+                    )
+                results["failed"].append(
+                    {"file": pdf_file.name, "error": "Rate limit exceeded"}
+                )
                 if not args.continue_on_error:
                     print("\nStopping due to rate limit.")
                     break
             else:
-                error_msg = response.get("detail", str(response)) if isinstance(response, dict) else str(response)
+                error_msg = (
+                    response.get("detail", str(response))
+                    if isinstance(response, dict)
+                    else str(response)
+                )
                 print(f"  ✗ Failed (HTTP {status_code}): {error_msg}")
                 results["failed"].append({"file": pdf_file.name, "error": error_msg})
                 if not args.continue_on_error:
@@ -285,9 +315,9 @@ Environment Variables:
         print()
 
     # Print summary
-    print(f"\n{'='*60}")
+    print(f"\n{'=' * 60}")
     print("Summary")
-    print(f"{'='*60}")
+    print(f"{'=' * 60}")
     print(f"  Successful uploads: {len(results['success'])}")
     print(f"  Duplicates skipped: {len(results['duplicates'])}")
     print(f"  Failed uploads:     {len(results['failed'])}")

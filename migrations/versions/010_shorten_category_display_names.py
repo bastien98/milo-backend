@@ -7,6 +7,7 @@ Create Date: 2026-02-08
 Renames verbose sub-category names to short, clean display names.
 Updates both transactions.category and budgets.category_allocations JSONB.
 """
+
 from typing import Sequence, Union
 
 from alembic import op

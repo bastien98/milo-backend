@@ -33,7 +33,9 @@ def _budget_to_response(budget) -> BudgetResponse:
         user_id=budget.user_id,
         monthly_amount=budget.monthly_amount,
         category_allocations=[
-            CategoryAllocation(category=alloc.get("category", ""), amount=alloc.get("amount", 0))
+            CategoryAllocation(
+                category=alloc.get("category", ""), amount=alloc.get("amount", 0)
+            )
             for alloc in (budget.category_allocations or [])
         ]
         if budget.category_allocations
@@ -90,7 +92,10 @@ async def get_budget_history(
                 user_id=entry.user_id,
                 monthly_amount=entry.monthly_amount,
                 category_allocations=[
-                    CategoryAllocation(category=alloc.get("category", ""), amount=alloc.get("amount", 0))
+                    CategoryAllocation(
+                        category=alloc.get("category", ""),
+                        amount=alloc.get("amount", 0),
+                    )
                     for alloc in (entry.category_allocations or [])
                 ]
                 if entry.category_allocations
@@ -137,7 +142,11 @@ async def auto_rollover_budget(
         current_user.id, previous_month
     )
 
-    if not previous_budget or not previous_budget.was_smart_budget or previous_budget.was_deleted:
+    if (
+        not previous_budget
+        or not previous_budget.was_smart_budget
+        or previous_budget.was_deleted
+    ):
         return None
 
     # Create new budget copying from previous month
@@ -182,7 +191,9 @@ async def create_budget(
                 for alloc in budget_data.category_allocations
             ]
 
-        logger.info(f"Creating budget for user {current_user.id}: amount={budget_data.monthly_amount}")
+        logger.info(
+            f"Creating budget for user {current_user.id}: amount={budget_data.monthly_amount}"
+        )
 
         budget = await repo.upsert(
             user_id=current_user.id,
@@ -280,7 +291,10 @@ async def update_budget(
     },
 )
 async def delete_budget(
-    month: str = Query(None, description="Month to delete in YYYY-MM format. Defaults to current month."),
+    month: str = Query(
+        None,
+        description="Month to delete in YYYY-MM format. Defaults to current month.",
+    ),
     current_user: User = Depends(get_current_db_user),
     db: AsyncSession = Depends(get_db),
 ):

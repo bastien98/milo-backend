@@ -53,6 +53,4 @@ class Budget(Base):
     # Relationships
     user: Mapped["User"] = relationship("User", back_populates="budget")
 
-    __table_args__ = (
-        Index("ix_budgets_user_id", "user_id"),
-    )
+    __table_args__ = (Index("ix_budgets_user_id", "user_id"),)

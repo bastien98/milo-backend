@@ -9,6 +9,7 @@ the GRANULAR_CATEGORIES mapping (Meat & Fish, Fresh Produce,
 Snacks & Sweets, Drinks (Soft/Soda), Drinks (Water)).
 Uses granular_category column for accurate splits.
 """
+
 from typing import Sequence, Union
 
 from alembic import op
@@ -75,10 +76,18 @@ def upgrade() -> None:
     """)
 
     # --- Catch-all for any remaining old names ---
-    op.execute("UPDATE transactions SET category = 'Meat' WHERE category ILIKE 'Meat%Fish%'")
-    op.execute("UPDATE transactions SET category = 'Meat' WHERE category ILIKE 'Meat%Seafood%'")
-    op.execute("UPDATE transactions SET category = 'Drinks' WHERE category ILIKE 'Drinks%Soft%'")
-    op.execute("UPDATE transactions SET category = 'Drinks' WHERE category ILIKE 'Drinks%Water%'")
+    op.execute(
+        "UPDATE transactions SET category = 'Meat' WHERE category ILIKE 'Meat%Fish%'"
+    )
+    op.execute(
+        "UPDATE transactions SET category = 'Meat' WHERE category ILIKE 'Meat%Seafood%'"
+    )
+    op.execute(
+        "UPDATE transactions SET category = 'Drinks' WHERE category ILIKE 'Drinks%Soft%'"
+    )
+    op.execute(
+        "UPDATE transactions SET category = 'Drinks' WHERE category ILIKE 'Drinks%Water%'"
+    )
 
 
 def downgrade() -> None:

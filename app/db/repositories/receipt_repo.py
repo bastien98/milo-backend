@@ -14,9 +14,7 @@ class ReceiptRepository:
 
     async def get_by_id(self, receipt_id: str) -> Optional[Receipt]:
         """Get receipt by ID."""
-        result = await self.db.execute(
-            select(Receipt).where(Receipt.id == receipt_id)
-        )
+        result = await self.db.execute(select(Receipt).where(Receipt.id == receipt_id))
         return result.scalar_one_or_none()
 
     async def get_by_id_and_user(

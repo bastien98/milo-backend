@@ -10,14 +10,15 @@ This migration adds fields for semantic search and granular categorization:
 - is_deposit: Flag for Leeggoed/Vidange deposit items
 - granular_category: Detailed category (~200 options)
 """
+
 from typing import Sequence, Union
 
 import sqlalchemy as sa
 from alembic import op
 
 # revision identifiers, used by Alembic.
-revision: str = '003_add_normalized_fields'
-down_revision: Union[str, None] = '002_add_receipt_source'
+revision: str = "003_add_normalized_fields"
+down_revision: Union[str, None] = "002_add_receipt_source"
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 

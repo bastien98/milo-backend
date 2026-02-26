@@ -21,7 +21,9 @@ logger = logging.getLogger(__name__)
 settings = get_settings()
 
 
-def build_rate_limit_headers(status: RateLimitStatus, account_for_current: bool = True) -> dict:
+def build_rate_limit_headers(
+    status: RateLimitStatus, account_for_current: bool = True
+) -> dict:
     """
     Build rate limit response headers.
 
@@ -140,7 +142,9 @@ async def stream_response(
             yield f"data: {error_data}\n\n"
         except Exception as e:
             logger.exception(f"Streaming chat error: {e}")
-            error_data = json.dumps({"type": "error", "error": "Failed to process chat request"})
+            error_data = json.dumps(
+                {"type": "error", "error": "Failed to process chat request"}
+            )
             yield f"data: {error_data}\n\n"
 
 
@@ -219,9 +223,7 @@ async def chat_test(
 
     # Get first user or user by email
     if user_email:
-        result = await db.execute(
-            select(User).where(User.email == user_email)
-        )
+        result = await db.execute(select(User).where(User.email == user_email))
     else:
         result = await db.execute(select(User).limit(1))
 
@@ -260,9 +262,7 @@ async def chat_test_stream(
 
     # Get first user or user by email
     if user_email:
-        result = await db.execute(
-            select(User).where(User.email == user_email)
-        )
+        result = await db.execute(select(User).where(User.email == user_email))
     else:
         result = await db.execute(select(User).limit(1))
 

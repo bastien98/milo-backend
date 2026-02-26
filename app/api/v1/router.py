@@ -1,6 +1,15 @@
 from fastapi import APIRouter
 
-from app.api.v1 import analytics, chat, health, profile, promo_chat, rate_limit, receipts, transactions
+from app.api.v1 import (
+    analytics,
+    chat,
+    health,
+    profile,
+    promo_chat,
+    rate_limit,
+    receipts,
+    transactions,
+)
 
 api_router = APIRouter()
 

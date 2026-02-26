@@ -8,14 +8,15 @@ This migration adds fields for brand tracking and premium classification:
 - normalized_brand: Brand name for semantic search (lowercase)
 - is_premium: Boolean flag for premium vs store/house brand
 """
+
 from typing import Sequence, Union
 
 import sqlalchemy as sa
 from alembic import op
 
 # revision identifiers, used by Alembic.
-revision: str = '004_add_brand_premium'
-down_revision: Union[str, None] = '003_add_normalized_fields'
+revision: str = "004_add_brand_premium"
+down_revision: Union[str, None] = "003_add_normalized_fields"
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 

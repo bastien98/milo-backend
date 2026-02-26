@@ -9,6 +9,7 @@ bank transactions can be linked to scanned receipts when a duplicate is
 detected. The BankTransactionStatus enum gains a 'receipt_matched' value
 (stored as VARCHAR string, no PostgreSQL enum alteration needed).
 """
+
 from typing import Sequence, Union
 
 import sqlalchemy as sa

@@ -19,7 +19,9 @@ SKIP_PATHS = {"/health", "/docs", "/openapi.json", "/redoc"}
 
 
 class RequestLoggingMiddleware(BaseHTTPMiddleware):
-    async def dispatch(self, request: Request, call_next: RequestResponseEndpoint) -> Response:
+    async def dispatch(
+        self, request: Request, call_next: RequestResponseEndpoint
+    ) -> Response:
         if request.url.path in SKIP_PATHS:
             return await call_next(request)
 

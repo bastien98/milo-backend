@@ -10,7 +10,11 @@ from app.core.exceptions import ResourceNotFoundError
 from app.db.repositories.receipt_repo import ReceiptRepository
 from app.db.repositories.transaction_repo import TransactionRepository
 from app.models.user import User
-from app.schemas.receipt import ReceiptListResponse, ReceiptResponse, ReceiptUploadResponse
+from app.schemas.receipt import (
+    ReceiptListResponse,
+    ReceiptResponse,
+    ReceiptUploadResponse,
+)
 from app.services.enriched_profile_service import EnrichedProfileService
 from app.services.receipt_processor_v2 import ReceiptProcessorV2
 
@@ -21,8 +25,12 @@ router = APIRouter()
 
 @router.get("", response_model=ReceiptListResponse)
 async def list_receipts(
-    start_date: Optional[date] = Query(None, description="Filter by start date (receipt date)"),
-    end_date: Optional[date] = Query(None, description="Filter by end date (receipt date)"),
+    start_date: Optional[date] = Query(
+        None, description="Filter by start date (receipt date)"
+    ),
+    end_date: Optional[date] = Query(
+        None, description="Filter by end date (receipt date)"
+    ),
     page: int = Query(1, ge=1),
     page_size: int = Query(20, ge=1, le=100),
     db: AsyncSession = Depends(get_db),

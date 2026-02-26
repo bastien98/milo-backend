@@ -99,18 +99,26 @@ class AnalyticsService:
             set(t.receipt_id for t in transactions if t.receipt_id)
 
         # Get split-adjusted amounts for all transactions
-        tx_amounts = await self.split_calc.get_transaction_user_amounts(user_id, transactions)
+        tx_amounts = await self.split_calc.get_transaction_user_amounts(
+            user_id, transactions
+        )
 
         # Calculate totals (split-adjusted)
         total_spend = sum(amount for _, amount in tx_amounts)
         transaction_count = len(transactions)
 
         # Calculate average health score (only for items with health scores)
-        health_scores = [t.health_score for t in transactions if t.health_score is not None]
-        average_health_score = round(sum(health_scores) / len(health_scores), 2) if health_scores else None
+        health_scores = [
+            t.health_score for t in transactions if t.health_score is not None
+        ]
+        average_health_score = (
+            round(sum(health_scores) / len(health_scores), 2) if health_scores else None
+        )
 
         # Group by store (including health scores for per-store average)
-        store_data = defaultdict(lambda: {"amount": 0.0, "receipt_ids": set(), "health_scores": []})
+        store_data = defaultdict(
+            lambda: {"amount": 0.0, "receipt_ids": set(), "health_scores": []}
+        )
         for t, amount in tx_amounts:
             store_data[t.store_name]["amount"] += amount
             if t.receipt_id:
@@ -142,7 +150,9 @@ class AnalyticsService:
         stores.sort(key=lambda x: x.amount_spent, reverse=True)
 
         # Format period string
-        period_str = "All Time" if all_time else self._format_period(actual_start, actual_end)
+        period_str = (
+            "All Time" if all_time else self._format_period(actual_start, actual_end)
+        )
 
         return PeriodSummary(
             period=period_str,
@@ -181,7 +191,6 @@ class AnalyticsService:
         days_in_month = calendar.monthrange(year, month)[1]
         end_date = date(year, month, days_in_month)
 
-
         # Query transactions for the month
         query = select(Transaction).where(
             and_(
@@ -194,13 +203,17 @@ class AnalyticsService:
         transactions = list(result.scalars().all())
 
         # Get split-adjusted amounts for all transactions
-        tx_amounts = await self.split_calc.get_transaction_user_amounts(user_id, transactions)
+        tx_amounts = await self.split_calc.get_transaction_user_amounts(
+            user_id, transactions
+        )
 
         # Calculate total spend (split-adjusted)
         total_spend = sum(amount for _, amount in tx_amounts)
 
         # Group by category (split-adjusted)
-        category_data = defaultdict(lambda: {"amount": 0.0, "count": 0, "health_scores": []})
+        category_data = defaultdict(
+            lambda: {"amount": 0.0, "count": 0, "health_scores": []}
+        )
         for t, amount in tx_amounts:
             category_data[t.category]["amount"] += amount
             category_data[t.category]["count"] += 1
@@ -236,7 +249,9 @@ class AnalyticsService:
         categories.sort(key=lambda x: x.total_spent, reverse=True)
 
         # Group by store (split-adjusted)
-        store_data = defaultdict(lambda: {"amount": 0.0, "receipts": set(), "health_scores": []})
+        store_data = defaultdict(
+            lambda: {"amount": 0.0, "receipts": set(), "health_scores": []}
+        )
         for t, amount in tx_amounts:
             store_data[t.store_name]["amount"] += amount
             store_data[t.store_name]["receipts"].add(t.receipt_id)
@@ -306,9 +321,7 @@ class AnalyticsService:
             conditions.append(Transaction.store_name == store_name)
 
         # Get all transactions
-        result = await self.db.execute(
-            select(Transaction).where(and_(*conditions))
-        )
+        result = await self.db.execute(select(Transaction).where(and_(*conditions)))
         transactions = list(result.scalars().all())
 
         # For all-time queries, compute actual date range from transactions
@@ -324,17 +337,27 @@ class AnalyticsService:
             actual_end = end_date
 
         # Get split-adjusted amounts for all transactions
-        tx_amounts = await self.split_calc.get_transaction_user_amounts(user_id, transactions)
+        tx_amounts = await self.split_calc.get_transaction_user_amounts(
+            user_id, transactions
+        )
 
         # Calculate totals (split-adjusted)
         total_spend = sum(amount for _, amount in tx_amounts)
 
         # Calculate overall average health score
-        all_health_scores = [t.health_score for t in transactions if t.health_score is not None]
-        overall_avg_health = round(sum(all_health_scores) / len(all_health_scores), 2) if all_health_scores else None
+        all_health_scores = [
+            t.health_score for t in transactions if t.health_score is not None
+        ]
+        overall_avg_health = (
+            round(sum(all_health_scores) / len(all_health_scores), 2)
+            if all_health_scores
+            else None
+        )
 
         # Group by category (split-adjusted)
-        category_data = defaultdict(lambda: {"amount": 0.0, "count": 0, "health_scores": []})
+        category_data = defaultdict(
+            lambda: {"amount": 0.0, "count": 0, "health_scores": []}
+        )
         for t, amount in tx_amounts:
             category_data[t.category]["amount"] += amount
             category_data[t.category]["count"] += 1
@@ -364,7 +387,9 @@ class AnalyticsService:
         categories.sort(key=lambda x: x.spent, reverse=True)
 
         # Format period string
-        period_str = "All Time" if all_time else self._format_period(actual_start, actual_end)
+        period_str = (
+            "All Time" if all_time else self._format_period(actual_start, actual_end)
+        )
 
         return CategoryBreakdown(
             period=period_str,
@@ -407,9 +432,7 @@ class AnalyticsService:
             conditions.append(Transaction.date <= end_date)
 
         # Get all transactions for store
-        result = await self.db.execute(
-            select(Transaction).where(and_(*conditions))
-        )
+        result = await self.db.execute(select(Transaction).where(and_(*conditions)))
         transactions = list(result.scalars().all())
 
         # For all-time queries, compute actual date range from transactions
@@ -425,7 +448,9 @@ class AnalyticsService:
             actual_end = end_date
 
         # Get split-adjusted amounts for all transactions
-        tx_amounts = await self.split_calc.get_transaction_user_amounts(user_id, transactions)
+        tx_amounts = await self.split_calc.get_transaction_user_amounts(
+            user_id, transactions
+        )
 
         # Calculate totals (split-adjusted)
         total_spend = sum(amount for _, amount in tx_amounts)
@@ -433,15 +458,25 @@ class AnalyticsService:
         receipt_ids = set(t.receipt_id for t in transactions if t.receipt_id)
 
         # Calculate average health score for this store
-        store_health_scores = [t.health_score for t in transactions if t.health_score is not None]
-        store_avg_health = round(sum(store_health_scores) / len(store_health_scores), 2) if store_health_scores else None
+        store_health_scores = [
+            t.health_score for t in transactions if t.health_score is not None
+        ]
+        store_avg_health = (
+            round(sum(store_health_scores) / len(store_health_scores), 2)
+            if store_health_scores
+            else None
+        )
 
         # Calculate average item price (NOT split-adjusted - this is the actual item price)
         total_raw_spend = sum(t.item_price for t in transactions)
-        average_item_price = round(total_raw_spend / total_items, 2) if total_items > 0 else None
+        average_item_price = (
+            round(total_raw_spend / total_items, 2) if total_items > 0 else None
+        )
 
         # Group by category (split-adjusted)
-        category_data = defaultdict(lambda: {"amount": 0.0, "count": 0, "health_scores": []})
+        category_data = defaultdict(
+            lambda: {"amount": 0.0, "count": 0, "health_scores": []}
+        )
         for t, amount in tx_amounts:
             category_data[t.category]["amount"] += amount
             category_data[t.category]["count"] += 1
@@ -471,17 +506,26 @@ class AnalyticsService:
         categories.sort(key=lambda x: x.spent, reverse=True)
 
         # Format period string
-        period_str = "All Time" if all_time else self._format_period(actual_start, actual_end)
+        period_str = (
+            "All Time" if all_time else self._format_period(actual_start, actual_end)
+        )
 
         # Enrich categories with group info from registry
         registry = get_category_registry()
         from app.services.category_registry import GROUP_COLORS, GROUP_ICONS
+
         enriched_categories = []
         for cat in categories:
             info = registry.get_info(cat.name)
             group_name = info.group if info else None
-            group_color = GROUP_COLORS.get(group_name, "#BDC3C7") if group_name else None
-            group_icon = GROUP_ICONS.get(group_name, "square.grid.2x2.fill") if group_name else None
+            group_color = (
+                GROUP_COLORS.get(group_name, "#BDC3C7") if group_name else None
+            )
+            group_icon = (
+                GROUP_ICONS.get(group_name, "square.grid.2x2.fill")
+                if group_name
+                else None
+            )
             enriched_categories.append(
                 CategorySpending(
                     name=cat.name,
@@ -552,14 +596,18 @@ class AnalyticsService:
             return TrendsResponse(trends=[], period_type=period_type)
 
         # Get split-adjusted amounts for all transactions
-        tx_amounts = await self.split_calc.get_transaction_user_amounts(user_id, transactions)
+        tx_amounts = await self.split_calc.get_transaction_user_amounts(
+            user_id, transactions
+        )
 
         # Group transactions by period
-        period_data = defaultdict(lambda: {
-            "total_spend": 0.0,
-            "transaction_count": 0,
-            "health_scores": [],
-        })
+        period_data = defaultdict(
+            lambda: {
+                "total_spend": 0.0,
+                "transaction_count": 0,
+                "health_scores": [],
+            }
+        )
 
         for t, amount in tx_amounts:
             # Determine period start based on period_type
@@ -589,9 +637,13 @@ class AnalyticsService:
                 period_end_date = period_start_date + timedelta(days=6)
             elif period_type == "month":
                 if period_start_date.month == 12:
-                    period_end_date = date(period_start_date.year + 1, 1, 1) - timedelta(days=1)
+                    period_end_date = date(
+                        period_start_date.year + 1, 1, 1
+                    ) - timedelta(days=1)
                 else:
-                    period_end_date = date(period_start_date.year, period_start_date.month + 1, 1) - timedelta(days=1)
+                    period_end_date = date(
+                        period_start_date.year, period_start_date.month + 1, 1
+                    ) - timedelta(days=1)
             else:  # year
                 period_end_date = date(period_start_date.year, 12, 31)
 
@@ -667,14 +719,18 @@ class AnalyticsService:
             return TrendsResponse(trends=[], period_type=period_type)
 
         # Get split-adjusted amounts for all transactions
-        tx_amounts = await self.split_calc.get_transaction_user_amounts(user_id, transactions)
+        tx_amounts = await self.split_calc.get_transaction_user_amounts(
+            user_id, transactions
+        )
 
         # Group transactions by period
-        period_data = defaultdict(lambda: {
-            "total_spend": 0.0,
-            "transaction_count": 0,
-            "health_scores": [],
-        })
+        period_data = defaultdict(
+            lambda: {
+                "total_spend": 0.0,
+                "transaction_count": 0,
+                "health_scores": [],
+            }
+        )
 
         for t, amount in tx_amounts:
             # Determine period start based on period_type
@@ -704,9 +760,13 @@ class AnalyticsService:
                 period_end_date = period_start_date + timedelta(days=6)
             elif period_type == "month":
                 if period_start_date.month == 12:
-                    period_end_date = date(period_start_date.year + 1, 1, 1) - timedelta(days=1)
+                    period_end_date = date(
+                        period_start_date.year + 1, 1, 1
+                    ) - timedelta(days=1)
                 else:
-                    period_end_date = date(period_start_date.year, period_start_date.month + 1, 1) - timedelta(days=1)
+                    period_end_date = date(
+                        period_start_date.year, period_start_date.month + 1, 1
+                    ) - timedelta(days=1)
             else:  # year
                 period_end_date = date(period_start_date.year, 12, 31)
 
@@ -781,17 +841,21 @@ class AnalyticsService:
             return PeriodsResponse(periods=[], total_periods=0)
 
         # Get split-adjusted amounts for all transactions
-        tx_amounts = await self.split_calc.get_transaction_user_amounts(user_id, transactions)
+        tx_amounts = await self.split_calc.get_transaction_user_amounts(
+            user_id, transactions
+        )
 
         # Group transactions by period
-        period_data = defaultdict(lambda: {
-            "total_spend": 0.0,
-            "receipt_ids": set(),
-            "store_names": set(),
-            "transaction_count": 0,
-            "total_items": 0,
-            "health_scores": [],
-        })
+        period_data = defaultdict(
+            lambda: {
+                "total_spend": 0.0,
+                "receipt_ids": set(),
+                "store_names": set(),
+                "transaction_count": 0,
+                "total_items": 0,
+                "health_scores": [],
+            }
+        )
 
         for t, amount in tx_amounts:
             # Determine period start based on period_type
@@ -825,9 +889,13 @@ class AnalyticsService:
                 period_end_date = period_start_date + timedelta(days=6)
             elif period_type == "month":
                 if period_start_date.month == 12:
-                    period_end_date = date(period_start_date.year + 1, 1, 1) - timedelta(days=1)
+                    period_end_date = date(
+                        period_start_date.year + 1, 1, 1
+                    ) - timedelta(days=1)
                 else:
-                    period_end_date = date(period_start_date.year, period_start_date.month + 1, 1) - timedelta(days=1)
+                    period_end_date = date(
+                        period_start_date.year, period_start_date.month + 1, 1
+                    ) - timedelta(days=1)
             else:  # year
                 period_end_date = date(period_start_date.year, 12, 31)
 
@@ -939,8 +1007,8 @@ class AnalyticsService:
         if all_time:
             # Get the full date range from user's first to last transaction
             date_range_query = select(
-                func.min(Transaction.date).label('first_date'),
-                func.max(Transaction.date).label('last_date'),
+                func.min(Transaction.date).label("first_date"),
+                func.max(Transaction.date).label("last_date"),
             ).where(Transaction.user_id == user_id)
             result = await self.db.execute(date_range_query)
             row = result.one_or_none()
@@ -956,13 +1024,19 @@ class AnalyticsService:
                     start_date=today,
                     end_date=today,
                     totals=AggregateTotals(
-                        total_spend=0, total_transactions=0, total_receipts=0, total_items=0
+                        total_spend=0,
+                        total_transactions=0,
+                        total_receipts=0,
+                        total_items=0,
                     ),
                     averages=AggregateAverages(
-                        average_spend_per_period=0, average_transaction_value=0,
-                        average_item_price=0, average_health_score=None,
-                        average_receipts_per_period=0, average_transactions_per_period=0,
-                        average_items_per_receipt=0
+                        average_spend_per_period=0,
+                        average_transaction_value=0,
+                        average_item_price=0,
+                        average_health_score=None,
+                        average_receipts_per_period=0,
+                        average_transactions_per_period=0,
+                        average_items_per_receipt=0,
                     ),
                     extremes=AggregateExtremes(),
                     top_categories=[],
@@ -995,10 +1069,13 @@ class AnalyticsService:
                     total_spend=0, total_transactions=0, total_receipts=0, total_items=0
                 ),
                 averages=AggregateAverages(
-                    average_spend_per_period=0, average_transaction_value=0,
-                    average_item_price=0, average_health_score=None,
-                    average_receipts_per_period=0, average_transactions_per_period=0,
-                    average_items_per_receipt=0
+                    average_spend_per_period=0,
+                    average_transaction_value=0,
+                    average_item_price=0,
+                    average_health_score=None,
+                    average_receipts_per_period=0,
+                    average_transactions_per_period=0,
+                    average_items_per_receipt=0,
                 ),
                 extremes=AggregateExtremes(),
                 top_categories=[],
@@ -1007,7 +1084,9 @@ class AnalyticsService:
             )
 
         # Get split-adjusted amounts for all transactions
-        tx_amounts = await self.split_calc.get_transaction_user_amounts(user_id, transactions)
+        tx_amounts = await self.split_calc.get_transaction_user_amounts(
+            user_id, transactions
+        )
 
         # Calculate totals (split-adjusted)
         total_spend = sum(amount for _, amount in tx_amounts)
@@ -1017,8 +1096,12 @@ class AnalyticsService:
         total_receipts = len(receipt_ids)
 
         # Calculate averages
-        health_scores = [t.health_score for t in transactions if t.health_score is not None]
-        avg_health_score = round(sum(health_scores) / len(health_scores), 2) if health_scores else None
+        health_scores = [
+            t.health_score for t in transactions if t.health_score is not None
+        ]
+        avg_health_score = (
+            round(sum(health_scores) / len(health_scores), 2) if health_scores else None
+        )
 
         # Calculate raw total (not split-adjusted) for average item price
         total_raw_spend = sum(t.item_price for t in transactions)
@@ -1038,12 +1121,20 @@ class AnalyticsService:
 
         averages = AggregateAverages(
             average_spend_per_period=round(total_spend / actual_num_periods, 2),
-            average_transaction_value=round(total_spend / total_transactions, 2) if total_transactions > 0 else 0,
-            average_item_price=round(total_raw_spend / total_items, 2) if total_items > 0 else 0,
+            average_transaction_value=round(total_spend / total_transactions, 2)
+            if total_transactions > 0
+            else 0,
+            average_item_price=round(total_raw_spend / total_items, 2)
+            if total_items > 0
+            else 0,
             average_health_score=avg_health_score,
             average_receipts_per_period=round(total_receipts / actual_num_periods, 2),
-            average_transactions_per_period=round(total_transactions / actual_num_periods, 2),
-            average_items_per_receipt=round(total_items / total_receipts, 2) if total_receipts > 0 else 0,
+            average_transactions_per_period=round(
+                total_transactions / actual_num_periods, 2
+            ),
+            average_items_per_receipt=round(total_items / total_receipts, 2)
+            if total_receipts > 0
+            else 0,
         )
 
         # Calculate extremes (max/min spending periods) - using split-adjusted amounts
@@ -1051,11 +1142,17 @@ class AnalyticsService:
 
         # Calculate top categories (split-adjusted)
         top_categories = await self._calculate_top_categories_split_adjusted(
-            user_id, tx_amounts, total_spend, top_categories_limit, min_category_percentage
+            user_id,
+            tx_amounts,
+            total_spend,
+            top_categories_limit,
+            min_category_percentage,
         )
 
         # Calculate top stores (split-adjusted)
-        top_stores = await self._calculate_top_stores_split_adjusted(user_id, tx_amounts, total_spend, top_stores_limit)
+        top_stores = await self._calculate_top_stores_split_adjusted(
+            user_id, tx_amounts, total_spend, top_stores_limit
+        )
 
         # Calculate health score distribution
         health_distribution = self._calculate_health_distribution(transactions)
@@ -1082,21 +1179,18 @@ class AnalyticsService:
     ) -> int:
         """Count the number of periods with transaction data."""
         if period_type == "week":
-            trunc_interval = 'week'
+            trunc_interval = "week"
         elif period_type == "month":
-            trunc_interval = 'month'
+            trunc_interval = "month"
         else:
-            trunc_interval = 'year'
+            trunc_interval = "year"
 
         period_col = func.date_trunc(trunc_interval, Transaction.date)
-        query = (
-            select(func.count(func.distinct(period_col)))
-            .where(
-                and_(
-                    Transaction.user_id == user_id,
-                    Transaction.date >= start_date,
-                    Transaction.date <= end_date,
-                )
+        query = select(func.count(func.distinct(period_col))).where(
+            and_(
+                Transaction.user_id == user_id,
+                Transaction.date >= start_date,
+                Transaction.date <= end_date,
             )
         )
         result = await self.db.execute(query)
@@ -1111,25 +1205,30 @@ class AnalyticsService:
     ) -> AggregateExtremes:
         """Calculate extreme values (max/min spend, highest/lowest health) per period."""
         if period_type == "week":
-            trunc_interval = 'week'
+            trunc_interval = "week"
         elif period_type == "month":
-            trunc_interval = 'month'
+            trunc_interval = "month"
         else:
-            trunc_interval = 'year'
+            trunc_interval = "year"
 
-        period_col = func.date_trunc(trunc_interval, Transaction.date).label('period_start')
+        period_col = func.date_trunc(trunc_interval, Transaction.date).label(
+            "period_start"
+        )
 
         # Get aggregates per period
         query = (
             select(
                 period_col,
-                func.sum(Transaction.item_price).label('total_spend'),
+                func.sum(Transaction.item_price).label("total_spend"),
                 func.avg(
                     case(
-                        (Transaction.health_score.isnot(None), Transaction.health_score),
-                        else_=None
+                        (
+                            Transaction.health_score.isnot(None),
+                            Transaction.health_score,
+                        ),
+                        else_=None,
                     )
-                ).label('avg_health_score'),
+                ).label("avg_health_score"),
             )
             .where(
                 and_(
@@ -1157,9 +1256,15 @@ class AnalyticsService:
             if min_spend_row is None or row.total_spend < min_spend_row.total_spend:
                 min_spend_row = row
             if row.avg_health_score is not None:
-                if max_health_row is None or row.avg_health_score > max_health_row.avg_health_score:
+                if (
+                    max_health_row is None
+                    or row.avg_health_score > max_health_row.avg_health_score
+                ):
                     max_health_row = row
-                if min_health_row is None or row.avg_health_score < min_health_row.avg_health_score:
+                if (
+                    min_health_row is None
+                    or row.avg_health_score < min_health_row.avg_health_score
+                ):
                     min_health_row = row
 
         def get_period_end(period_start_date: date, p_type: str) -> date:
@@ -1169,7 +1274,9 @@ class AnalyticsService:
                 if period_start_date.month == 12:
                     return date(period_start_date.year + 1, 1, 1) - timedelta(days=1)
                 else:
-                    return date(period_start_date.year, period_start_date.month + 1, 1) - timedelta(days=1)
+                    return date(
+                        period_start_date.year, period_start_date.month + 1, 1
+                    ) - timedelta(days=1)
             else:  # year
                 return date(period_start_date.year, 12, 31)
 
@@ -1179,7 +1286,11 @@ class AnalyticsService:
         lowest_health_period = None
 
         if max_spend_row:
-            ps = max_spend_row.period_start.date() if hasattr(max_spend_row.period_start, 'date') else max_spend_row.period_start
+            ps = (
+                max_spend_row.period_start.date()
+                if hasattr(max_spend_row.period_start, "date")
+                else max_spend_row.period_start
+            )
             pe = get_period_end(ps, period_type)
             max_spending_period = PeriodExtreme(
                 period=self._format_period(ps, pe),
@@ -1189,7 +1300,11 @@ class AnalyticsService:
             )
 
         if min_spend_row:
-            ps = min_spend_row.period_start.date() if hasattr(min_spend_row.period_start, 'date') else min_spend_row.period_start
+            ps = (
+                min_spend_row.period_start.date()
+                if hasattr(min_spend_row.period_start, "date")
+                else min_spend_row.period_start
+            )
             pe = get_period_end(ps, period_type)
             min_spending_period = PeriodExtreme(
                 period=self._format_period(ps, pe),
@@ -1199,7 +1314,11 @@ class AnalyticsService:
             )
 
         if max_health_row:
-            ps = max_health_row.period_start.date() if hasattr(max_health_row.period_start, 'date') else max_health_row.period_start
+            ps = (
+                max_health_row.period_start.date()
+                if hasattr(max_health_row.period_start, "date")
+                else max_health_row.period_start
+            )
             pe = get_period_end(ps, period_type)
             highest_health_period = HealthScoreExtreme(
                 period=self._format_period(ps, pe),
@@ -1209,7 +1328,11 @@ class AnalyticsService:
             )
 
         if min_health_row:
-            ps = min_health_row.period_start.date() if hasattr(min_health_row.period_start, 'date') else min_health_row.period_start
+            ps = (
+                min_health_row.period_start.date()
+                if hasattr(min_health_row.period_start, "date")
+                else min_health_row.period_start
+            )
             pe = get_period_end(ps, period_type)
             lowest_health_period = HealthScoreExtreme(
                 period=self._format_period(ps, pe),
@@ -1260,10 +1383,10 @@ class AnalyticsService:
         min_spend_period = None
         max_health_period = None
         min_health_period = None
-        max_spend = float('-inf')
-        min_spend = float('inf')
-        max_health = float('-inf')
-        min_health = float('inf')
+        max_spend = float("-inf")
+        min_spend = float("inf")
+        max_health = float("-inf")
+        min_health = float("inf")
 
         for period_start_date, data in period_data.items():
             if data["total_spend"] > max_spend:
@@ -1289,7 +1412,9 @@ class AnalyticsService:
                 if period_start_date.month == 12:
                     return date(period_start_date.year + 1, 1, 1) - timedelta(days=1)
                 else:
-                    return date(period_start_date.year, period_start_date.month + 1, 1) - timedelta(days=1)
+                    return date(
+                        period_start_date.year, period_start_date.month + 1, 1
+                    ) - timedelta(days=1)
             else:  # year
                 return date(period_start_date.year, 12, 31)
 
@@ -1349,7 +1474,9 @@ class AnalyticsService:
         min_percentage: float,
     ) -> list[CategorySpending]:
         """Calculate top categories from transactions."""
-        category_data = defaultdict(lambda: {"amount": 0.0, "count": 0, "health_scores": []})
+        category_data = defaultdict(
+            lambda: {"amount": 0.0, "count": 0, "health_scores": []}
+        )
 
         for t in transactions:
             category_data[t.category]["amount"] += t.item_price
@@ -1387,7 +1514,9 @@ class AnalyticsService:
         limit: int,
     ) -> list[StoreSpending]:
         """Calculate top stores from transactions."""
-        store_data = defaultdict(lambda: {"amount": 0.0, "receipt_ids": set(), "health_scores": []})
+        store_data = defaultdict(
+            lambda: {"amount": 0.0, "receipt_ids": set(), "health_scores": []}
+        )
 
         for t in transactions:
             store_data[t.store_name]["amount"] += t.item_price
@@ -1426,7 +1555,9 @@ class AnalyticsService:
         min_percentage: float,
     ) -> list[CategorySpending]:
         """Calculate top categories from transactions with split-adjusted amounts."""
-        category_data = defaultdict(lambda: {"amount": 0.0, "count": 0, "health_scores": []})
+        category_data = defaultdict(
+            lambda: {"amount": 0.0, "count": 0, "health_scores": []}
+        )
 
         for t, amount in tx_amounts:
             category_data[t.category]["amount"] += amount
@@ -1465,7 +1596,9 @@ class AnalyticsService:
         limit: int,
     ) -> list[StoreSpending]:
         """Calculate top stores from transactions with split-adjusted amounts."""
-        store_data = defaultdict(lambda: {"amount": 0.0, "receipt_ids": set(), "health_scores": []})
+        store_data = defaultdict(
+            lambda: {"amount": 0.0, "receipt_ids": set(), "health_scores": []}
+        )
 
         for t, amount in tx_amounts:
             store_data[t.store_name]["amount"] += amount
@@ -1495,7 +1628,9 @@ class AnalyticsService:
         stores.sort(key=lambda x: x.amount_spent, reverse=True)
         return stores[:limit]
 
-    def _calculate_health_distribution(self, transactions: list) -> HealthScoreDistribution:
+    def _calculate_health_distribution(
+        self, transactions: list
+    ) -> HealthScoreDistribution:
         """Calculate health score distribution from transactions."""
         distribution = {
             "score_1": 0,
@@ -1564,7 +1699,9 @@ class AnalyticsService:
             )
 
         # Get split-adjusted amounts for all transactions
-        tx_amounts = await self.split_calc.get_transaction_user_amounts(user_id, transactions)
+        tx_amounts = await self.split_calc.get_transaction_user_amounts(
+            user_id, transactions
+        )
 
         # Calculate totals (split-adjusted)
         total_spend = sum(amount for _, amount in tx_amounts)
@@ -1576,9 +1713,15 @@ class AnalyticsService:
         # Calculate averages
         # Note: average_item_price uses raw prices (NOT split-adjusted) - it's the actual item cost
         total_raw_spend = sum(t.item_price for t in transactions)
-        average_item_price = round(total_raw_spend / total_items, 2) if total_items > 0 else None
-        health_scores = [t.health_score for t in transactions if t.health_score is not None]
-        average_health_score = round(sum(health_scores) / len(health_scores), 2) if health_scores else None
+        average_item_price = (
+            round(total_raw_spend / total_items, 2) if total_items > 0 else None
+        )
+        health_scores = [
+            t.health_score for t in transactions if t.health_score is not None
+        ]
+        average_health_score = (
+            round(sum(health_scores) / len(health_scores), 2) if health_scores else None
+        )
 
         # Calculate first and last receipt dates
         dates = [t.date for t in transactions]
@@ -1624,7 +1767,9 @@ class AnalyticsService:
         ]
 
         # Calculate top categories (split-adjusted)
-        category_data = defaultdict(lambda: {"amount": 0.0, "count": 0, "health_scores": []})
+        category_data = defaultdict(
+            lambda: {"amount": 0.0, "count": 0, "health_scores": []}
+        )
         for t, amount in tx_amounts:
             category_data[t.category]["amount"] += amount
             category_data[t.category]["count"] += 1
@@ -1639,13 +1784,15 @@ class AnalyticsService:
                 if data["health_scores"]
                 else None
             )
-            categories_list.append({
-                "name": get_category_registry().get_display_name(category_name),
-                "total_spent": round(data["amount"], 2),
-                "percentage": round(percentage, 1),
-                "transaction_count": data["count"],
-                "average_health_score": avg_health,
-            })
+            categories_list.append(
+                {
+                    "name": get_category_registry().get_display_name(category_name),
+                    "total_spent": round(data["amount"], 2),
+                    "percentage": round(percentage, 1),
+                    "transaction_count": data["count"],
+                    "average_health_score": avg_health,
+                }
+            )
 
         categories_list.sort(key=lambda x: x["total_spent"], reverse=True)
         top_categories = [
@@ -1727,7 +1874,9 @@ class AnalyticsService:
             )
 
         # Get split-adjusted amounts for all transactions
-        tx_amounts = await self.split_calc.get_transaction_user_amounts(user_id, transactions)
+        tx_amounts = await self.split_calc.get_transaction_user_amounts(
+            user_id, transactions
+        )
 
         # Calculate totals (split-adjusted)
         total_spend = sum(amount for _, amount in tx_amounts)
@@ -1737,11 +1886,17 @@ class AnalyticsService:
         receipt_count = len(receipt_ids)
 
         # Calculate average health score
-        health_scores = [t.health_score for t in transactions if t.health_score is not None]
-        average_health_score = round(sum(health_scores) / len(health_scores), 2) if health_scores else None
+        health_scores = [
+            t.health_score for t in transactions if t.health_score is not None
+        ]
+        average_health_score = (
+            round(sum(health_scores) / len(health_scores), 2) if health_scores else None
+        )
 
         # Aggregate store data (split-adjusted)
-        store_data = defaultdict(lambda: {"amount": 0.0, "receipt_ids": set(), "health_scores": []})
+        store_data = defaultdict(
+            lambda: {"amount": 0.0, "receipt_ids": set(), "health_scores": []}
+        )
         for t, amount in tx_amounts:
             store_data[t.store_name]["amount"] += amount
             if t.receipt_id:
@@ -1772,7 +1927,9 @@ class AnalyticsService:
         # Calculate monthly breakdown if requested (split-adjusted)
         monthly_breakdown = None
         if include_monthly_breakdown:
-            month_data = defaultdict(lambda: {"amount": 0.0, "receipt_ids": set(), "health_scores": []})
+            month_data = defaultdict(
+                lambda: {"amount": 0.0, "receipt_ids": set(), "health_scores": []}
+            )
             for t, amount in tx_amounts:
                 month_num = t.date.month
                 month_data[month_num]["amount"] += amount
@@ -1783,8 +1940,18 @@ class AnalyticsService:
 
             # Build monthly breakdown list, only including months with data
             month_names = [
-                "January", "February", "March", "April", "May", "June",
-                "July", "August", "September", "October", "November", "December"
+                "January",
+                "February",
+                "March",
+                "April",
+                "May",
+                "June",
+                "July",
+                "August",
+                "September",
+                "October",
+                "November",
+                "December",
             ]
             monthly_breakdown = []
             for month_num in sorted(month_data.keys()):
@@ -1805,7 +1972,9 @@ class AnalyticsService:
                 )
 
         # Calculate top categories (split-adjusted)
-        category_data = defaultdict(lambda: {"amount": 0.0, "count": 0, "health_scores": []})
+        category_data = defaultdict(
+            lambda: {"amount": 0.0, "count": 0, "health_scores": []}
+        )
         for t, amount in tx_amounts:
             category_data[t.category]["amount"] += amount
             category_data[t.category]["count"] += 1

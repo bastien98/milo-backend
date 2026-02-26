@@ -7,14 +7,15 @@ Create Date: 2026-02-02
 This migration creates tables for the expense splitting feature.
 Uses IF NOT EXISTS to be safe for existing deployments.
 """
+
 from typing import Sequence, Union
 
 import sqlalchemy as sa
 from alembic import op
 
 # revision identifiers, used by Alembic.
-revision: str = '003_add_expense_splits'
-down_revision: Union[str, None] = '002_add_receipt_source'
+revision: str = "003_add_expense_splits"
+down_revision: Union[str, None] = "002_add_receipt_source"
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 

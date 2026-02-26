@@ -45,7 +45,10 @@ class User(Base):
         "Receipt", back_populates="user", cascade="all, delete-orphan"
     )
     profile: Mapped[Optional["UserProfile"]] = relationship(
-        "UserProfile", back_populates="user", cascade="all, delete-orphan", uselist=False
+        "UserProfile",
+        back_populates="user",
+        cascade="all, delete-orphan",
+        uselist=False,
     )
     budget: Mapped[Optional["Budget"]] = relationship(
         "Budget", back_populates="user", cascade="all, delete-orphan", uselist=False
@@ -57,5 +60,8 @@ class User(Base):
         "ExpenseSplit", back_populates="user", cascade="all, delete-orphan"
     )
     enriched_profile: Mapped[Optional["UserEnrichedProfile"]] = relationship(
-        "UserEnrichedProfile", back_populates="user", cascade="all, delete-orphan", uselist=False
+        "UserEnrichedProfile",
+        back_populates="user",
+        cascade="all, delete-orphan",
+        uselist=False,
     )

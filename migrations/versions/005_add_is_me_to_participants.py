@@ -5,6 +5,7 @@ Revises: 004_add_custom_amount
 Create Date: 2026-02-03
 
 """
+
 from typing import Sequence, Union
 
 import sqlalchemy as sa
@@ -21,7 +22,9 @@ def upgrade() -> None:
     # Add is_me column to split_participants table
     op.add_column(
         "split_participants",
-        sa.Column("is_me", sa.Boolean(), nullable=False, server_default=sa.text("false")),
+        sa.Column(
+            "is_me", sa.Boolean(), nullable=False, server_default=sa.text("false")
+        ),
     )
 
 

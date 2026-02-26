@@ -13,16 +13,12 @@ class BudgetRepository:
 
     async def get_by_user_id(self, user_id: str) -> Optional[Budget]:
         """Get budget by user ID."""
-        result = await self.db.execute(
-            select(Budget).where(Budget.user_id == user_id)
-        )
+        result = await self.db.execute(select(Budget).where(Budget.user_id == user_id))
         return result.scalar_one_or_none()
 
     async def get_by_id(self, budget_id: str) -> Optional[Budget]:
         """Get budget by ID."""
-        result = await self.db.execute(
-            select(Budget).where(Budget.id == budget_id)
-        )
+        result = await self.db.execute(select(Budget).where(Budget.id == budget_id))
         return result.scalar_one_or_none()
 
     async def get_by_id_and_user(
@@ -113,9 +109,7 @@ class BudgetRepository:
 
     async def delete_by_user_id(self, user_id: str) -> bool:
         """Delete budget by user ID."""
-        result = await self.db.execute(
-            delete(Budget).where(Budget.user_id == user_id)
-        )
+        result = await self.db.execute(delete(Budget).where(Budget.user_id == user_id))
         await self.db.flush()
         return result.rowcount > 0
 

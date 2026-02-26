@@ -16,6 +16,7 @@ settings = get_settings()
 @dataclass
 class CategorizedItem:
     """Represents a categorized item with health score."""
+
     item_name: str
     item_price: float
     quantity: int
@@ -27,6 +28,7 @@ class CategorizedItem:
 @dataclass
 class CategorizationResult:
     """Result of categorization including cleaned store name and items."""
+
     store_name: Optional[str]
     items: List[CategorizedItem]
 
@@ -162,7 +164,11 @@ Return ONLY valid JSON with this exact format:
             items_text = self._format_items_for_prompt(items)
 
             # Build user message with store name
-            store_line = f"Store name: {vendor_name}\n\n" if vendor_name else "Store name: Unknown\n\n"
+            store_line = (
+                f"Store name: {vendor_name}\n\n"
+                if vendor_name
+                else "Store name: Unknown\n\n"
+            )
             user_content = f"{store_line}Items:\n{items_text}"
 
             # Call Gemini API
@@ -187,7 +193,9 @@ Return ONLY valid JSON with this exact format:
 
             # Build result combining Veryfi data with Gemini categorizations
             categorized_items = self._build_categorized_items(items, categorizations)
-            return CategorizationResult(store_name=cleaned_store_name, items=categorized_items)
+            return CategorizationResult(
+                store_name=cleaned_store_name, items=categorized_items
+            )
 
         except json.JSONDecodeError as e:
             raise GeminiAPIError(
@@ -273,9 +281,17 @@ Return ONLY valid JSON with this exact format:
             cleaned_name = cat_data.get("item_name") or primary_item.description
 
             # Calculate prices from primary item (not summing duplicates)
-            total_price = primary_item.total if primary_item.total is not None else primary_item.price
+            total_price = (
+                primary_item.total
+                if primary_item.total is not None
+                else primary_item.price
+            )
             quantity = int(primary_item.quantity) if primary_item.quantity else 1
-            unit_price = primary_item.price if primary_item.price else (total_price / quantity if quantity > 0 else total_price)
+            unit_price = (
+                primary_item.price
+                if primary_item.price
+                else (total_price / quantity if quantity > 0 else total_price)
+            )
 
             result.append(
                 CategorizedItem(

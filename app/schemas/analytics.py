@@ -44,6 +44,7 @@ def get_category_color(sub_category_name: str) -> str:
 
 class PieChartCategory(BaseModel):
     """Category data for Pie Chart visualization."""
+
     category_id: str  # Enum name, e.g., "MEAT_FISH"
     name: str  # Display name, e.g., "Meat & Fish"
     total_spent: float
@@ -55,6 +56,7 @@ class PieChartCategory(BaseModel):
 
 class PieChartStore(BaseModel):
     """Store data for Pie Chart visualization."""
+
     store_name: str
     total_spent: float
     percentage: float
@@ -64,6 +66,7 @@ class PieChartStore(BaseModel):
 
 class PieChartSummaryResponse(BaseModel):
     """Response for analytics summary endpoint (Pie Chart)."""
+
     month: int
     year: int
     total_spent: float
@@ -76,7 +79,9 @@ class StoreSpending(BaseModel):
     amount_spent: float
     store_visits: int
     percentage: float
-    average_health_score: Optional[float] = None  # Average health score for this store (0-5)
+    average_health_score: Optional[float] = (
+        None  # Average health score for this store (0-5)
+    )
 
 
 class PeriodSummary(BaseModel):
@@ -86,7 +91,9 @@ class PeriodSummary(BaseModel):
     total_spend: float
     transaction_count: int
     stores: List[StoreSpending]
-    average_health_score: Optional[float] = None  # Average health score for all food items (0-5)
+    average_health_score: Optional[float] = (
+        None  # Average health score for all food items (0-5)
+    )
 
 
 class CategorySpending(BaseModel):
@@ -94,10 +101,14 @@ class CategorySpending(BaseModel):
     spent: float
     percentage: float
     transaction_count: int
-    average_health_score: Optional[float] = None  # Average health score for this category (0-5)
+    average_health_score: Optional[float] = (
+        None  # Average health score for this category (0-5)
+    )
     group: Optional[str] = None  # Top-level group name (e.g., "Food & Dining")
     group_color_hex: Optional[str] = None  # Hex color for the group (e.g., "#2ECC71")
-    group_icon: Optional[str] = None  # SF Symbol icon for the group (e.g., "fork.knife")
+    group_icon: Optional[str] = (
+        None  # SF Symbol icon for the group (e.g., "fork.knife")
+    )
 
 
 class CategoryBreakdown(BaseModel):
@@ -117,7 +128,9 @@ class StoreBreakdown(BaseModel):
     total_store_spend: float
     store_visits: int
     categories: List[CategorySpending]
-    average_health_score: Optional[float] = None  # Average health score at this store (0-5)
+    average_health_score: Optional[float] = (
+        None  # Average health score at this store (0-5)
+    )
     total_items: int = 0  # Sum of all item quantities for this store in the period
     average_item_price: Optional[float] = None  # total_store_spend / total_items
 
@@ -128,7 +141,9 @@ class SpendingTrend(BaseModel):
     end_date: date
     total_spend: float
     transaction_count: int
-    average_health_score: Optional[float] = None  # Average health score for this period (0-5)
+    average_health_score: Optional[float] = (
+        None  # Average health score for this period (0-5)
+    )
 
 
 class TrendsResponse(BaseModel):
@@ -138,6 +153,7 @@ class TrendsResponse(BaseModel):
 
 class PeriodMetadata(BaseModel):
     """Lightweight metadata for a single period."""
+
     period: str
     period_start: date
     period_end: date
@@ -151,14 +167,17 @@ class PeriodMetadata(BaseModel):
 
 class PeriodsResponse(BaseModel):
     """Response containing all periods with basic metadata."""
+
     periods: List[PeriodMetadata]
     total_periods: int
 
 
 # ============== Aggregate Analytics Schemas ==============
 
+
 class AggregateTotals(BaseModel):
     """Total values across the aggregate period."""
+
     total_spend: float
     total_transactions: int
     total_receipts: int
@@ -167,6 +186,7 @@ class AggregateTotals(BaseModel):
 
 class AggregateAverages(BaseModel):
     """Average values across the aggregate period."""
+
     average_spend_per_period: float
     average_transaction_value: float
     average_item_price: float
@@ -178,6 +198,7 @@ class AggregateAverages(BaseModel):
 
 class PeriodExtreme(BaseModel):
     """Represents an extreme (max/min) spending period."""
+
     period: str
     period_start: date
     period_end: date
@@ -186,6 +207,7 @@ class PeriodExtreme(BaseModel):
 
 class HealthScoreExtreme(BaseModel):
     """Represents an extreme (highest/lowest) health score period."""
+
     period: str
     period_start: date
     period_end: date
@@ -194,6 +216,7 @@ class HealthScoreExtreme(BaseModel):
 
 class AggregateExtremes(BaseModel):
     """Extreme values (max/min) across the aggregate period."""
+
     max_spending_period: Optional[PeriodExtreme] = None
     min_spending_period: Optional[PeriodExtreme] = None
     highest_health_score_period: Optional[HealthScoreExtreme] = None
@@ -202,6 +225,7 @@ class AggregateExtremes(BaseModel):
 
 class HealthScoreDistribution(BaseModel):
     """Distribution of health scores across transactions."""
+
     score_1: int = 0  # Unhealthy
     score_2: int = 0
     score_3: int = 0  # Neutral
@@ -212,6 +236,7 @@ class HealthScoreDistribution(BaseModel):
 
 class AggregateResponse(BaseModel):
     """Response for aggregate analytics across multiple periods."""
+
     period_type: str
     num_periods: int
     start_date: date
@@ -228,8 +253,10 @@ class AggregateResponse(BaseModel):
 
 # ============== All-Time Analytics Schemas ==============
 
+
 class StoreByVisits(BaseModel):
     """Store ranked by visit count."""
+
     store_name: str
     visit_count: int
     rank: int
@@ -237,6 +264,7 @@ class StoreByVisits(BaseModel):
 
 class StoreBySpend(BaseModel):
     """Store ranked by total spend."""
+
     store_name: str
     total_spent: float
     rank: int
@@ -244,6 +272,7 @@ class StoreBySpend(BaseModel):
 
 class TopCategory(BaseModel):
     """Category ranked by total spend for all-time statistics."""
+
     name: str
     total_spent: float
     percentage: float
@@ -254,6 +283,7 @@ class TopCategory(BaseModel):
 
 class AllTimeResponse(BaseModel):
     """Response for all-time user statistics."""
+
     total_receipts: int
     total_items: int
     total_spend: float
@@ -269,8 +299,10 @@ class AllTimeResponse(BaseModel):
 
 # ============== Year Summary Analytics Schemas ==============
 
+
 class YearStoreSpending(BaseModel):
     """Store spending breakdown for year summary."""
+
     store_name: str
     amount_spent: float
     store_visits: int
@@ -280,6 +312,7 @@ class YearStoreSpending(BaseModel):
 
 class YearMonthlyBreakdown(BaseModel):
     """Monthly spending breakdown for year summary."""
+
     month: str  # e.g., "January"
     month_number: int  # 1-12
     total_spend: float
@@ -289,6 +322,7 @@ class YearMonthlyBreakdown(BaseModel):
 
 class YearCategorySpending(BaseModel):
     """Category spending for year summary."""
+
     name: str
     spent: float
     percentage: float
@@ -298,6 +332,7 @@ class YearCategorySpending(BaseModel):
 
 class YearSummaryResponse(BaseModel):
     """Response for year summary analytics."""
+
     year: int
     start_date: date
     end_date: date

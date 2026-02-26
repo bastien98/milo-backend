@@ -63,7 +63,6 @@ GRANULAR_CATEGORIES: dict[str, str] = {
     "Spirits Rum": _ALCOHOL,
     "Spirits Liqueur": _ALCOHOL,
     "Aperitif": _ALCOHOL,
-
     # ===================
     # DRINKS
     # ===================
@@ -78,7 +77,6 @@ GRANULAR_CATEGORIES: dict[str, str] = {
     "Water Still": _WATER,
     "Water Sparkling": _WATER,
     "Water Flavored": _WATER,
-
     # ===================
     # HOT BEVERAGES
     # ===================
@@ -87,7 +85,6 @@ GRANULAR_CATEGORIES: dict[str, str] = {
     "Coffee Instant": _COFFEE,
     "Tea": _COFFEE,
     "Hot Chocolate": _COFFEE,
-
     # ===================
     # DAIRY, EGGS & CHEESE
     # ===================
@@ -112,7 +109,6 @@ GRANULAR_CATEGORIES: dict[str, str] = {
     "Cheese Grated": _DAIRY,
     "Cheese Belgian": _DAIRY,
     "Eggs": _DAIRY,
-
     # ===================
     # MEAT & POULTRY (RAW)
     # ===================
@@ -124,7 +120,6 @@ GRANULAR_CATEGORIES: dict[str, str] = {
     "Minced Meat": _MEAT_RAW,
     "Meat Preparations": _MEAT_RAW,
     "Offal": _MEAT_RAW,
-
     # ===================
     # CHARCUTERIE & SALADS (PREPARÉ/DELI)
     # ===================
@@ -139,7 +134,6 @@ GRANULAR_CATEGORIES: dict[str, str] = {
     "Sandwiches": _CHARCUTERIE,
     "Sushi": _CHARCUTERIE,
     "Hummus & Dips": _CHARCUTERIE,
-
     # ===================
     # FISH & SEAFOOD
     # ===================
@@ -149,7 +143,6 @@ GRANULAR_CATEGORIES: dict[str, str] = {
     "Shellfish": _FISH,
     "Canned Fish": _FISH,
     "Surimi": _FISH,
-
     # ===================
     # FRUITS
     # ===================
@@ -163,7 +156,6 @@ GRANULAR_CATEGORIES: dict[str, str] = {
     "Fruit Tropical": _FRUITS,
     "Fruit Dried": _FRUITS,
     "Nuts": _FRUITS,
-
     # ===================
     # VEGETABLES
     # ===================
@@ -180,7 +172,6 @@ GRANULAR_CATEGORIES: dict[str, str] = {
     "Corn": _VEGETABLES,
     "Fresh Herbs": _VEGETABLES,
     "Prepared Vegetables": _VEGETABLES,
-
     # ===================
     # BAKERY (BREAD, PISTOLETS)
     # ===================
@@ -189,14 +180,12 @@ GRANULAR_CATEGORIES: dict[str, str] = {
     "Bread Specialty": _BAKERY,
     "Wraps & Pita": _BAKERY,
     "Crackers": _BAKERY,
-
     # ===================
     # PASTRIES & KOFFIEKOEKEN
     # ===================
     "Croissants & Pastries": _PASTRIES,
     "Cakes & Tarts": _PASTRIES,
     "Waffles": _PASTRIES,
-
     # ===================
     # GRAINS, PASTA & POTATOES
     # ===================
@@ -206,7 +195,6 @@ GRANULAR_CATEGORIES: dict[str, str] = {
     "Noodles Asian": _GRAINS,
     "Couscous & Bulgur": _GRAINS,
     "Grains & Legumes": _GRAINS,
-
     # ===================
     # CANNED & JARRED GOODS
     # ===================
@@ -219,7 +207,6 @@ GRANULAR_CATEGORIES: dict[str, str] = {
     "Soup Canned": _CANNED,
     "Soup Carton Fresh": _CANNED,
     "Soup Instant": _CANNED,
-
     # ===================
     # SAUCES, MAYO & CONDIMENTS
     # ===================
@@ -236,7 +223,6 @@ GRANULAR_CATEGORIES: dict[str, str] = {
     "Salt Pepper & Spices": _SAUCES,
     "Stock & Bouillon": _SAUCES,
     "Dried Herbs": _SAUCES,
-
     # ===================
     # BREAKFAST & CEREAL (CHOCO/JAM)
     # ===================
@@ -247,7 +233,6 @@ GRANULAR_CATEGORIES: dict[str, str] = {
     "Spreads Honey": _BREAKFAST,
     "Spreads Peanut Nut": _BREAKFAST,
     "Spreads Savory": _BREAKFAST,
-
     # ===================
     # BAKING & FLOUR
     # ===================
@@ -256,7 +241,6 @@ GRANULAR_CATEGORIES: dict[str, str] = {
     "Baking Ingredients": _BAKING,
     "Baking Decorations": _BAKING,
     "Chocolate Baking": _BAKING,
-
     # ===================
     # CHIPS, NUTS & APERITIF (SNACKS)
     # ===================
@@ -267,7 +251,6 @@ GRANULAR_CATEGORIES: dict[str, str] = {
     "Dried Meat Snack": _CHIPS,
     "Cookies & Biscuits": _CHIPS,
     "Protein Bars": _CHIPS,
-
     # ===================
     # CHOCOLATE & SWEETS (BISCUITS)
     # ===================
@@ -277,7 +260,6 @@ GRANULAR_CATEGORIES: dict[str, str] = {
     "Licorice": _CHOCOLATE,
     "Gum & Mints": _CHOCOLATE,
     "Marshmallows": _CHOCOLATE,
-
     # ===================
     # FROZEN INGREDIENTS (VEG/FRUIT)
     # ===================
@@ -286,7 +268,6 @@ GRANULAR_CATEGORIES: dict[str, str] = {
     "Frozen Meat": _FROZEN_INGR,
     "Frozen Bread": _FROZEN_INGR,
     "Frozen Fruits": _FROZEN_INGR,
-
     # ===================
     # FRIES & SNACKS (FRITUUR AT HOME)
     # ===================
@@ -294,7 +275,6 @@ GRANULAR_CATEGORIES: dict[str, str] = {
     "Frozen Snacks": _FRIES,
     "Ice Cream": _FRIES,
     "Frozen Desserts": _FRIES,
-
     # ===================
     # READY MEALS & PIZZA
     # ===================
@@ -309,13 +289,11 @@ GRANULAR_CATEGORIES: dict[str, str] = {
     "Mexican Food": _READY_MEALS,
     "Italian Specialty": _READY_MEALS,
     "Middle Eastern": _READY_MEALS,
-
     # ===================
     # SPORTS NUTRITION
     # ===================
     "Protein Shakes": _DAIRY,
     "Protein Desserts": _DAIRY,
-
     # ===================
     # BABY & KIDS
     # ===================
@@ -324,12 +302,10 @@ GRANULAR_CATEGORIES: dict[str, str] = {
     "Baby Snacks": _BABY,
     "Diapers": _BABY,
     "Baby Care": _BABY,
-
     # ===================
     # HOUSEHOLD - WASTE BAGS
     # ===================
     "Trash Bags": _WASTE_BAGS,
-
     # ===================
     # HOUSEHOLD - CLEANING & PAPER
     # ===================
@@ -353,7 +329,6 @@ GRANULAR_CATEGORIES: dict[str, str] = {
     "Kitchen Accessories": _CLEANING,
     "Party Supplies": _CLEANING,
     "Flowers & Plants": _CLEANING,
-
     # ===================
     # PERSONAL CARE / PHARMACY & HYGIENE
     # ===================
@@ -376,7 +351,6 @@ GRANULAR_CATEGORIES: dict[str, str] = {
     "First Aid": _PHARMACY,
     "Vitamins & Supplements": _PHARMACY,
     "Pain Relief": _PHARMACY,
-
     # ===================
     # PET SUPPLIES
     # ===================
@@ -385,17 +359,14 @@ GRANULAR_CATEGORIES: dict[str, str] = {
     "Pet Treats": _PET,
     "Pet Litter": _PET,
     "Pet Care": _PET,
-
     # ===================
     # TOBACCO
     # ===================
     "Tobacco": _TOBACCO,
-
     # ===================
     # DEPOSITS & DISCOUNTS
     # ===================
     "Discounts": _DEPOSITS,
-
     # ===================
     # OTHER
     # ===================

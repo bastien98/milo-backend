@@ -120,12 +120,14 @@ You will receive the user's profile information (name, etc.) and their full tran
         start_date = today - timedelta(days=365)
 
         result = await db.execute(
-            select(Transaction).where(
+            select(Transaction)
+            .where(
                 and_(
                     Transaction.user_id == user_id,
                     Transaction.date >= start_date,
                 )
-            ).order_by(Transaction.date.desc())
+            )
+            .order_by(Transaction.date.desc())
         )
         transactions = list(result.scalars().all())
 
@@ -171,18 +173,24 @@ You will receive the user's profile information (name, etc.) and their full tran
         ]
 
         # Sort categories by spending
-        sorted_categories = sorted(category_totals.items(), key=lambda x: x[1], reverse=True)
+        sorted_categories = sorted(
+            category_totals.items(), key=lambda x: x[1], reverse=True
+        )
         for category, amount in sorted_categories:
             count = category_counts[category]
             pct = (amount / total_spend * 100) if total_spend > 0 else 0
-            context_parts.append(f"  {category}: €{amount:.2f} ({pct:.1f}%, {count} items)")
+            context_parts.append(
+                f"  {category}: €{amount:.2f} ({pct:.1f}%, {count} items)"
+            )
 
         context_parts.append("\n--- SPENDING BY STORE ---")
         sorted_stores = sorted(store_totals.items(), key=lambda x: x[1], reverse=True)
         for store, amount in sorted_stores:
             visits = len(store_visits[store])
             pct = (amount / total_spend * 100) if total_spend > 0 else 0
-            context_parts.append(f"  {store}: €{amount:.2f} ({pct:.1f}%, {visits} visits)")
+            context_parts.append(
+                f"  {store}: €{amount:.2f} ({pct:.1f}%, {visits} visits)"
+            )
 
         context_parts.append("\n--- MONTHLY SPENDING ---")
         for month in sorted(monthly_totals.keys(), reverse=True)[:12]:
@@ -233,7 +241,9 @@ You will receive the user's profile information (name, etc.) and their full tran
             transaction_context = await self._get_user_transaction_context(db, user_id)
 
             # Build language-aware system prompt
-            system_prompt = self.SYSTEM_PROMPT + self._build_language_instruction(profile)
+            system_prompt = self.SYSTEM_PROMPT + self._build_language_instruction(
+                profile
+            )
 
             # Build contents with conversation history
             contents = []
@@ -242,7 +252,11 @@ You will receive the user's profile information (name, etc.) and their full tran
             if conversation_history:
                 for msg in conversation_history:
                     role = "user" if msg.role == "user" else "model"
-                    contents.append(types.Content(role=role, parts=[types.Part.from_text(text=msg.content)]))
+                    contents.append(
+                        types.Content(
+                            role=role, parts=[types.Part.from_text(text=msg.content)]
+                        )
+                    )
 
             # Build user message with context
             context_parts = []
@@ -257,7 +271,11 @@ You will receive the user's profile information (name, etc.) and their full tran
 
 My question: {message}"""
 
-            contents.append(types.Content(role="user", parts=[types.Part.from_text(text=user_content)]))
+            contents.append(
+                types.Content(
+                    role="user", parts=[types.Part.from_text(text=user_content)]
+                )
+            )
 
             # Call Gemini API
             t0 = time.monotonic()
@@ -268,14 +286,26 @@ My question: {message}"""
                 config=self._build_config(system_prompt),
             )
             api_duration_ms = round((time.monotonic() - t0) * 1000, 1)
-            logger.info("gemini_api_call_completed", model=self.MODEL, purpose="chat", duration_ms=api_duration_ms, success=True)
+            logger.info(
+                "gemini_api_call_completed",
+                model=self.MODEL,
+                purpose="chat",
+                duration_ms=api_duration_ms,
+                success=True,
+            )
 
             return response.text
 
         except GeminiAPIError:
             raise
         except Exception as e:
-            logger.error("gemini_api_call_completed", model=self.MODEL, purpose="chat", success=False, error=str(e))
+            logger.error(
+                "gemini_api_call_completed",
+                model=self.MODEL,
+                purpose="chat",
+                success=False,
+                error=str(e),
+            )
             raise GeminiAPIError(
                 f"Gemini API error: {str(e)}",
                 details={"error_type": "api_error", "api_error": str(e)},
@@ -299,7 +329,9 @@ My question: {message}"""
             transaction_context = await self._get_user_transaction_context(db, user_id)
 
             # Build language-aware system prompt
-            system_prompt = self.SYSTEM_PROMPT + self._build_language_instruction(profile)
+            system_prompt = self.SYSTEM_PROMPT + self._build_language_instruction(
+                profile
+            )
 
             # Build contents with conversation history
             contents = []
@@ -308,7 +340,11 @@ My question: {message}"""
             if conversation_history:
                 for msg in conversation_history:
                     role = "user" if msg.role == "user" else "model"
-                    contents.append(types.Content(role=role, parts=[types.Part.from_text(text=msg.content)]))
+                    contents.append(
+                        types.Content(
+                            role=role, parts=[types.Part.from_text(text=msg.content)]
+                        )
+                    )
 
             # Build user message with context
             context_parts = []
@@ -323,11 +359,17 @@ My question: {message}"""
 
 My question: {message}"""
 
-            contents.append(types.Content(role="user", parts=[types.Part.from_text(text=user_content)]))
+            contents.append(
+                types.Content(
+                    role="user", parts=[types.Part.from_text(text=user_content)]
+                )
+            )
 
             # Call Gemini API with streaming
             t0 = time.monotonic()
-            logger.info("gemini_api_call_started", model=self.MODEL, purpose="chat_stream")
+            logger.info(
+                "gemini_api_call_started", model=self.MODEL, purpose="chat_stream"
+            )
             response = self.client.models.generate_content_stream(
                 model=self.MODEL,
                 contents=contents,
@@ -339,12 +381,24 @@ My question: {message}"""
                     yield chunk.text
 
             api_duration_ms = round((time.monotonic() - t0) * 1000, 1)
-            logger.info("gemini_api_call_completed", model=self.MODEL, purpose="chat_stream", duration_ms=api_duration_ms, success=True)
+            logger.info(
+                "gemini_api_call_completed",
+                model=self.MODEL,
+                purpose="chat_stream",
+                duration_ms=api_duration_ms,
+                success=True,
+            )
 
         except GeminiAPIError:
             raise
         except Exception as e:
-            logger.error("gemini_api_call_completed", model=self.MODEL, purpose="chat_stream", success=False, error=str(e))
+            logger.error(
+                "gemini_api_call_completed",
+                model=self.MODEL,
+                purpose="chat_stream",
+                success=False,
+                error=str(e),
+            )
             raise GeminiAPIError(
                 f"Gemini API error: {str(e)}",
                 details={"error_type": "api_error", "api_error": str(e)},

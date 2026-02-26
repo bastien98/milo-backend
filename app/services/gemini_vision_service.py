@@ -23,7 +23,11 @@ from PIL import Image
 
 from app.config import get_settings
 from app.core.exceptions import GeminiAPIError
-from app.services.categories import CATEGORIES_PROMPT_LIST, GRANULAR_CATEGORIES, get_parent_category
+from app.services.categories import (
+    CATEGORIES_PROMPT_LIST,
+    GRANULAR_CATEGORIES,
+    get_parent_category,
+)
 
 settings = get_settings()
 logger = structlog.get_logger(__name__)
@@ -60,7 +64,9 @@ class GeminiExtractionResult:
     line_items: list[ExtractedLineItem]
     ocr_text: Optional[str]  # Full OCR for debugging
     receipt_time: Optional[str]  # HH:MM format
-    payment_method: Optional[str]  # bancontact/visa/mastercard/cash/payconiq/meal_vouchers/mixed
+    payment_method: Optional[
+        str
+    ]  # bancontact/visa/mastercard/cash/payconiq/meal_vouchers/mixed
     total_savings: Optional[float]  # total discount amount (positive number)
     store_branch: Optional[str]  # store location/branch
 
@@ -71,7 +77,7 @@ class GeminiVisionService:
     MODEL = "gemini-2.5-flash"
     MAX_TOKENS = 65536
 
-    SYSTEM_PROMPT = '''You are a Belgian grocery receipt analyzer. Extract and normalize line items from receipt images.
+    SYSTEM_PROMPT = """You are a Belgian grocery receipt analyzer. Extract and normalize line items from receipt images.
 
 ## EXTRACTION RULES
 
@@ -238,7 +244,7 @@ Return a JSON object with this structure:
   - "health_score": integer 0-5 or null
   - "unit_of_measure": string or null (kg/g/l/ml/piece)
   - "weight_or_volume": number or null
-  - "price_per_unit_measure": number or null'''
+  - "price_per_unit_measure": number or null"""
 
     # Image compression settings (for large images only)
     MAX_IMAGE_SIZE = (1600, 2400)  # Max dimensions for compressed image
@@ -250,7 +256,9 @@ Return a JSON object with this structure:
             raise ValueError("Gemini API key not configured")
         self.client = genai.Client(api_key=self.api_key)
 
-    def _compress_image(self, image_content: bytes, mime_type: str) -> tuple[bytes, str]:
+    def _compress_image(
+        self, image_content: bytes, mime_type: str
+    ) -> tuple[bytes, str]:
         """Compress image if it's too large.
 
         Returns:
@@ -301,15 +309,24 @@ Return a JSON object with this structure:
         system_prompt = self.SYSTEM_PROMPT.format(categories=CATEGORIES_PROMPT_LIST)
 
         # Log input details for debugging
-        logger.info("gemini_api_call_started", model=self.MODEL, mime_type=mime_type, content_size=len(file_content))
+        logger.info(
+            "gemini_api_call_started",
+            model=self.MODEL,
+            mime_type=mime_type,
+            content_size=len(file_content),
+        )
 
         # Pass PDFs directly to Gemini, compress large images only
         if mime_type == "application/pdf":
             processed_content, processed_mime = file_content, mime_type
         else:
-            processed_content, processed_mime = self._compress_image(file_content, mime_type)
+            processed_content, processed_mime = self._compress_image(
+                file_content, mime_type
+            )
 
-        extract_prompt = "Extract all line items from this receipt image. Return JSON only."
+        extract_prompt = (
+            "Extract all line items from this receipt image. Return JSON only."
+        )
 
         t0 = time.monotonic()
         try:
@@ -332,13 +349,21 @@ Return a JSON object with this structure:
             api_duration_ms = round((time.monotonic() - t0) * 1000, 1)
 
             # Check for truncation
-            if response.candidates and response.candidates[0].finish_reason and response.candidates[0].finish_reason.name == "MAX_TOKENS":
+            if (
+                response.candidates
+                and response.candidates[0].finish_reason
+                and response.candidates[0].finish_reason.name == "MAX_TOKENS"
+            ):
                 logger.warning("gemini_response_truncated", model=self.MODEL)
 
             # Parse response - JSON mode guarantees valid JSON
             response_text = response.text
             if not response_text:
-                logger.error("gemini_empty_response", model=self.MODEL, candidates=str(getattr(response, 'candidates', 'N/A')))
+                logger.error(
+                    "gemini_empty_response",
+                    model=self.MODEL,
+                    candidates=str(getattr(response, "candidates", "N/A")),
+                )
                 raise GeminiAPIError(
                     "Gemini returned empty response",
                     details={"error_type": "empty_response"},
@@ -358,7 +383,14 @@ Return a JSON object with this structure:
 
         except json.JSONDecodeError as e:
             api_duration_ms = round((time.monotonic() - t0) * 1000, 1)
-            logger.error("gemini_api_call_completed", model=self.MODEL, duration_ms=api_duration_ms, success=False, error_type="parse_error", error=str(e))
+            logger.error(
+                "gemini_api_call_completed",
+                model=self.MODEL,
+                duration_ms=api_duration_ms,
+                success=False,
+                error_type="parse_error",
+                error=str(e),
+            )
             raise GeminiAPIError(
                 "Failed to parse extraction response",
                 details={"error_type": "parse_error", "parse_error": str(e)},
@@ -367,7 +399,15 @@ Return a JSON object with this structure:
             raise
         except Exception as e:
             api_duration_ms = round((time.monotonic() - t0) * 1000, 1)
-            logger.error("gemini_api_call_completed", model=self.MODEL, duration_ms=api_duration_ms, success=False, error_type="unexpected", error=str(e), exc_info=True)
+            logger.error(
+                "gemini_api_call_completed",
+                model=self.MODEL,
+                duration_ms=api_duration_ms,
+                success=False,
+                error_type="unexpected",
+                error=str(e),
+                exc_info=True,
+            )
             raise GeminiAPIError(
                 f"Extraction failed: {str(e)}",
                 details={"error_type": "unexpected", "error": str(e)},
@@ -381,7 +421,9 @@ Return a JSON object with this structure:
             try:
                 receipt_date = date.fromisoformat(data["receipt_date"])
             except ValueError:
-                logger.warning("gemini_date_parse_failed", raw_date=data.get("receipt_date"))
+                logger.warning(
+                    "gemini_date_parse_failed", raw_date=data.get("receipt_date")
+                )
 
         # Build line items
         line_items = []
@@ -430,7 +472,13 @@ Return a JSON object with this structure:
 
             # Parse unit measure fields
             unit_of_measure = item.get("unit_of_measure")
-            if unit_of_measure and unit_of_measure not in ("kg", "g", "l", "ml", "piece"):
+            if unit_of_measure and unit_of_measure not in (
+                "kg",
+                "g",
+                "l",
+                "ml",
+                "piece",
+            ):
                 unit_of_measure = None
 
             weight_or_volume = item.get("weight_or_volume")
@@ -479,7 +527,15 @@ Return a JSON object with this structure:
                 receipt_time = None
 
         payment_method = data.get("payment_method")
-        valid_methods = {"bancontact", "visa", "mastercard", "cash", "payconiq", "meal_vouchers", "mixed"}
+        valid_methods = {
+            "bancontact",
+            "visa",
+            "mastercard",
+            "cash",
+            "payconiq",
+            "meal_vouchers",
+            "mixed",
+        }
         if payment_method and payment_method.lower() not in valid_methods:
             payment_method = None
         elif payment_method:

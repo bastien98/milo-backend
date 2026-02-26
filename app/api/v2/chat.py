@@ -21,7 +21,9 @@ settings = get_settings()
 logger = structlog.get_logger(__name__)
 
 
-def build_rate_limit_headers(status: RateLimitStatus, account_for_current: bool = True) -> dict:
+def build_rate_limit_headers(
+    status: RateLimitStatus, account_for_current: bool = True
+) -> dict:
     """
     Build rate limit response headers.
 
@@ -125,10 +127,12 @@ async def stream_response(
             rate_status = await rate_limit_service.check_rate_limit(firebase_uid)
 
             if not rate_status.allowed:
-                error_data = json.dumps({
-                    "type": "error",
-                    "error": "You've reached your message limit for this period",
-                })
+                error_data = json.dumps(
+                    {
+                        "type": "error",
+                        "error": "You've reached your message limit for this period",
+                    }
+                )
                 yield f"data: {error_data}\n\n"
                 return
 
@@ -154,7 +158,9 @@ async def stream_response(
             error_data = json.dumps({"type": "error", "error": str(e.message)})
             yield f"data: {error_data}\n\n"
         except Exception:
-            error_data = json.dumps({"type": "error", "error": "Failed to process chat request"})
+            error_data = json.dumps(
+                {"type": "error", "error": "Failed to process chat request"}
+            )
             yield f"data: {error_data}\n\n"
 
 
@@ -211,9 +217,7 @@ async def chat_test(
 
     # Get first user or user by email
     if user_email:
-        result = await db.execute(
-            select(User).where(User.email == user_email)
-        )
+        result = await db.execute(select(User).where(User.email == user_email))
     else:
         result = await db.execute(select(User).limit(1))
 
@@ -251,9 +255,7 @@ async def chat_test_stream(
 
     # Get first user or user by email
     if user_email:
-        result = await db.execute(
-            select(User).where(User.email == user_email)
-        )
+        result = await db.execute(select(User).where(User.email == user_email))
     else:
         result = await db.execute(select(User).limit(1))
 

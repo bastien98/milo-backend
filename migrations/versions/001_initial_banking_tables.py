@@ -7,13 +7,14 @@ Create Date: 2025-02-01
 This migration creates the EnableBanking integration tables.
 Uses IF NOT EXISTS to be safe for existing deployments.
 """
+
 from typing import Sequence, Union
 
 import sqlalchemy as sa
 from alembic import op
 
 # revision identifiers, used by Alembic.
-revision: str = '001_initial_banking'
+revision: str = "001_initial_banking"
 down_revision: Union[str, None] = None
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None

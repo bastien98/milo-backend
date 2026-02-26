@@ -35,7 +35,11 @@ from google import genai
 from google.genai import types
 from pinecone import Pinecone
 
-from app.services.categories import CATEGORIES_PROMPT_LIST, GRANULAR_CATEGORIES, get_parent_category
+from app.services.categories import (
+    CATEGORIES_PROMPT_LIST,
+    GRANULAR_CATEGORIES,
+    get_parent_category,
+)
 
 # ---------------------------------------------------------------------------
 # Config
@@ -54,9 +58,7 @@ FOLDER_DIR = Path(__file__).resolve().parent / "folder"
 RETAILER_NAME = "Albert Heijn"
 RETAILER_DISPLAY_NAME = "Albert Heijn"
 
-logging.basicConfig(
-    level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s"
-)
+logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 logger = logging.getLogger(__name__)
 
 
@@ -87,7 +89,7 @@ class PromoItem:
 # ---------------------------------------------------------------------------
 # Albert Heijn-specific Gemini prompt
 # ---------------------------------------------------------------------------
-SYSTEM_PROMPT = '''You are extracting promotional offers from an Albert Heijn Belgium Bonus folder PDF.
+SYSTEM_PROMPT = """You are extracting promotional offers from an Albert Heijn Belgium Bonus folder PDF.
 
 ## FOLDER FORMAT
 - Language: Dutch (Belgium)
@@ -248,20 +250,24 @@ Return ONLY valid JSON:
     }}
   ]
 }}
-```'''
+```"""
 
 
 # ---------------------------------------------------------------------------
 # PDF splitting
 # ---------------------------------------------------------------------------
-def split_pdf_into_batches(pdf_path: Path, pages_per_batch: int) -> list[tuple[bytes, int]]:
+def split_pdf_into_batches(
+    pdf_path: Path, pages_per_batch: int
+) -> list[tuple[bytes, int]]:
     """Split a PDF into smaller PDFs of pages_per_batch pages each.
 
     Returns a list of (batch_bytes, start_page) tuples where start_page is 1-indexed.
     """
     doc = fitz.open(pdf_path)
     total_pages = len(doc)
-    logger.info(f"PDF has {total_pages} pages, splitting into batches of {pages_per_batch}")
+    logger.info(
+        f"PDF has {total_pages} pages, splitting into batches of {pages_per_batch}"
+    )
 
     batches = []
     for start in range(0, total_pages, pages_per_batch):
@@ -285,7 +291,13 @@ def _build_system_prompt() -> str:
     return SYSTEM_PROMPT.format(categories=CATEGORIES_PROMPT_LIST)
 
 
-def extract_batch(client: genai.Client, batch_pdf: bytes, batch_num: int, start_page: int, system_prompt: str) -> dict:
+def extract_batch(
+    client: genai.Client,
+    batch_pdf: bytes,
+    batch_num: int,
+    start_page: int,
+    system_prompt: str,
+) -> dict:
     """Extract promo items from a single PDF batch via Gemini with exponential backoff.
 
     Args:
@@ -302,7 +314,9 @@ def extract_batch(client: genai.Client, batch_pdf: bytes, batch_num: int, start_
         if attempt == 1:
             logger.info(f"{label} Sending to Gemini ({len(batch_pdf):,} bytes)...")
         else:
-            logger.info(f"{label} Retry {attempt}/{MAX_RETRIES} after {delay}s backoff...")
+            logger.info(
+                f"{label} Retry {attempt}/{MAX_RETRIES} after {delay}s backoff..."
+            )
             time.sleep(delay)
 
         start_time = time.time()
@@ -332,7 +346,9 @@ def extract_batch(client: genai.Client, batch_pdf: bytes, batch_num: int, start_
         if not response_text:
             logger.warning(f"{label} Empty response after {elapsed:.1f}s")
             if attempt == MAX_RETRIES:
-                raise RuntimeError(f"Batch {batch_num} returned empty after {MAX_RETRIES} retries")
+                raise RuntimeError(
+                    f"Batch {batch_num} returned empty after {MAX_RETRIES} retries"
+                )
             continue
 
         json_str = _extract_json(response_text)
@@ -341,7 +357,9 @@ def extract_batch(client: genai.Client, batch_pdf: bytes, batch_num: int, start_
         except json.JSONDecodeError as e:
             logger.warning(f"{label} JSON parse error after {elapsed:.1f}s: {e}")
             if attempt == MAX_RETRIES:
-                raise RuntimeError(f"Batch {batch_num} returned invalid JSON after {MAX_RETRIES} retries")
+                raise RuntimeError(
+                    f"Batch {batch_num} returned invalid JSON after {MAX_RETRIES} retries"
+                )
             continue
 
         # Adjust page numbers: Gemini returns 1-indexed page within batch,
@@ -380,7 +398,9 @@ def extract_promos_from_pdf(pdf_path: Path) -> dict:
         all_items.extend(data.get("items", []))
 
     elapsed = time.time() - start_time
-    logger.info(f"All batches complete in {elapsed:.1f}s — {len(all_items)} total items")
+    logger.info(
+        f"All batches complete in {elapsed:.1f}s — {len(all_items)} total items"
+    )
 
     # Deduplicate by normalized_name (keep first occurrence)
     seen = set()
@@ -456,7 +476,7 @@ def parse_promo_items(data: dict) -> list[PromoItem]:
 
         # Safety net: strip brand from normalized_name if the LLM still included it
         if brand and normalized_name.startswith(brand):
-            stripped = normalized_name[len(brand):].strip(" -")
+            stripped = normalized_name[len(brand) :].strip(" -")
             if stripped:
                 logger.debug(
                     f"Stripped brand '{brand}' from normalized_name: "
@@ -523,7 +543,9 @@ def build_embedding_text(item: PromoItem) -> str:
     return " ".join(parts)
 
 
-def delete_retailer_promos(index, retailer: str, validity_start: str, validity_end: str) -> int:
+def delete_retailer_promos(
+    index, retailer: str, validity_start: str, validity_end: str
+) -> int:
     """Delete all existing promos for a retailer + validity period before re-ingesting."""
     logger.info(
         f"Cleaning up existing {retailer} promos "
@@ -548,9 +570,13 @@ def delete_retailer_promos(index, retailer: str, validity_start: str, validity_e
         for i in range(0, len(ids_to_delete), 100):
             batch = ids_to_delete[i : i + 100]
             index.delete(ids=batch, namespace="__default__")
-        logger.info(f"Deleted {len(ids_to_delete)} existing records for {retailer} ({validity_start} to {validity_end})")
+        logger.info(
+            f"Deleted {len(ids_to_delete)} existing records for {retailer} ({validity_start} to {validity_end})"
+        )
     else:
-        logger.info(f"No existing records found for {retailer} ({validity_start} to {validity_end})")
+        logger.info(
+            f"No existing records found for {retailer} ({validity_start} to {validity_end})"
+        )
 
     return len(ids_to_delete)
 
@@ -598,7 +624,9 @@ def upsert_to_pinecone(items: list[PromoItem], batch_size: int = 50) -> int:
     before = len(items)
     items = [i for i in items if i.promo_mechanism]
     if before > len(items):
-        logger.info(f"Filtered out {before - len(items)} items with no promo_mechanism before upsert")
+        logger.info(
+            f"Filtered out {before - len(items)} items with no promo_mechanism before upsert"
+        )
 
     if not items:
         logger.warning("No items with promo_mechanism to upsert")
@@ -624,7 +652,9 @@ def upsert_to_pinecone(items: list[PromoItem], batch_size: int = 50) -> int:
             "brand": item.brand or "",
             "granular_category": item.granular_category,
             "parent_category": item.parent_category,
-            "original_price": item.original_price if item.original_price is not None else 0.0,
+            "original_price": item.original_price
+            if item.original_price is not None
+            else 0.0,
             "promo_price": item.promo_price if item.promo_price is not None else 0.0,
             "promo_mechanism": item.promo_mechanism or "",
             "unit_info": item.unit_info or "",

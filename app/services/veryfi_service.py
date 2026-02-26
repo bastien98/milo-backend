@@ -14,6 +14,7 @@ settings = get_settings()
 @dataclass
 class VeryfiLineItem:
     """Represents a line item extracted by Veryfi."""
+
     description: str
     total: Optional[float]
     quantity: Optional[float]
@@ -25,6 +26,7 @@ class VeryfiLineItem:
 @dataclass
 class VeryfiExtractionResult:
     """Represents the extraction result from Veryfi."""
+
     vendor_name: Optional[str]
     date: Optional[date]
     total: Optional[float]
@@ -146,7 +148,8 @@ class VeryfiService:
         for item in data.get("line_items", []):
             line_items.append(
                 VeryfiLineItem(
-                    description=item.get("description") or item.get("text", "Unknown Item"),
+                    description=item.get("description")
+                    or item.get("text", "Unknown Item"),
                     total=item.get("total"),
                     quantity=item.get("quantity"),
                     price=item.get("price"),

@@ -182,7 +182,9 @@ class PromoService:
         self.settings = get_settings()
         self.enriched_repo = EnrichedProfileRepository(db)
 
-    async def _fetch_user_profile_prefs(self, user_id: str) -> tuple[Optional[Language], Optional[List[str]]]:
+    async def _fetch_user_profile_prefs(
+        self, user_id: str
+    ) -> tuple[Optional[Language], Optional[List[str]]]:
         """Fetch the user's language and preferred stores from their profile."""
         result = await self.db.execute(
             select(UserProfile.language, UserProfile.preferred_stores)
@@ -215,7 +217,8 @@ class PromoService:
             filtered_results: dict[str, list[dict]] = {}
             for item_name, promos in promo_results.items():
                 filtered = [
-                    p for p in promos
+                    p
+                    for p in promos
                     if p.get("source_retailer", "").lower() in store_set
                 ]
                 filtered_results[item_name] = filtered
@@ -239,12 +242,16 @@ class PromoService:
         return {
             "shopping_habits": shopping_habits,
             "promo_interest_items": promo_interest_items,
-            "data_period_start": str(ep.data_period_start) if ep.data_period_start else None,
+            "data_period_start": str(ep.data_period_start)
+            if ep.data_period_start
+            else None,
             "data_period_end": str(ep.data_period_end) if ep.data_period_end else None,
             "receipts_analyzed": ep.receipts_analyzed,
         }
 
-    async def _search_all_promos(self, interest_items: list[dict]) -> dict[str, list[dict]]:
+    async def _search_all_promos(
+        self, interest_items: list[dict]
+    ) -> dict[str, list[dict]]:
         """Search Pinecone for promotions matching each interest item."""
         pc = Pinecone(api_key=self.settings.PINECONE_API_KEY)
         index = pc.Index(host=self.settings.PINECONE_INDEX_HOST)
@@ -253,9 +260,7 @@ class PromoService:
 
         for item in interest_items:
             name = item["normalized_name"]
-            promos = await asyncio.to_thread(
-                _search_promos_for_item, pc, index, item
-            )
+            promos = await asyncio.to_thread(_search_promos_for_item, pc, index, item)
             all_results[name] = promos
 
             if promos:
@@ -269,7 +274,9 @@ class PromoService:
         return all_results
 
     async def _generate_recommendations(
-        self, profile: dict, promo_results: dict[str, list[dict]],
+        self,
+        profile: dict,
+        promo_results: dict[str, list[dict]],
         language: Optional[Language] = None,
         preferred_stores: Optional[List[str]] = None,
     ) -> dict:
@@ -281,7 +288,9 @@ class PromoService:
         return _parse_llm_response(raw_response)
 
     def _call_gemini(
-        self, user_message: str, attempt: int = 1,
+        self,
+        user_message: str,
+        attempt: int = 1,
         language: Optional[Language] = None,
         preferred_stores: Optional[List[str]] = None,
     ) -> str:
@@ -313,8 +322,12 @@ class PromoService:
             ),
         )
         if response.text is None:
-            logger.warning(f"Gemini returned None text. Candidates: {response.candidates}")
-            raise GeminiPromoError("Gemini returned empty response — likely blocked by safety filters")
+            logger.warning(
+                f"Gemini returned None text. Candidates: {response.candidates}"
+            )
+            raise GeminiPromoError(
+                "Gemini returned empty response — likely blocked by safety filters"
+            )
 
         # Verify JSON is parseable; retry once if truncated
         raw = response.text.strip()
@@ -322,9 +335,13 @@ class PromoService:
             json.loads(raw)
         except json.JSONDecodeError:
             if attempt < 2:
-                logger.warning(f"Gemini returned truncated JSON (attempt {attempt}), retrying...")
+                logger.warning(
+                    f"Gemini returned truncated JSON (attempt {attempt}), retrying..."
+                )
                 time.sleep(1)
-                return self._call_gemini(user_message, attempt + 1, language, preferred_stores)
+                return self._call_gemini(
+                    user_message, attempt + 1, language, preferred_stores
+                )
             logger.warning("Gemini returned truncated JSON on final attempt")
 
         return response.text
@@ -354,6 +371,7 @@ class PromoService:
 # Exceptions
 # ---------------------------------------------------------------------------
 
+
 class ProfileNotFoundError(Exception):
     def __init__(self, user_id: str):
         self.user_id = user_id
@@ -367,6 +385,7 @@ class GeminiPromoError(Exception):
 # ---------------------------------------------------------------------------
 # Pinecone helpers (synchronous — called via asyncio.to_thread)
 # ---------------------------------------------------------------------------
+
 
 def _search_promos_for_item(pc: Pinecone, index, item: dict) -> list[dict]:
     """Search Pinecone for promotions matching a single promo interest item."""
@@ -437,7 +456,9 @@ def _search_promos_for_item(pc: Pinecone, index, item: dict) -> list[dict]:
 
 
 def _pinecone_search_and_rerank(
-    index, query_text: str, filter_dict: Optional[dict],
+    index,
+    query_text: str,
+    filter_dict: Optional[dict],
     _max_retries: int = 3,
 ) -> list[dict]:
     """Execute integrated search + rerank in a single Pinecone API call.
@@ -460,16 +481,26 @@ def _pinecone_search_and_rerank(
     for attempt in range(_max_retries):
         try:
             try:
-                results = index.search_records(namespace="__default__", query=query, rerank=rerank)
+                results = index.search_records(
+                    namespace="__default__", query=query, rerank=rerank
+                )
             except (AttributeError, TypeError):
-                results = index.search(namespace="__default__", query=query, rerank=rerank)
+                results = index.search(
+                    namespace="__default__", query=query, rerank=rerank
+                )
             return _extract_hits(results)
         except Exception as e:
             error_str = str(e)
-            is_rate_limit = "429" in error_str or "Too Many Requests" in error_str or "RESOURCE_EXHAUSTED" in error_str
+            is_rate_limit = (
+                "429" in error_str
+                or "Too Many Requests" in error_str
+                or "RESOURCE_EXHAUSTED" in error_str
+            )
             if is_rate_limit and attempt < _max_retries - 1:
-                wait = 2 ** attempt  # 1s, 2s, 4s
-                logger.warning(f"Pinecone rerank rate-limited (attempt {attempt + 1}), retrying in {wait}s...")
+                wait = 2**attempt  # 1s, 2s, 4s
+                logger.warning(
+                    f"Pinecone rerank rate-limited (attempt {attempt + 1}), retrying in {wait}s..."
+                )
                 time.sleep(wait)
                 continue
             logger.warning(f"Pinecone search+rerank failed: {e}")
@@ -541,9 +572,13 @@ def _normalize_hit(hit) -> dict:
         "_score": getattr(hit, "_score", getattr(hit, "score", 0)),
     }
     if hasattr(hit, "fields"):
-        d["fields"] = dict(hit.fields) if not isinstance(hit.fields, dict) else hit.fields
+        d["fields"] = (
+            dict(hit.fields) if not isinstance(hit.fields, dict) else hit.fields
+        )
     elif hasattr(hit, "metadata"):
-        d["fields"] = dict(hit.metadata) if not isinstance(hit.metadata, dict) else hit.metadata
+        d["fields"] = (
+            dict(hit.metadata) if not isinstance(hit.metadata, dict) else hit.metadata
+        )
     else:
         d["fields"] = {}
     return d
@@ -552,6 +587,7 @@ def _normalize_hit(hit) -> dict:
 # ---------------------------------------------------------------------------
 # LLM context builder + response parser
 # ---------------------------------------------------------------------------
+
 
 def _build_llm_context(profile: dict, promo_results: dict[str, list[dict]]) -> str:
     habits = profile["shopping_habits"]
@@ -635,7 +671,9 @@ def _build_llm_context(profile: dict, promo_results: dict[str, list[dict]]) -> s
             f"({se['small_trips_pct']}%), avg €{se['small_trips_avg_cost']:.2f}"
         )
         if se.get("weekend_premium_pct", 0) != 0:
-            parts.append(f"Weekend premium: {se['weekend_premium_pct']:+.1f}% vs weekday")
+            parts.append(
+                f"Weekend premium: {se['weekend_premium_pct']:+.1f}% vs weekday"
+            )
 
     # Section 2: Interest items with metrics
     parts.append("\n## ITEMS TO FIND DEALS FOR")
@@ -702,7 +740,9 @@ def _build_llm_context(profile: dict, promo_results: dict[str, list[dict]]) -> s
 
             page_str = f" | page={p['page_number']}" if p.get("page_number") else ""
             folder_str = (
-                f" | folder_url={p['promo_folder_url']}" if p.get("promo_folder_url") else ""
+                f" | folder_url={p['promo_folder_url']}"
+                if p.get("promo_folder_url")
+                else ""
             )
 
             parts.append(
@@ -728,6 +768,7 @@ def _repair_truncated_json(raw: str) -> str | None:
     """Attempt to repair truncated JSON by closing open brackets/braces."""
     # Strip any trailing incomplete string (unterminated "...")
     import re
+
     s = raw.rstrip()
 
     # Remove trailing incomplete key-value or string
@@ -738,7 +779,7 @@ def _repair_truncated_json(raw: str) -> str | None:
         s += '"'
 
     # Remove trailing comma if present
-    s = re.sub(r',\s*$', '', s)
+    s = re.sub(r",\s*$", "", s)
 
     # Count open vs close brackets
     stack = []
@@ -748,7 +789,7 @@ def _repair_truncated_json(raw: str) -> str | None:
         if escape:
             escape = False
             continue
-        if ch == '\\' and in_string:
+        if ch == "\\" and in_string:
             escape = True
             continue
         if ch == '"':
@@ -756,17 +797,17 @@ def _repair_truncated_json(raw: str) -> str | None:
             continue
         if in_string:
             continue
-        if ch in ('{', '['):
+        if ch in ("{", "["):
             stack.append(ch)
-        elif ch == '}':
-            if stack and stack[-1] == '{':
+        elif ch == "}":
+            if stack and stack[-1] == "{":
                 stack.pop()
-        elif ch == ']':
-            if stack and stack[-1] == '[':
+        elif ch == "]":
+            if stack and stack[-1] == "[":
                 stack.pop()
 
     # Close remaining open brackets
-    closers = {'[': ']', '{': '}'}
+    closers = {"[": "]", "{": "}"}
     for opener in reversed(stack):
         s += closers[opener]
 
@@ -798,7 +839,7 @@ def _parse_llm_response(raw_response: str) -> dict:
         clean = clean.strip()
 
     # Safety net: strip trailing commas
-    clean = re.sub(r',\s*([}\]])', r'\1', clean)
+    clean = re.sub(r",\s*([}\]])", r"\1", clean)
 
     # Parse and validate through Pydantic schema
     try:
@@ -817,10 +858,14 @@ def _parse_llm_response(raw_response: str) -> dict:
                     logger.info("Truncated JSON repaired successfully")
                 except json.JSONDecodeError as e3:
                     logger.error(f"Failed to parse even repaired JSON: {e3}")
-                    logger.error(f"Raw response (first 500 chars): {raw_response[:500]}")
+                    logger.error(
+                        f"Raw response (first 500 chars): {raw_response[:500]}"
+                    )
                     return _empty_fallback()
             else:
-                logger.error(f"JSON repair failed. Raw (first 500 chars): {raw_response[:500]}")
+                logger.error(
+                    f"JSON repair failed. Raw (first 500 chars): {raw_response[:500]}"
+                )
                 return _empty_fallback()
 
     # Cap top_picks at 3

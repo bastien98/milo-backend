@@ -82,7 +82,9 @@ async def promo_chat(
 
     # Fetch user's language preference
     profile_result = await db.execute(
-        select(UserProfile.language).where(UserProfile.user_id == current_user.firebase_uid)
+        select(UserProfile.language).where(
+            UserProfile.user_id == current_user.firebase_uid
+        )
     )
     user_language = profile_result.scalar_one_or_none()
 
@@ -106,7 +108,9 @@ async def promo_chat(
 
     except Exception as e:
         logger.exception(f"Promo chat error: {e}")
-        raise HTTPException(status_code=500, detail="Failed to process promo search request")
+        raise HTTPException(
+            status_code=500, detail="Failed to process promo search request"
+        )
 
 
 # Debug/Test endpoint - only available when DEBUG=True
@@ -125,9 +129,7 @@ async def promo_chat_test(
 
     # Get first user or user by email
     if user_email:
-        result = await db.execute(
-            select(User).where(User.email == user_email)
-        )
+        result = await db.execute(select(User).where(User.email == user_email))
     else:
         result = await db.execute(select(User).limit(1))
 
@@ -143,4 +145,6 @@ async def promo_chat_test(
         )
     except Exception as e:
         logger.exception(f"Promo chat test error: {e}")
-        raise HTTPException(status_code=500, detail="Failed to process promo search request")
+        raise HTTPException(
+            status_code=500, detail="Failed to process promo search request"
+        )

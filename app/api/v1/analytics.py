@@ -116,8 +116,13 @@ async def get_summary(
 
 @router.get("/categories", response_model=CategoryBreakdown)
 async def get_categories(
-    period: Optional[str] = Query(None, description="Period: week, month, year, or custom. If not provided with no date params, returns all-time data."),
-    start_date: Optional[date] = Query(None, description="Start date for custom period"),
+    period: Optional[str] = Query(
+        None,
+        description="Period: week, month, year, or custom. If not provided with no date params, returns all-time data.",
+    ),
+    start_date: Optional[date] = Query(
+        None, description="Start date for custom period"
+    ),
     end_date: Optional[date] = Query(None, description="End date for custom period"),
     store_name: Optional[str] = Query(None, description="Filter by store"),
     db: AsyncSession = Depends(get_db),
@@ -147,8 +152,13 @@ async def get_categories(
 @router.get("/stores/{store_name}", response_model=StoreBreakdown)
 async def get_store_breakdown(
     store_name: str,
-    period: Optional[str] = Query(None, description="Period: week, month, year, or custom. If not provided with no date params, returns all-time data."),
-    start_date: Optional[date] = Query(None, description="Start date for custom period"),
+    period: Optional[str] = Query(
+        None,
+        description="Period: week, month, year, or custom. If not provided with no date params, returns all-time data.",
+    ),
+    start_date: Optional[date] = Query(
+        None, description="Start date for custom period"
+    ),
     end_date: Optional[date] = Query(None, description="End date for custom period"),
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_db_user),
@@ -185,7 +195,9 @@ async def get_store_breakdown(
 async def get_store_trends(
     store_name: str,
     period_type: str = Query("month", description="Period type: week, month, year"),
-    num_periods: int = Query(6, ge=1, le=52, description="Maximum number of periods to return"),
+    num_periods: int = Query(
+        6, ge=1, le=52, description="Maximum number of periods to return"
+    ),
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_db_user),
 ):
@@ -219,7 +231,9 @@ async def get_store_trends(
 )
 async def get_trends(
     period_type: str = Query("month", description="Period type: week, month, year"),
-    num_periods: int = Query(12, ge=1, le=52, description="Maximum number of periods to return"),
+    num_periods: int = Query(
+        12, ge=1, le=52, description="Maximum number of periods to return"
+    ),
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_db_user),
 ):
@@ -250,14 +264,30 @@ async def get_trends(
     "top categories, top stores, and health score distribution across multiple time periods.",
 )
 async def get_aggregate(
-    period_type: str = Query("month", description="Period granularity: week, month, year"),
-    num_periods: int = Query(12, ge=1, le=52, description="Number of periods to aggregate"),
-    start_date: Optional[date] = Query(None, description="Optional start date (YYYY-MM-DD)"),
-    end_date: Optional[date] = Query(None, description="Optional end date (YYYY-MM-DD)"),
-    all_time: bool = Query(False, description="If true, return all-time stats (ignores date filters)"),
-    top_categories_limit: int = Query(5, ge=1, le=20, description="Number of top categories to return"),
-    top_stores_limit: int = Query(5, ge=1, le=20, description="Number of top stores to return"),
-    min_category_percentage: float = Query(0, ge=0, le=100, description="Minimum percentage threshold for categories"),
+    period_type: str = Query(
+        "month", description="Period granularity: week, month, year"
+    ),
+    num_periods: int = Query(
+        12, ge=1, le=52, description="Number of periods to aggregate"
+    ),
+    start_date: Optional[date] = Query(
+        None, description="Optional start date (YYYY-MM-DD)"
+    ),
+    end_date: Optional[date] = Query(
+        None, description="Optional end date (YYYY-MM-DD)"
+    ),
+    all_time: bool = Query(
+        False, description="If true, return all-time stats (ignores date filters)"
+    ),
+    top_categories_limit: int = Query(
+        5, ge=1, le=20, description="Number of top categories to return"
+    ),
+    top_stores_limit: int = Query(
+        5, ge=1, le=20, description="Number of top stores to return"
+    ),
+    min_category_percentage: float = Query(
+        0, ge=0, le=100, description="Minimum percentage threshold for categories"
+    ),
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_db_user),
 ):
@@ -302,8 +332,12 @@ async def get_aggregate(
     "spend, top stores by visits and spend, top categories, and date range.",
 )
 async def get_all_time(
-    top_stores_limit: int = Query(3, ge=1, le=10, description="Number of top stores to return"),
-    top_categories_limit: int = Query(5, ge=1, le=20, description="Number of top categories to return"),
+    top_stores_limit: int = Query(
+        3, ge=1, le=10, description="Number of top stores to return"
+    ),
+    top_categories_limit: int = Query(
+        5, ge=1, le=20, description="Number of top categories to return"
+    ),
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_db_user),
 ):
@@ -320,7 +354,9 @@ async def get_all_time(
 
     This endpoint is optimized for the scan view hero cards on the frontend.
     """
-    logger.info(f"All-time request: user_id={current_user.id}, top_stores_limit={top_stores_limit}, top_categories_limit={top_categories_limit}")
+    logger.info(
+        f"All-time request: user_id={current_user.id}, top_stores_limit={top_stores_limit}, top_categories_limit={top_categories_limit}"
+    )
 
     analytics = AnalyticsService(db)
     return await analytics.get_all_time_stats(
@@ -339,8 +375,12 @@ async def get_all_time(
 )
 async def get_year_summary(
     year: int,
-    include_monthly_breakdown: bool = Query(True, description="Whether to include per-month spending breakdown"),
-    top_categories_limit: int = Query(5, ge=1, le=20, description="Number of top categories to return"),
+    include_monthly_breakdown: bool = Query(
+        True, description="Whether to include per-month spending breakdown"
+    ),
+    top_categories_limit: int = Query(
+        5, ge=1, le=20, description="Number of top categories to return"
+    ),
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_db_user),
 ):

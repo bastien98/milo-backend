@@ -4,6 +4,7 @@ Revision ID: 018_add_nickname_age_language
 Revises: 017_fix_budget_id_defaults
 Create Date: 2026-02-16
 """
+
 from typing import Sequence, Union
 
 import sqlalchemy as sa

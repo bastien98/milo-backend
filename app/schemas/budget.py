@@ -6,6 +6,7 @@ from pydantic import BaseModel, Field, model_validator
 
 class CategoryAllocation(BaseModel):
     """A category target (guardrail) within a budget."""
+
     category: str
     amount: float = Field(..., gt=0)
 
@@ -13,15 +14,18 @@ class CategoryAllocation(BaseModel):
 def _filter_zero_allocations(data):
     """Remove category allocations with zero/negative amounts (e.g. from rounding)."""
     if isinstance(data, dict):
-        allocs = data.get('category_allocations')
+        allocs = data.get("category_allocations")
         if allocs is not None:
-            filtered = [a for a in allocs if isinstance(a, dict) and a.get('amount', 0) > 0]
-            data['category_allocations'] = filtered
+            filtered = [
+                a for a in allocs if isinstance(a, dict) and a.get("amount", 0) > 0
+            ]
+            data["category_allocations"] = filtered
     return data
 
 
 class BudgetBase(BaseModel):
     """Base budget schema with common fields."""
+
     monthly_amount: float = Field(..., ge=0)
     category_allocations: Optional[List[CategoryAllocation]] = None
     is_smart_budget: bool = True  # When true, budget auto-rolls to next month
@@ -30,28 +34,29 @@ class BudgetBase(BaseModel):
 class BudgetCreate(BudgetBase):
     """Schema for creating a new budget."""
 
-    @model_validator(mode='before')
+    @model_validator(mode="before")
     @classmethod
     def filter_zero_allocations(cls, data):
         return _filter_zero_allocations(data)
 
-    @model_validator(mode='after')
+    @model_validator(mode="after")
     def require_budget_or_categories(self):
         """At least one of monthly_amount > 0 or category_allocations must be set."""
         has_total = self.monthly_amount > 0
         has_categories = bool(self.category_allocations)
         if not has_total and not has_categories:
-            raise ValueError('Must set either a monthly budget or category allocations')
+            raise ValueError("Must set either a monthly budget or category allocations")
         return self
 
 
 class BudgetUpdate(BaseModel):
     """Schema for updating a budget. All fields are optional."""
+
     monthly_amount: Optional[float] = Field(None, ge=0)
     category_allocations: Optional[List[CategoryAllocation]] = None
     is_smart_budget: Optional[bool] = None  # Allows toggling smart budget
 
-    @model_validator(mode='before')
+    @model_validator(mode="before")
     @classmethod
     def filter_zero_allocations(cls, data):
         return _filter_zero_allocations(data)
@@ -59,6 +64,7 @@ class BudgetUpdate(BaseModel):
 
 class BudgetResponse(BudgetBase):
     """Schema for budget response."""
+
     id: str
     user_id: str
     created_at: datetime
@@ -70,12 +76,14 @@ class BudgetResponse(BudgetBase):
 
 class BudgetNotFoundResponse(BaseModel):
     """Response when no budget is found."""
+
     error: str = "No budget found"
     code: str = "NO_BUDGET"
 
 
 class CategoryProgress(BaseModel):
     """Progress for a single watched category (guardrail)."""
+
     category_id: str  # Enum name, e.g., "MEAT_FISH"
     name: str  # Display name, e.g., "Meat & Fish"
     limit_amount: float  # The category target
@@ -86,6 +94,7 @@ class CategoryProgress(BaseModel):
 
 class BudgetProgressResponse(BaseModel):
     """Schema for budget progress response."""
+
     budget: BudgetResponse
     current_spend: float
     days_elapsed: int
@@ -100,6 +109,7 @@ class BudgetProgressResponse(BaseModel):
 
 class BudgetHistoryEntry(BaseModel):
     """Schema for a single budget history entry."""
+
     id: str
     user_id: str
     monthly_amount: float
@@ -115,4 +125,5 @@ class BudgetHistoryEntry(BaseModel):
 
 class BudgetHistoryResponse(BaseModel):
     """Schema for budget history response."""
+
     budget_history: List[BudgetHistoryEntry]

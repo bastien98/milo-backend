@@ -7,14 +7,15 @@ Create Date: 2026-02-05
 This migration adds the is_discount field for tracking discount/bonus line items:
 - is_discount: Boolean flag for discount lines (negative amounts like Hoeveelheidsvoordeel)
 """
+
 from typing import Sequence, Union
 
 import sqlalchemy as sa
 from alembic import op
 
 # revision identifiers, used by Alembic.
-revision: str = '006_add_is_discount'
-down_revision: Union[str, None] = '005_enriched_profiles'
+revision: str = "006_add_is_discount"
+down_revision: Union[str, None] = "005_enriched_profiles"
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 

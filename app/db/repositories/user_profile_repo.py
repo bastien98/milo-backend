@@ -78,12 +78,14 @@ class UserProfileRepository:
             profile.preferred_stores = preferred_stores
 
         # Update profile_completed status (new fields)
-        profile.profile_completed = all([
-            profile.nickname,
-            profile.gender,
-            profile.age is not None,
-            profile.language,
-        ])
+        profile.profile_completed = all(
+            [
+                profile.nickname,
+                profile.gender,
+                profile.age is not None,
+                profile.language,
+            ]
+        )
 
         await self.db.flush()
         await self.db.refresh(profile)

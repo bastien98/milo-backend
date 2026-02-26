@@ -49,11 +49,13 @@ async def main():
     print(json.dumps(result, indent=2, ensure_ascii=False))
 
     # Quick summary
-    print(f"\n{'='*50}")
+    print(f"\n{'=' * 50}")
     print(f"Weekly savings: €{result.get('weekly_savings', 0):.2f}")
     print(f"Deals found: {result.get('deal_count', 0)}")
     for i, pick in enumerate(result.get("top_picks", []), 1):
-        print(f"  {i}. {pick.get('brand')} {pick.get('product_name')} — €{pick.get('promo_price', 0):.2f} (save €{pick.get('savings', 0):.2f}) at {pick.get('store')}")
+        print(
+            f"  {i}. {pick.get('brand')} {pick.get('product_name')} — €{pick.get('promo_price', 0):.2f} (save €{pick.get('savings', 0):.2f}) at {pick.get('store')}"
+        )
 
 
 if __name__ == "__main__":

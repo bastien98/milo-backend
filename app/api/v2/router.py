@@ -4,7 +4,16 @@ from fastapi import APIRouter
 from app.api.v1 import analytics, health, profile, rate_limit, transactions
 
 # Import v2-specific endpoints (using Gemini)
-from app.api.v2 import budgets, categories, chat, expense_splits, periods, promos, receipts, wallet_pass
+from app.api.v2 import (
+    budgets,
+    categories,
+    chat,
+    expense_splits,
+    periods,
+    promos,
+    receipts,
+    wallet_pass,
+)
 
 api_router = APIRouter()
 
@@ -20,7 +29,9 @@ api_router.include_router(
 )
 
 # Analytics - reuse from v1 (no LLM interaction)
-api_router.include_router(analytics.router, prefix="/analytics", tags=["v2 - analytics"])
+api_router.include_router(
+    analytics.router, prefix="/analytics", tags=["v2 - analytics"]
+)
 
 # Periods - V2 lightweight endpoint for period metadata
 api_router.include_router(periods.router, prefix="/analytics", tags=["v2 - analytics"])
@@ -29,7 +40,9 @@ api_router.include_router(periods.router, prefix="/analytics", tags=["v2 - analy
 api_router.include_router(chat.router, prefix="/chat", tags=["v2 - chat"])
 
 # Rate limit - reuse from v1 (no LLM interaction)
-api_router.include_router(rate_limit.router, prefix="/rate-limit", tags=["v2 - rate-limit"])
+api_router.include_router(
+    rate_limit.router, prefix="/rate-limit", tags=["v2 - rate-limit"]
+)
 
 # Profile - reuse from v1 (no LLM interaction)
 api_router.include_router(profile.router, prefix="/profile", tags=["v2 - profile"])
@@ -38,13 +51,17 @@ api_router.include_router(profile.router, prefix="/profile", tags=["v2 - profile
 api_router.include_router(budgets.router, prefix="/budgets", tags=["v2 - budgets"])
 
 # Expense Splits - Split expenses among friends
-api_router.include_router(expense_splits.router, prefix="/expense-splits", tags=["v2 - expense-splits"])
+api_router.include_router(
+    expense_splits.router, prefix="/expense-splits", tags=["v2 - expense-splits"]
+)
 
 # Wallet Pass - Apple Wallet pass creation
 api_router.include_router(wallet_pass.router, tags=["v2 - wallet-pass"])
 
 # Categories - category hierarchy and usage data
-api_router.include_router(categories.router, prefix="/categories", tags=["v2 - categories"])
+api_router.include_router(
+    categories.router, prefix="/categories", tags=["v2 - categories"]
+)
 
 # Promos - personalized promo recommendations
 api_router.include_router(promos.router, prefix="/promos", tags=["v2 - promos"])

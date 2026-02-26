@@ -64,6 +64,7 @@ def cached(include_month: bool = False):
         async def get_current_month_spend(self, user_id: str):
             ...
     """
+
     def decorator(func: Callable) -> Callable:
         @wraps(func)
         async def wrapper(*args, **kwargs) -> Any:
@@ -81,11 +82,15 @@ def cached(include_month: bool = False):
 
             if user_id is None:
                 # Can't cache without user_id, just execute
-                logger.warning(f"Cache: No user_id found for {func.__name__}, skipping cache")
+                logger.warning(
+                    f"Cache: No user_id found for {func.__name__}, skipping cache"
+                )
                 return await func(*args, **kwargs)
 
             # Build cache key from all kwargs except 'db' (session objects aren't hashable)
-            cache_params = {k: v for k, v in kwargs.items() if k not in ("db", "user_id")}
+            cache_params = {
+                k: v for k, v in kwargs.items() if k not in ("db", "user_id")
+            }
 
             # Also include relevant positional args (skip self and user_id)
             # This handles cases like get_pie_chart_summary(self, user_id, month, year)
@@ -121,6 +126,7 @@ def cached(include_month: bool = False):
             return result
 
         return wrapper
+
     return decorator
 
 
@@ -146,7 +152,9 @@ def invalidate_user(user_id: str) -> int:
         del _cache[key]
 
     if keys_to_delete:
-        logger.info(f"Cache invalidated for user {user_id}: {len(keys_to_delete)} entries cleared")
+        logger.info(
+            f"Cache invalidated for user {user_id}: {len(keys_to_delete)} entries cleared"
+        )
 
     return len(keys_to_delete)
 

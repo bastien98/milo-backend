@@ -12,7 +12,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.api.deps import get_current_db_user, get_db
 from app.models.user import User
 from app.schemas.promo import PromoRecommendationResponse
-from app.services.promo_service import GeminiPromoError, ProfileNotFoundError, PromoService
+from app.services.promo_service import (
+    GeminiPromoError,
+    ProfileNotFoundError,
+    PromoService,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -58,7 +62,10 @@ async def get_promo_recommendations(
             },
         )
     except Exception as e:
-        logger.error(f"Promo recommendation failed for user {current_user.id}: {e}", exc_info=True)
+        logger.error(
+            f"Promo recommendation failed for user {current_user.id}: {e}",
+            exc_info=True,
+        )
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail={

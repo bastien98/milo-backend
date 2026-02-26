@@ -105,7 +105,11 @@ def _configure_structlog() -> None:
 
     root = logging.getLogger()
     # Remove default handlers to avoid duplicate plain-text output
-    root.handlers = [h for h in root.handlers if not isinstance(h, logging.StreamHandler) or h.stream != sys.stderr]
+    root.handlers = [
+        h
+        for h in root.handlers
+        if not isinstance(h, logging.StreamHandler) or h.stream != sys.stderr
+    ]
     root.addHandler(stream_handler)
     root.setLevel(logging.INFO)
 

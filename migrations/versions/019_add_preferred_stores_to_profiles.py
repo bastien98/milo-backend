@@ -4,6 +4,7 @@ Revision ID: 019_add_preferred_stores
 Revises: 018_add_nickname_age_language
 Create Date: 2026-02-17
 """
+
 from typing import Sequence, Union
 
 import sqlalchemy as sa

@@ -18,8 +18,7 @@ class UserProfile(Base):
     __tablename__ = "user_profiles"
 
     user_id: Mapped[str] = mapped_column(
-        String, ForeignKey("users.firebase_uid", ondelete="CASCADE"),
-        primary_key=True
+        String, ForeignKey("users.firebase_uid", ondelete="CASCADE"), primary_key=True
     )
     first_name: Mapped[Optional[str]] = mapped_column(String, nullable=True)
     last_name: Mapped[Optional[str]] = mapped_column(String, nullable=True)

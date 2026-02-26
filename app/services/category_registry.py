@@ -9,6 +9,7 @@ Transactions store the category display name as a string.
 For backward compatibility, the code still uses "sub_category" terminology
 internally (since category IS the leaf level).
 """
+
 import csv
 import os
 from dataclasses import dataclass, field
@@ -20,6 +21,7 @@ from typing import Dict, List, Optional
 @dataclass
 class SubCategoryInfo:
     """Full info for a sub-category."""
+
     sub_category: str
     category: str
     group: str
@@ -29,6 +31,7 @@ class SubCategoryInfo:
 @dataclass
 class CategoryNode:
     """Mid-level category containing sub-categories."""
+
     name: str
     sub_categories: List[str] = field(default_factory=list)
 
@@ -36,20 +39,21 @@ class CategoryNode:
 @dataclass
 class GroupNode:
     """Top-level group containing categories."""
+
     name: str
     categories: Dict[str, CategoryNode] = field(default_factory=dict)
 
 
 # Group-level colors (hex) for pie chart visualization
 GROUP_COLORS: Dict[str, str] = {
-    "Fresh Food": "#2ECC71",               # Emerald Green
-    "Pantry & Staples": "#E67E22",         # Warm Orange
-    "Frozen": "#3498DB",                   # Blue
-    "Drinks": "#E74C3C",                   # Coral Red
-    "Snacks": "#F39C12",                   # Amber
-    "Household": "#8E44AD",               # Royal Purple
-    "Personal Care": "#1ABC9C",            # Teal
-    "Other": "#95A5A6",                    # Slate Gray
+    "Fresh Food": "#2ECC71",  # Emerald Green
+    "Pantry & Staples": "#E67E22",  # Warm Orange
+    "Frozen": "#3498DB",  # Blue
+    "Drinks": "#E74C3C",  # Coral Red
+    "Snacks": "#F39C12",  # Amber
+    "Household": "#8E44AD",  # Royal Purple
+    "Personal Care": "#1ABC9C",  # Teal
+    "Other": "#95A5A6",  # Slate Gray
 }
 
 # Group-level SF Symbol icons (sent to iOS)
@@ -113,7 +117,9 @@ class CategoryRegistry:
         """Load categories from CSV file."""
         if csv_path is None:
             # Default: categories.csv in project root (2 levels up from app/)
-            base_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+            base_dir = os.path.dirname(
+                os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+            )
             csv_path = os.path.join(base_dir, "categories.csv")
 
         if not os.path.exists(csv_path):
@@ -149,8 +155,12 @@ class CategoryRegistry:
                 group_node = self._groups[group_name]
 
                 if category_name not in group_node.categories:
-                    group_node.categories[category_name] = CategoryNode(name=category_name)
-                group_node.categories[category_name].sub_categories.append(category_name)
+                    group_node.categories[category_name] = CategoryNode(
+                        name=category_name
+                    )
+                group_node.categories[category_name].sub_categories.append(
+                    category_name
+                )
 
         # Register backward-compat aliases for old category names
         for old_name, new_name in OLD_TO_NEW_CATEGORY.items():
@@ -283,17 +293,21 @@ class CategoryRegistry:
                 # Look up display name for this category
                 cat_info = self._lookup.get(cat_name)
                 cat_display = cat_info.display_name if cat_info else cat_name
-                categories.append({
-                    "name": cat_name,
-                    "display_name": cat_display,
-                    "sub_categories": cat_node.sub_categories,
-                })
-            groups.append({
-                "name": group_name,
-                "icon": GROUP_ICONS.get(group_name, "square.grid.2x2.fill"),
-                "color_hex": GROUP_COLORS.get(group_name, "#BDC3C7"),
-                "categories": categories,
-            })
+                categories.append(
+                    {
+                        "name": cat_name,
+                        "display_name": cat_display,
+                        "sub_categories": cat_node.sub_categories,
+                    }
+                )
+            groups.append(
+                {
+                    "name": group_name,
+                    "icon": GROUP_ICONS.get(group_name, "square.grid.2x2.fill"),
+                    "color_hex": GROUP_COLORS.get(group_name, "#BDC3C7"),
+                    "categories": categories,
+                }
+            )
         return {"groups": groups}
 
     def get_category_id(self, sub_category: str) -> str:
@@ -310,6 +324,7 @@ class CategoryRegistry:
             s = s.replace(ch, "_")
         # Collapse multiple spaces/underscores
         import re
+
         s = re.sub(r"[\s_]+", "_", s)
         # Strip leading/trailing underscores
         s = s.strip("_")

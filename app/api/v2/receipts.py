@@ -56,8 +56,10 @@ async def upload_receipt(
     file_content = await file.read()
     filename = file.filename or "receipt"
     file_type_mapping = {
-        "image/jpeg": "jpg", "image/jpg": "jpg",
-        "image/png": "png", "application/pdf": "pdf",
+        "image/jpeg": "jpg",
+        "image/jpg": "jpg",
+        "image/png": "png",
+        "application/pdf": "pdf",
     }
     file_type = file_type_mapping.get(content_type, "unknown")
 
@@ -100,8 +102,12 @@ async def upload_receipt(
 
 @router.get("", response_model=GroupedReceiptListResponse)
 async def list_receipts(
-    start_date: Optional[date] = Query(None, description="Filter by start date (YYYY-MM-DD)"),
-    end_date: Optional[date] = Query(None, description="Filter by end date (YYYY-MM-DD)"),
+    start_date: Optional[date] = Query(
+        None, description="Filter by start date (YYYY-MM-DD)"
+    ),
+    end_date: Optional[date] = Query(
+        None, description="Filter by end date (YYYY-MM-DD)"
+    ),
     store_name: Optional[str] = Query(None, description="Filter by store name"),
     page: int = Query(1, ge=1),
     page_size: int = Query(20, ge=1, le=100),
@@ -166,9 +172,7 @@ async def list_receipts(
         # Calculate average health score (excluding nulls)
         health_scores = [t.health_score for t in txns if t.health_score is not None]
         average_health_score = (
-            round(sum(health_scores) / len(health_scores), 1)
-            if health_scores
-            else None
+            round(sum(health_scores) / len(health_scores), 1) if health_scores else None
         )
 
         # Get receipt-level fields from the receipt object
@@ -176,6 +180,7 @@ async def list_receipts(
 
         # Get source from the receipt (default to receipt_upload for backwards compatibility)
         from app.models.enums import ReceiptSource
+
         source = receipt_obj.source if receipt_obj else ReceiptSource.RECEIPT_UPLOAD
 
         grouped_receipts.append(
@@ -391,11 +396,11 @@ async def delete_line_item(
     new_items_count = len(remaining_transactions)
 
     # Calculate new average health score (excluding nulls)
-    health_scores = [t.health_score for t in remaining_transactions if t.health_score is not None]
+    health_scores = [
+        t.health_score for t in remaining_transactions if t.health_score is not None
+    ]
     new_average_health_score = (
-        round(sum(health_scores) / len(health_scores), 1)
-        if health_scores
-        else None
+        round(sum(health_scores) / len(health_scores), 1) if health_scores else None
     )
 
     # Update the receipt with new total

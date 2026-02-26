@@ -88,7 +88,11 @@ class ReceiptProcessorV2:
             file_size=len(file_content),
             status=ReceiptStatus.PROCESSING,
         )
-        logger.info("receipt_record_created", receipt_id=receipt.id, duration_ms=round((time.monotonic() - t0) * 1000, 1))
+        logger.info(
+            "receipt_record_created",
+            receipt_id=receipt.id,
+            duration_ms=round((time.monotonic() - t0) * 1000, 1),
+        )
 
         try:
             # Step 3: Validate image quality
@@ -97,7 +101,11 @@ class ReceiptProcessorV2:
                 file_content, content_type
             )
             warnings.extend(validation_warnings)
-            logger.info("image_validated", receipt_id=receipt.id, duration_ms=round((time.monotonic() - t0) * 1000, 1))
+            logger.info(
+                "image_validated",
+                receipt_id=receipt.id,
+                duration_ms=round((time.monotonic() - t0) * 1000, 1),
+            )
 
             # Step 4: Check for duplicate (simple content hash)
             content_hash = self._compute_content_hash(file_content)
@@ -106,7 +114,11 @@ class ReceiptProcessorV2:
             if is_duplicate:
                 # Delete the receipt record we created
                 await self.receipt_repo.delete(receipt.id)
-                logger.info("duplicate_receipt_detected", user_id=user_id, content_hash=content_hash[:16])
+                logger.info(
+                    "duplicate_receipt_detected",
+                    user_id=user_id,
+                    content_hash=content_hash[:16],
+                )
 
                 warning_msg = "Duplicate receipt detected - not saved"
 
@@ -125,7 +137,12 @@ class ReceiptProcessorV2:
 
             # Step 5: Extract + normalize + categorize via Gemini Vision (single call)
             t0 = time.monotonic()
-            logger.info("ocr_started", receipt_id=receipt.id, user_id=user_id, provider="gemini_vision")
+            logger.info(
+                "ocr_started",
+                receipt_id=receipt.id,
+                user_id=user_id,
+                provider="gemini_vision",
+            )
             extraction_result = await self.gemini_vision_service.extract_receipt(
                 file_content, content_type
             )
@@ -205,7 +222,9 @@ class ReceiptProcessorV2:
             if extraction_result.total and extraction_result.total > 0:
                 final_total = extraction_result.total
             else:
-                final_total = sum(item.total_price for item in extraction_result.line_items)
+                final_total = sum(
+                    item.total_price for item in extraction_result.line_items
+                )
 
             # Parse receipt_time from HH:MM string to time object
             parsed_receipt_time = None
@@ -230,7 +249,12 @@ class ReceiptProcessorV2:
                 total_savings=extraction_result.total_savings,
                 store_branch=extraction_result.store_branch,
             )
-            logger.info("receipt_completed", receipt_id=receipt.id, user_id=user_id, duration_ms=round((time.monotonic() - t0) * 1000, 1))
+            logger.info(
+                "receipt_completed",
+                receipt_id=receipt.id,
+                user_id=user_id,
+                duration_ms=round((time.monotonic() - t0) * 1000, 1),
+            )
 
             # Step 8: Return results
             return ReceiptUploadResponse(

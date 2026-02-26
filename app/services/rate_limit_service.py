@@ -107,7 +107,9 @@ class RateLimitService:
         if now >= record.period_end_date:
             record = await self.repo.reset_period(record)
 
-        return self._build_status(record, firebase_uid=firebase_uid, include_increment_callback=False)
+        return self._build_status(
+            record, firebase_uid=firebase_uid, include_increment_callback=False
+        )
 
     async def check_rate_limit(self, firebase_uid: str) -> RateLimitStatus:
         """
@@ -124,7 +126,9 @@ class RateLimitService:
         if now >= record.period_end_date:
             record = await self.repo.reset_period(record)
 
-        return self._build_status(record, firebase_uid=firebase_uid, include_increment_callback=True)
+        return self._build_status(
+            record, firebase_uid=firebase_uid, include_increment_callback=True
+        )
 
     def _build_status(
         self, record: UserRateLimit, firebase_uid: str, include_increment_callback: bool
@@ -175,9 +179,13 @@ class RateLimitService:
         if now >= record.period_end_date:
             record = await self.repo.reset_period(record)
 
-        return self._build_receipt_status(record, firebase_uid=firebase_uid, include_increment_callback=False)
+        return self._build_receipt_status(
+            record, firebase_uid=firebase_uid, include_increment_callback=False
+        )
 
-    async def check_receipt_rate_limit(self, firebase_uid: str) -> ReceiptRateLimitStatus:
+    async def check_receipt_rate_limit(
+        self, firebase_uid: str
+    ) -> ReceiptRateLimitStatus:
         """
         Check if a user can upload a receipt.
 
@@ -192,7 +200,9 @@ class RateLimitService:
         if now >= record.period_end_date:
             record = await self.repo.reset_period(record)
 
-        return self._build_receipt_status(record, firebase_uid=firebase_uid, include_increment_callback=True)
+        return self._build_receipt_status(
+            record, firebase_uid=firebase_uid, include_increment_callback=True
+        )
 
     def _build_receipt_status(
         self, record: UserRateLimit, firebase_uid: str, include_increment_callback: bool

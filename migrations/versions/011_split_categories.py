@@ -9,6 +9,7 @@ Existing "Fresh Produce" transactions default to "Vegetables".
 Existing "Meat & Seafood" transactions default to "Meat".
 New receipt scans will categorize into the correct split category.
 """
+
 from typing import Sequence, Union
 
 from alembic import op
@@ -63,9 +64,7 @@ def downgrade() -> None:
         "UPDATE transactions SET category = 'Meat & Seafood' WHERE category IN ('Meat', 'Seafood')"
     )
     # Candy -> Snacks
-    op.execute(
-        "UPDATE transactions SET category = 'Snacks' WHERE category = 'Candy'"
-    )
+    op.execute("UPDATE transactions SET category = 'Snacks' WHERE category = 'Candy'")
 
     # Budgets JSONB downgrade
     for new_names, old_name in [

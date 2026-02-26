@@ -4,6 +4,7 @@ Split-aware calculation utilities for budget and analytics.
 This module provides functions to calculate user's actual spending
 by accounting for expense splits where the user only pays their portion.
 """
+
 from collections import defaultdict
 from typing import Dict, List
 
@@ -55,10 +56,12 @@ class SplitAwareCalculation:
         result = await self.db.execute(
             select(SplitAssignment, ExpenseSplit, SplitParticipant)
             .join(ExpenseSplit, SplitAssignment.split_id == ExpenseSplit.id)
-            .join(SplitParticipant, and_(
-                SplitParticipant.split_id == ExpenseSplit.id,
-                SplitParticipant.is_me
-            ))
+            .join(
+                SplitParticipant,
+                and_(
+                    SplitParticipant.split_id == ExpenseSplit.id, SplitParticipant.is_me
+                ),
+            )
             .where(
                 ExpenseSplit.user_id == user_id,
                 SplitAssignment.transaction_id.in_(transaction_ids),
@@ -76,8 +79,9 @@ class SplitAwareCalculation:
 
         # Get transaction amounts for all requested transactions
         tx_result = await self.db.execute(
-            select(Transaction.id, Transaction.item_price)
-            .where(Transaction.id.in_(transaction_ids))
+            select(Transaction.id, Transaction.item_price).where(
+                Transaction.id.in_(transaction_ids)
+            )
         )
         tx_amounts = {row.id: row.item_price for row in tx_result.all()}
 

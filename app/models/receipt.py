@@ -2,7 +2,18 @@ import uuid
 from datetime import date, datetime, time
 from typing import TYPE_CHECKING, List, Optional
 
-from sqlalchemy import Date, DateTime, Enum, Float, ForeignKey, Integer, String, Text, Time, func
+from sqlalchemy import (
+    Date,
+    DateTime,
+    Enum,
+    Float,
+    ForeignKey,
+    Integer,
+    String,
+    Text,
+    Time,
+    func,
+)
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db.base import Base
@@ -26,7 +37,9 @@ class Receipt(Base):
 
     # File metadata (nullable for bank imports which have no file)
     original_filename: Mapped[Optional[str]] = mapped_column(String, nullable=True)
-    file_type: Mapped[Optional[str]] = mapped_column(String, nullable=True)  # pdf, jpg, png
+    file_type: Mapped[Optional[str]] = mapped_column(
+        String, nullable=True
+    )  # pdf, jpg, png
     file_size_bytes: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
 
     # Processing status
@@ -36,7 +49,7 @@ class Receipt(Base):
     source: Mapped[ReceiptSource] = mapped_column(
         Enum(ReceiptSource, values_callable=lambda e: [m.value for m in e]),
         default=ReceiptSource.RECEIPT_UPLOAD,
-        nullable=False
+        nullable=False,
     )
     error_message: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
 
@@ -65,5 +78,8 @@ class Receipt(Base):
         "Transaction", back_populates="receipt", cascade="all, delete-orphan"
     )
     expense_split: Mapped[Optional["ExpenseSplit"]] = relationship(
-        "ExpenseSplit", back_populates="receipt", cascade="all, delete-orphan", uselist=False
+        "ExpenseSplit",
+        back_populates="receipt",
+        cascade="all, delete-orphan",
+        uselist=False,
     )

@@ -33,9 +33,7 @@ class ExpenseSplitService:
     ) -> ExpenseSplitResponse:
         """Create a new expense split for a receipt."""
         # Verify receipt exists and belongs to user
-        receipt = await self.receipt_repo.get_by_id_and_user(
-            data.receipt_id, user_id
-        )
+        receipt = await self.receipt_repo.get_by_id_and_user(data.receipt_id, user_id)
         if not receipt:
             raise ResourceNotFoundError(f"Receipt {data.receipt_id} not found")
 
@@ -268,11 +266,13 @@ class ExpenseSplitService:
                     pt = participant_totals[pid]
                     pt.total_amount += share_amount
                     pt.item_count += 1
-                    pt.items.append({
-                        "item_name": transaction.item_name,
-                        "item_price": transaction.item_price,
-                        "share_amount": share_amount,
-                    })
+                    pt.items.append(
+                        {
+                            "item_name": transaction.item_name,
+                            "item_price": transaction.item_price,
+                            "share_amount": share_amount,
+                        }
+                    )
 
         # Round final totals
         for pt in participant_totals.values():

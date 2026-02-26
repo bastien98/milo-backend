@@ -39,7 +39,9 @@ class WalletPassService:
         b = int(color.blue * 255)
         return f"rgb({r}, {g}, {b})"
 
-    def _create_pass_json(self, request: WalletPassCreateRequest, serial_number: str) -> dict:
+    def _create_pass_json(
+        self, request: WalletPassCreateRequest, serial_number: str
+    ) -> dict:
         """Create the pass.json structure."""
         pass_json = {
             "formatVersion": 1,
@@ -61,27 +63,27 @@ class WalletPassService:
                     {
                         "key": "created",
                         "label": "Created with",
-                        "value": "Scandalicious App"
+                        "value": "Scandalicious App",
                     },
                     {
                         "key": "date",
                         "label": "Created on",
-                        "value": datetime.now().strftime("%B %d, %Y")
-                    }
-                ]
+                        "value": datetime.now().strftime("%B %d, %Y"),
+                    },
+                ],
             },
             "barcode": {
                 "format": request.barcode_format.value,
                 "message": request.barcode_value,
-                "messageEncoding": "iso-8859-1"
+                "messageEncoding": "iso-8859-1",
             },
             "barcodes": [
                 {
                     "format": request.barcode_format.value,
                     "message": request.barcode_value,
-                    "messageEncoding": "iso-8859-1"
+                    "messageEncoding": "iso-8859-1",
                 }
-            ]
+            ],
         }
         return pass_json
 
@@ -105,7 +107,9 @@ class WalletPassService:
         """Sign the manifest with the certificate."""
         # Check if we have certificate configured
         if not self.cert_base64 or not self.team_id:
-            print("Wallet pass signing not configured: missing WALLET_CERT_BASE64 or WALLET_TEAM_ID")
+            print(
+                "Wallet pass signing not configured: missing WALLET_CERT_BASE64 or WALLET_TEAM_ID"
+            )
             return None
 
         try:
@@ -120,8 +124,8 @@ class WalletPassService:
 
             # Parse PKCS12 certificate
             password = self.cert_password.encode() if self.cert_password else None
-            private_key, certificate, additional_certs = pkcs12.load_key_and_certificates(
-                cert_data, password, default_backend()
+            private_key, certificate, additional_certs = (
+                pkcs12.load_key_and_certificates(cert_data, password, default_backend())
             )
 
             if not private_key or not certificate:
@@ -152,10 +156,13 @@ class WalletPassService:
         except Exception as e:
             print(f"Error signing manifest: {e}")
             import traceback
+
             traceback.print_exc()
             return None
 
-    async def create_pass(self, request: WalletPassCreateRequest) -> tuple[bool, Optional[bytes], Optional[str]]:
+    async def create_pass(
+        self, request: WalletPassCreateRequest
+    ) -> tuple[bool, Optional[bytes], Optional[str]]:
         """
         Create a signed .pkpass file.
 
@@ -167,12 +174,10 @@ class WalletPassService:
 
             # Create pass.json
             pass_json = self._create_pass_json(request, serial_number)
-            pass_json_data = json.dumps(pass_json, indent=2).encode('utf-8')
+            pass_json_data = json.dumps(pass_json, indent=2).encode("utf-8")
 
             # Prepare files
-            files = {
-                "pass.json": pass_json_data
-            }
+            files = {"pass.json": pass_json_data}
 
             # Add logo if provided
             if request.logo_base64:
@@ -198,7 +203,7 @@ class WalletPassService:
 
             # Create manifest
             manifest = self._compute_manifest(files)
-            manifest_data = json.dumps(manifest, indent=2).encode('utf-8')
+            manifest_data = json.dumps(manifest, indent=2).encode("utf-8")
             files["manifest.json"] = manifest_data
 
             # Sign manifest
@@ -208,11 +213,15 @@ class WalletPassService:
             else:
                 # Return unsigned pass with warning
                 # Note: Unsigned passes won't work with Apple Wallet
-                return False, None, "Pass signing not configured. Please set WALLET_CERT_BASE64, WALLET_CERT_PASSWORD, WALLET_TEAM_ID, and WALLET_WWDR_CERT_BASE64 environment variables."
+                return (
+                    False,
+                    None,
+                    "Pass signing not configured. Please set WALLET_CERT_BASE64, WALLET_CERT_PASSWORD, WALLET_TEAM_ID, and WALLET_WWDR_CERT_BASE64 environment variables.",
+                )
 
             # Create .pkpass ZIP file
             pass_buffer = BytesIO()
-            with zipfile.ZipFile(pass_buffer, 'w', zipfile.ZIP_DEFLATED) as zf:
+            with zipfile.ZipFile(pass_buffer, "w", zipfile.ZIP_DEFLATED) as zf:
                 for filename, data in files.items():
                     zf.writestr(filename, data)
 
@@ -221,6 +230,7 @@ class WalletPassService:
 
         except Exception as e:
             import traceback
+
             traceback.print_exc()
             return False, None, str(e)
 

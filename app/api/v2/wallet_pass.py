@@ -18,8 +18,7 @@ router = APIRouter(prefix="/wallet-pass", tags=["wallet-pass"])
 
 @router.post("/create", response_model=WalletPassCreateResponse)
 async def create_wallet_pass(
-    request: WalletPassCreateRequest,
-    current_user: User = Depends(get_current_db_user)
+    request: WalletPassCreateRequest, current_user: User = Depends(get_current_db_user)
 ):
     """
     Create a signed Apple Wallet pass (.pkpass file).
@@ -31,25 +30,18 @@ async def create_wallet_pass(
 
     if not success:
         return WalletPassCreateResponse(
-            success=False,
-            pass_data=None,
-            error=error or "Failed to create pass"
+            success=False, pass_data=None, error=error or "Failed to create pass"
         )
 
     # Encode pass data as base64
-    pass_base64 = base64.b64encode(pass_data).decode('utf-8')
+    pass_base64 = base64.b64encode(pass_data).decode("utf-8")
 
-    return WalletPassCreateResponse(
-        success=True,
-        pass_data=pass_base64,
-        error=None
-    )
+    return WalletPassCreateResponse(success=True, pass_data=pass_base64, error=None)
 
 
 @router.post("/create-download")
 async def create_wallet_pass_download(
-    request: WalletPassCreateRequest,
-    current_user: User = Depends(get_current_db_user)
+    request: WalletPassCreateRequest, current_user: User = Depends(get_current_db_user)
 ):
     """
     Create and directly download a .pkpass file.
@@ -66,5 +58,5 @@ async def create_wallet_pass_download(
         media_type="application/vnd.apple.pkpass",
         headers={
             "Content-Disposition": f"attachment; filename={request.store_name.replace(' ', '_')}_pass.pkpass"
-        }
+        },
     )

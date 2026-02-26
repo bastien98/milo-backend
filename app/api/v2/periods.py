@@ -12,7 +12,9 @@ router = APIRouter()
 @router.get("/periods", response_model=PeriodsResponse)
 async def get_periods(
     period_type: str = Query("month", description="Period type: week, month, year"),
-    num_periods: int = Query(52, ge=1, le=52, description="Maximum number of periods to return"),
+    num_periods: int = Query(
+        52, ge=1, le=52, description="Maximum number of periods to return"
+    ),
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_db_user),
 ):

@@ -35,7 +35,12 @@ load_dotenv(BACKEND_ROOT / ".env")
 from pinecone import Pinecone
 
 # Import from promo_recommender
-from promo_recommender import PINECONE_API_KEY, PINECONE_INDEX_HOST, fetch_enriched_profile, search_promos_for_item
+from promo_recommender import (
+    PINECONE_API_KEY,
+    PINECONE_INDEX_HOST,
+    fetch_enriched_profile,
+    search_promos_for_item,
+)
 
 # Test user IDs (add more for broader testing)
 TEST_USER_IDS = [
@@ -79,7 +84,9 @@ def analyze_brand_alignment(profile: dict, promo_results: dict) -> dict:
         "user_brands": list(user_brands),
         "total_promos": total_promos,
         "brand_aligned_promos": aligned_promos,
-        "brand_alignment_rate": aligned_promos / total_promos if total_promos > 0 else 0,
+        "brand_alignment_rate": aligned_promos / total_promos
+        if total_promos > 0
+        else 0,
     }
 
 
@@ -140,18 +147,35 @@ async def generate_user_report(user_id: str, pc: Pinecone, index) -> dict:
             "receipts_analyzed": profile.get("receipts_analyzed"),
             "data_period": f"{profile.get('data_period_start')} to {profile.get('data_period_end')}",
             "total_spend": profile.get("shopping_habits", {}).get("total_spend"),
-            "preferred_stores": [s.get("name") for s in profile.get("shopping_habits", {}).get("preferred_stores", [])[:3]],
+            "preferred_stores": [
+                s.get("name")
+                for s in profile.get("shopping_habits", {}).get("preferred_stores", [])[
+                    :3
+                ]
+            ],
         },
         "interest_items": {
             "total": len(interest_items),
-            "specific_items": sum(1 for i in interest_items if i.get("interest_category") != "category_fallback"),
-            "category_fallbacks": sum(1 for i in interest_items if i.get("interest_category") == "category_fallback"),
+            "specific_items": sum(
+                1
+                for i in interest_items
+                if i.get("interest_category") != "category_fallback"
+            ),
+            "category_fallbacks": sum(
+                1
+                for i in interest_items
+                if i.get("interest_category") == "category_fallback"
+            ),
         },
         "match_quality": {
             "items_with_matches": items_with_matches,
-            "match_rate": items_with_matches / len(interest_items) if interest_items else 0,
+            "match_rate": items_with_matches / len(interest_items)
+            if interest_items
+            else 0,
             "total_promos_found": total_promos,
-            "avg_promos_per_item": total_promos / len(interest_items) if interest_items else 0,
+            "avg_promos_per_item": total_promos / len(interest_items)
+            if interest_items
+            else 0,
         },
         "relevance_scores": {
             "avg_score": sum(all_scores) / len(all_scores) if all_scores else 0,
@@ -161,7 +185,9 @@ async def generate_user_report(user_id: str, pc: Pinecone, index) -> dict:
         },
         "savings_potential": {
             "total_savings_eur": round(total_savings, 2),
-            "avg_savings_per_promo": round(total_savings / total_promos, 2) if total_promos > 0 else 0,
+            "avg_savings_per_promo": round(total_savings / total_promos, 2)
+            if total_promos > 0
+            else 0,
         },
         "personalization": {
             "brand_alignment_rate": round(brand_analysis["brand_alignment_rate"], 2),
@@ -192,21 +218,31 @@ def print_report(report: dict):
 
     ii = report["interest_items"]
     print("\n🎯 INTEREST ITEMS")
-    print(f"   Total: {ii['total']} ({ii['specific_items']} specific + {ii['category_fallbacks']} category fallbacks)")
+    print(
+        f"   Total: {ii['total']} ({ii['specific_items']} specific + {ii['category_fallbacks']} category fallbacks)"
+    )
 
     mq = report["match_quality"]
     print("\n✅ MATCH QUALITY")
-    print(f"   Match Rate: {mq['match_rate']:.0%} ({mq['items_with_matches']}/{ii['total']} items)")
-    print(f"   Total Promos: {mq['total_promos_found']} (avg {mq['avg_promos_per_item']:.1f}/item)")
+    print(
+        f"   Match Rate: {mq['match_rate']:.0%} ({mq['items_with_matches']}/{ii['total']} items)"
+    )
+    print(
+        f"   Total Promos: {mq['total_promos_found']} (avg {mq['avg_promos_per_item']:.1f}/item)"
+    )
 
     rs = report["relevance_scores"]
     print("\n📈 RELEVANCE SCORES")
-    print(f"   Average: {rs['avg_score']:.2f} | Range: {rs['min_score']:.2f} - {rs['max_score']:.2f}")
+    print(
+        f"   Average: {rs['avg_score']:.2f} | Range: {rs['min_score']:.2f} - {rs['max_score']:.2f}"
+    )
     print(f"   High Quality (>0.7): {rs['scores_above_0.7']} promos")
 
     sp = report["savings_potential"]
     print("\n💰 SAVINGS POTENTIAL")
-    print(f"   Total: €{sp['total_savings_eur']} | Avg per promo: €{sp['avg_savings_per_promo']}")
+    print(
+        f"   Total: €{sp['total_savings_eur']} | Avg per promo: €{sp['avg_savings_per_promo']}"
+    )
 
     pers = report["personalization"]
     print("\n🎨 PERSONALIZATION")
@@ -234,11 +270,23 @@ def print_aggregate_report(reports: list[dict]):
 
     # Aggregate metrics
     total_users = len(valid_reports)
-    avg_match_rate = sum(r["match_quality"]["match_rate"] for r in valid_reports) / total_users
-    avg_relevance = sum(r["relevance_scores"]["avg_score"] for r in valid_reports) / total_users
-    total_savings = sum(r["savings_potential"]["total_savings_eur"] for r in valid_reports)
-    avg_brand_align = sum(r["personalization"]["brand_alignment_rate"] for r in valid_reports) / total_users
-    avg_store_align = sum(r["personalization"]["store_alignment_rate"] for r in valid_reports) / total_users
+    avg_match_rate = (
+        sum(r["match_quality"]["match_rate"] for r in valid_reports) / total_users
+    )
+    avg_relevance = (
+        sum(r["relevance_scores"]["avg_score"] for r in valid_reports) / total_users
+    )
+    total_savings = sum(
+        r["savings_potential"]["total_savings_eur"] for r in valid_reports
+    )
+    avg_brand_align = (
+        sum(r["personalization"]["brand_alignment_rate"] for r in valid_reports)
+        / total_users
+    )
+    avg_store_align = (
+        sum(r["personalization"]["store_alignment_rate"] for r in valid_reports)
+        / total_users
+    )
 
     print(f"\n📊 SUMMARY ({total_users} users)")
     print(f"   ├─ Match Rate:        {avg_match_rate:.0%}")
@@ -249,10 +297,18 @@ def print_aggregate_report(reports: list[dict]):
 
     # Quality thresholds for investors
     print("\n🎯 INVESTOR METRICS")
-    print(f"   ├─ Match Rate > 60%:     {'✅ PASS' if avg_match_rate > 0.6 else '❌ NEEDS WORK'}")
-    print(f"   ├─ Relevance > 0.65:     {'✅ PASS' if avg_relevance > 0.65 else '❌ NEEDS WORK'}")
-    print(f"   ├─ Savings > €5/user:    {'✅ PASS' if total_savings/total_users > 5 else '❌ NEEDS WORK'}")
-    print(f"   └─ Personalization > 30%: {'✅ PASS' if (avg_brand_align + avg_store_align)/2 > 0.3 else '❌ NEEDS WORK'}")
+    print(
+        f"   ├─ Match Rate > 60%:     {'✅ PASS' if avg_match_rate > 0.6 else '❌ NEEDS WORK'}"
+    )
+    print(
+        f"   ├─ Relevance > 0.65:     {'✅ PASS' if avg_relevance > 0.65 else '❌ NEEDS WORK'}"
+    )
+    print(
+        f"   ├─ Savings > €5/user:    {'✅ PASS' if total_savings / total_users > 5 else '❌ NEEDS WORK'}"
+    )
+    print(
+        f"   └─ Personalization > 30%: {'✅ PASS' if (avg_brand_align + avg_store_align) / 2 > 0.3 else '❌ NEEDS WORK'}"
+    )
 
 
 async def main():

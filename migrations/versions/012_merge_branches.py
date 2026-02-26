@@ -8,6 +8,7 @@ Merge migration to unify the two parallel branches:
 - Branch A (expense splits + category string migration): 003-011
 - Branch B (normalized fields + enriched profiles): 003-006
 """
+
 from typing import Sequence, Union
 
 from alembic import op

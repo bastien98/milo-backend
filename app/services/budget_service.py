@@ -43,7 +43,9 @@ class BudgetService:
         if not transactions:
             return 0.0
 
-        return await self.split_calc.calculate_split_adjusted_spend(user_id, transactions)
+        return await self.split_calc.calculate_split_adjusted_spend(
+            user_id, transactions
+        )
 
     @cached(include_month=True)
     async def get_current_month_spend_by_category(
@@ -67,7 +69,9 @@ class BudgetService:
         if not transactions:
             return {}
 
-        return await self.split_calc.calculate_split_adjusted_spend_by_category(user_id, transactions)
+        return await self.split_calc.calculate_split_adjusted_spend_by_category(
+            user_id, transactions
+        )
 
     async def get_budget_progress(
         self, user_id: str, budget: Budget
@@ -97,7 +101,9 @@ class BudgetService:
 
                 # Over budget only when spend exceeds limit by at least 1 cent
                 is_over_budget = spent_amount > limit_amount
-                over_budget_amount = round(spent_amount - limit_amount, 2) if is_over_budget else None
+                over_budget_amount = (
+                    round(spent_amount - limit_amount, 2) if is_over_budget else None
+                )
 
                 category_id = registry.get_category_id(category_name)
 
@@ -116,14 +122,18 @@ class BudgetService:
             def _progress_ratio(cp: CategoryProgress) -> float:
                 return cp.spent_amount / cp.limit_amount if cp.limit_amount > 0 else 0
 
-            category_progress.sort(key=lambda x: (_progress_ratio(x), x.spent_amount), reverse=True)
+            category_progress.sort(
+                key=lambda x: (_progress_ratio(x), x.spent_amount), reverse=True
+            )
 
         budget_response = BudgetResponse(
             id=budget.id,
             user_id=budget.user_id,
             monthly_amount=budget.monthly_amount,
             category_allocations=[
-                CategoryAllocation(category=alloc.get("category", ""), amount=alloc.get("amount", 0))
+                CategoryAllocation(
+                    category=alloc.get("category", ""), amount=alloc.get("amount", 0)
+                )
                 for alloc in (budget.category_allocations or [])
             ]
             if budget.category_allocations

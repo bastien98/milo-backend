@@ -17,14 +17,14 @@ def normalize_category_for_matching(category: str) -> str:
     # Remove special characters and normalize
     s = category.upper()
     # Remove parentheses and their contents
-    s = re.sub(r'\([^)]*\)', '', s)
+    s = re.sub(r"\([^)]*\)", "", s)
     # Replace special chars with underscores
     for ch in "&/-,. ":
         s = s.replace(ch, "_")
     # Collapse multiple underscores
-    s = re.sub(r'_+', '_', s)
+    s = re.sub(r"_+", "_", s)
     # Strip leading/trailing underscores
-    s = s.strip('_')
+    s = s.strip("_")
     return s
 
 
@@ -75,6 +75,7 @@ class TransactionRepository:
             # Resolve display name to all possible raw category names
             # (e.g., "Bakery" → ["Bakery (Bread, Pistolets)", "Bakery"])
             from app.services.category_registry import get_category_registry
+
             registry = get_category_registry()
             raw_names = registry.get_raw_names_for_display(category)
 

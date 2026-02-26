@@ -50,5 +50,3 @@ class GeminiAPIError(ScandaliciousException):
     """Raised when Gemini API call fails."""
 
     pass
-
-

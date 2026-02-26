@@ -39,9 +39,21 @@ RERANK_SCORE_THRESHOLD = 0.40  # Threshold for non-filtered searches
 
 # Belgian supermarket chains for retailer matching
 BELGIAN_RETAILERS = [
-    "colruyt", "delhaize", "carrefour", "aldi", "lidl", "spar",
-    "albert heijn", "bio-planet", "okay", "jumbo", "intermarché",
-    "cora", "match", "louis delhaize", "proxy delhaize"
+    "colruyt",
+    "delhaize",
+    "carrefour",
+    "aldi",
+    "lidl",
+    "spar",
+    "albert heijn",
+    "bio-planet",
+    "okay",
+    "jumbo",
+    "intermarché",
+    "cora",
+    "match",
+    "louis delhaize",
+    "proxy delhaize",
 ]
 
 # LLM prompt for intent extraction - uses CATEGORIES_PROMPT_LIST dynamically
@@ -146,11 +158,20 @@ class PromoChatService:
 
         # Step 2: Check if clarification needed
         if search_query.is_vague:
-            clarification = search_query.clarification_needed or "Could you be more specific about what products or promotions you're looking for?"
+            clarification = (
+                search_query.clarification_needed
+                or "Could you be more specific about what products or promotions you're looking for?"
+            )
             if language and language.value == "nl":
-                clarification = search_query.clarification_needed or "Kan je iets specifieker zijn over welke producten of promoties je zoekt?"
+                clarification = (
+                    search_query.clarification_needed
+                    or "Kan je iets specifieker zijn over welke producten of promoties je zoekt?"
+                )
             elif language and language.value == "fr":
-                clarification = search_query.clarification_needed or "Pourriez-vous être plus précis sur les produits ou promotions que vous recherchez ?"
+                clarification = (
+                    search_query.clarification_needed
+                    or "Pourriez-vous être plus précis sur les produits ou promotions que vous recherchez ?"
+                )
             return PromoChatResponse(
                 message=clarification,
                 promos=[],
@@ -163,7 +184,9 @@ class PromoChatService:
 
         # Step 4: Build response
         if promos:
-            response_message = self._build_success_response(search_query, promos, language)
+            response_message = self._build_success_response(
+                search_query, promos, language
+            )
         else:
             response_message = self._build_no_results_response(search_query, language)
 
@@ -218,7 +241,9 @@ class PromoChatService:
                 categories=[],
                 retailers=[],
                 is_vague=len(message.split()) < 2,
-                clarification_needed="What specific product or category are you looking for?" if len(message.split()) < 2 else None,
+                clarification_needed="What specific product or category are you looking for?"
+                if len(message.split()) < 2
+                else None,
             )
 
     async def _call_llm(self, system_prompt: str, user_message: str) -> str:
@@ -257,15 +282,19 @@ class PromoChatService:
         else:
             # Fallback: simple keyword extraction without LLM
             logger.warning("No LLM API key available, using fallback extraction")
-            return json.dumps({
-                "search_text": user_message,
-                "product_keywords": user_message.split(),
-                "brands": [],
-                "categories": [],
-                "retailers": [r for r in BELGIAN_RETAILERS if r in user_message.lower()],
-                "is_vague": len(user_message.split()) < 2,
-                "clarification_needed": None,
-            })
+            return json.dumps(
+                {
+                    "search_text": user_message,
+                    "product_keywords": user_message.split(),
+                    "brands": [],
+                    "categories": [],
+                    "retailers": [
+                        r for r in BELGIAN_RETAILERS if r in user_message.lower()
+                    ],
+                    "is_vague": len(user_message.split()) < 2,
+                    "clarification_needed": None,
+                }
+            )
 
     async def _search_promos(self, search_query: SearchQuery) -> list[PromoResult]:
         """Search Pinecone for matching promotions using 3 category-filtered searches."""
@@ -303,10 +332,16 @@ class PromoChatService:
             base_filter = expiry_filter
 
         # Run 3 searches with granular_category filters (if available)
-        granular_categories = search_query.granular_categories[:3] if search_query.granular_categories else []
+        granular_categories = (
+            search_query.granular_categories[:3]
+            if search_query.granular_categories
+            else []
+        )
 
         if granular_categories:
-            logger.info(f"[promo_chat] Running 3 category-filtered searches: {granular_categories}")
+            logger.info(
+                f"[promo_chat] Running 3 category-filtered searches: {granular_categories}"
+            )
 
             for category in granular_categories:
                 # Build filter with category
@@ -314,7 +349,9 @@ class PromoChatService:
                 combined_filter = {"$and": [base_filter, category_filter]}
 
                 # Search with category filter
-                hits = self._pinecone_search_and_rerank(search_query.search_text, combined_filter)
+                hits = self._pinecone_search_and_rerank(
+                    search_query.search_text, combined_filter
+                )
 
                 for hit in hits:
                     hit_id = hit.get("_id", "")
@@ -327,11 +364,19 @@ class PromoChatService:
                     # Threshold for category-filtered searches
                     if score >= 0.55:
                         promo = self._build_promo_result(hit.get("fields", {}), score)
-                        if promo and self._is_valid_promo(promo) and not self._is_expired_promo(promo):
+                        if (
+                            promo
+                            and self._is_valid_promo(promo)
+                            and not self._is_expired_promo(promo)
+                        ):
                             # Boost score if brand matches exactly
                             if search_query.brands and promo.brand:
-                                if promo.brand.lower() in [b.lower() for b in search_query.brands]:
-                                    promo.relevance_score = min(1.0, promo.relevance_score + 0.2)
+                                if promo.brand.lower() in [
+                                    b.lower() for b in search_query.brands
+                                ]:
+                                    promo.relevance_score = min(
+                                        1.0, promo.relevance_score + 0.2
+                                    )
                             all_promos.append(promo)
 
         # Also run a search without category filter as fallback
@@ -348,17 +393,27 @@ class PromoChatService:
             score = hit.get("_score", 0)
             if score >= RERANK_SCORE_THRESHOLD:
                 promo = self._build_promo_result(hit.get("fields", {}), score)
-                if promo and self._is_valid_promo(promo) and not self._is_expired_promo(promo):
+                if (
+                    promo
+                    and self._is_valid_promo(promo)
+                    and not self._is_expired_promo(promo)
+                ):
                     if search_query.brands and promo.brand:
-                        if promo.brand.lower() in [b.lower() for b in search_query.brands]:
-                            promo.relevance_score = min(1.0, promo.relevance_score + 0.2)
+                        if promo.brand.lower() in [
+                            b.lower() for b in search_query.brands
+                        ]:
+                            promo.relevance_score = min(
+                                1.0, promo.relevance_score + 0.2
+                            )
                     all_promos.append(promo)
 
         # Sort by relevance and limit results
         all_promos.sort(key=lambda p: p.relevance_score, reverse=True)
         return all_promos[:RERANK_TOP_N]
 
-    def _pinecone_search_and_rerank(self, query_text: str, filter_dict: Optional[dict]) -> list[dict]:
+    def _pinecone_search_and_rerank(
+        self, query_text: str, filter_dict: Optional[dict]
+    ) -> list[dict]:
         """Execute integrated search + rerank in a single Pinecone API call."""
         logger.info(f"[promo_chat] search: '{query_text}' filter={filter_dict}")
 
@@ -376,11 +431,15 @@ class PromoChatService:
         }
 
         try:
-            results = self.index.search_records(namespace="__default__", query=query, rerank=rerank)
+            results = self.index.search_records(
+                namespace="__default__", query=query, rerank=rerank
+            )
             return self._extract_hits(results)
         except (AttributeError, TypeError):
             try:
-                results = self.index.search(namespace="__default__", query=query, rerank=rerank)
+                results = self.index.search(
+                    namespace="__default__", query=query, rerank=rerank
+                )
                 return self._extract_hits(results)
             except Exception as e:
                 logger.warning(f"Pinecone search failed: {e}")
@@ -395,7 +454,9 @@ class PromoChatService:
 
         if isinstance(results, dict):
             if "result" in results:
-                return [self._normalize_hit(h) for h in results["result"].get("hits", [])]
+                return [
+                    self._normalize_hit(h) for h in results["result"].get("hits", [])
+                ]
             if "matches" in results:
                 return [self._normalize_hit(m) for m in results["matches"]]
 
@@ -416,9 +477,15 @@ class PromoChatService:
             "_score": getattr(hit, "_score", getattr(hit, "score", 0)),
         }
         if hasattr(hit, "fields"):
-            d["fields"] = dict(hit.fields) if not isinstance(hit.fields, dict) else hit.fields
+            d["fields"] = (
+                dict(hit.fields) if not isinstance(hit.fields, dict) else hit.fields
+            )
         elif hasattr(hit, "metadata"):
-            d["fields"] = dict(hit.metadata) if not isinstance(hit.metadata, dict) else hit.metadata
+            d["fields"] = (
+                dict(hit.metadata)
+                if not isinstance(hit.metadata, dict)
+                else hit.metadata
+            )
         else:
             d["fields"] = {}
         return d
@@ -449,9 +516,13 @@ class PromoChatService:
 
             return PromoResult(
                 product_name=fields.get("normalized_name", "Unknown"),
-                original_description=fields.get("original_description", fields.get("normalized_name", "")),
+                original_description=fields.get(
+                    "original_description", fields.get("normalized_name", "")
+                ),
                 brand=fields.get("brand"),
-                category=fields.get("granular_category", fields.get("parent_category", "Other")),
+                category=fields.get(
+                    "granular_category", fields.get("parent_category", "Other")
+                ),
                 original_price=original_price,
                 promo_price=promo_price,
                 savings=savings,
@@ -487,7 +558,12 @@ class PromoChatService:
         except (ValueError, TypeError):
             return False
 
-    def _build_success_response(self, search_query: SearchQuery, promos: list[PromoResult], language: Optional[Language] = None) -> str:
+    def _build_success_response(
+        self,
+        search_query: SearchQuery,
+        promos: list[PromoResult],
+        language: Optional[Language] = None,
+    ) -> str:
         """Build a friendly response message for successful search."""
         num_promos = len(promos)
         retailers = list(set(p.retailer for p in promos if p.retailer))
@@ -500,12 +576,18 @@ class PromoChatService:
         if is_nl:
             if search_query.brands:
                 brand_str = ", ".join(search_query.brands)
-                parts.append(f"Ik heb {num_promos} promotie{'s' if num_promos != 1 else ''} gevonden voor {brand_str}")
+                parts.append(
+                    f"Ik heb {num_promos} promotie{'s' if num_promos != 1 else ''} gevonden voor {brand_str}"
+                )
             elif search_query.product_keywords:
                 keyword_str = ", ".join(search_query.product_keywords[:2])
-                parts.append(f"Ik heb {num_promos} promotie{'s' if num_promos != 1 else ''} gevonden voor {keyword_str}")
+                parts.append(
+                    f"Ik heb {num_promos} promotie{'s' if num_promos != 1 else ''} gevonden voor {keyword_str}"
+                )
             else:
-                parts.append(f"Ik heb {num_promos} passende promotie{'s' if num_promos != 1 else ''} gevonden")
+                parts.append(
+                    f"Ik heb {num_promos} passende promotie{'s' if num_promos != 1 else ''} gevonden"
+                )
             if retailers:
                 if len(retailers) == 1:
                     parts.append(f"bij {retailers[0].title()}")
@@ -517,12 +599,18 @@ class PromoChatService:
         elif is_fr:
             if search_query.brands:
                 brand_str = ", ".join(search_query.brands)
-                parts.append(f"J'ai trouvé {num_promos} promotion{'s' if num_promos != 1 else ''} pour {brand_str}")
+                parts.append(
+                    f"J'ai trouvé {num_promos} promotion{'s' if num_promos != 1 else ''} pour {brand_str}"
+                )
             elif search_query.product_keywords:
                 keyword_str = ", ".join(search_query.product_keywords[:2])
-                parts.append(f"J'ai trouvé {num_promos} promotion{'s' if num_promos != 1 else ''} pour {keyword_str}")
+                parts.append(
+                    f"J'ai trouvé {num_promos} promotion{'s' if num_promos != 1 else ''} pour {keyword_str}"
+                )
             else:
-                parts.append(f"J'ai trouvé {num_promos} promotion{'s' if num_promos != 1 else ''} correspondante{'s' if num_promos != 1 else ''}")
+                parts.append(
+                    f"J'ai trouvé {num_promos} promotion{'s' if num_promos != 1 else ''} correspondante{'s' if num_promos != 1 else ''}"
+                )
             if retailers:
                 if len(retailers) == 1:
                     parts.append(f"chez {retailers[0].title()}")
@@ -534,12 +622,18 @@ class PromoChatService:
         else:
             if search_query.brands:
                 brand_str = ", ".join(search_query.brands)
-                parts.append(f"I found {num_promos} promotion{'s' if num_promos != 1 else ''} for {brand_str}")
+                parts.append(
+                    f"I found {num_promos} promotion{'s' if num_promos != 1 else ''} for {brand_str}"
+                )
             elif search_query.product_keywords:
                 keyword_str = ", ".join(search_query.product_keywords[:2])
-                parts.append(f"I found {num_promos} promotion{'s' if num_promos != 1 else ''} for {keyword_str}")
+                parts.append(
+                    f"I found {num_promos} promotion{'s' if num_promos != 1 else ''} for {keyword_str}"
+                )
             else:
-                parts.append(f"I found {num_promos} matching promotion{'s' if num_promos != 1 else ''}")
+                parts.append(
+                    f"I found {num_promos} matching promotion{'s' if num_promos != 1 else ''}"
+                )
             if retailers:
                 if len(retailers) == 1:
                     parts.append(f"at {retailers[0].title()}")
@@ -551,7 +645,9 @@ class PromoChatService:
 
         return result
 
-    def _build_no_results_response(self, search_query: SearchQuery, language: Optional[Language] = None) -> str:
+    def _build_no_results_response(
+        self, search_query: SearchQuery, language: Optional[Language] = None
+    ) -> str:
         """Build a response when no promos are found."""
         is_nl = language and language.value == "nl"
         is_fr = language and language.value == "fr"

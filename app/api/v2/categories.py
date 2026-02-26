@@ -64,16 +64,18 @@ async def get_used_categories(
     for row in rows:
         sub_category = row.category
         info = registry.get_info(sub_category)
-        used_categories.append({
-            "sub_category": sub_category,
-            "display_name": registry.get_display_name(sub_category),
-            "category": info.category if info else "Uncategorized",
-            "group": info.group if info else "Miscellaneous",
-            "total_spent": float(row.total_spent),
-            "transaction_count": row.transaction_count,
-            "color_hex": registry.get_group_color(sub_category),
-            "icon": registry.get_group_icon(sub_category),
-            "category_id": registry.get_category_id(sub_category),
-        })
+        used_categories.append(
+            {
+                "sub_category": sub_category,
+                "display_name": registry.get_display_name(sub_category),
+                "category": info.category if info else "Uncategorized",
+                "group": info.group if info else "Miscellaneous",
+                "total_spent": float(row.total_spent),
+                "transaction_count": row.transaction_count,
+                "color_hex": registry.get_group_color(sub_category),
+                "icon": registry.get_group_icon(sub_category),
+                "category_id": registry.get_category_id(sub_category),
+            }
+        )
 
     return {"categories": used_categories}

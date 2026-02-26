@@ -3,7 +3,18 @@ from datetime import date as date_type
 from datetime import datetime
 from typing import TYPE_CHECKING, Optional
 
-from sqlalchemy import Boolean, Date, DateTime, Float, ForeignKey, Index, Integer, String, Text, func
+from sqlalchemy import (
+    Boolean,
+    Date,
+    DateTime,
+    Float,
+    ForeignKey,
+    Index,
+    Integer,
+    String,
+    Text,
+    func,
+)
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db.base import Base
@@ -51,12 +62,12 @@ class Transaction(Base):
     # Unit measure fields
     unit_of_measure: Mapped[Optional[str]] = mapped_column(String(10), nullable=True)
     weight_or_volume: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
-    price_per_unit_measure: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    price_per_unit_measure: Mapped[Optional[float]] = mapped_column(
+        Float, nullable=True
+    )
 
     # Categorization - sub-category display name from categories.csv
-    category: Mapped[str] = mapped_column(
-        String, nullable=False, index=True
-    )
+    category: Mapped[str] = mapped_column(String, nullable=False, index=True)
 
     # Health score (0-5, where 0 is unhealthy and 5 is very healthy)
     health_score: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)

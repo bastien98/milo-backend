@@ -61,8 +61,14 @@ Authorization: Bearer <firebase_id_token>
 """,
     lifespan=lifespan,
     openapi_tags=[
-        {"name": "v2 - receipts", "description": "📄 Upload and manage receipts (Gemini AI)"},
-        {"name": "v2 - chat", "description": "💬 AI-powered spending assistant (Gemini AI)"},
+        {
+            "name": "v2 - receipts",
+            "description": "📄 Upload and manage receipts (Gemini AI)",
+        },
+        {
+            "name": "v2 - chat",
+            "description": "💬 AI-powered spending assistant (Gemini AI)",
+        },
         {"name": "v2 - transactions", "description": "💳 View and manage transactions"},
         {"name": "v2 - analytics", "description": "📊 Spending analytics and insights"},
         {"name": "v2 - rate-limit", "description": "⏱️ Rate limit status"},

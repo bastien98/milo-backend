@@ -38,7 +38,12 @@ async def process_receipt_background(
     as FAILED status on the receipt.
     """
     log = logger.bind(receipt_id=receipt_id, user_id=user_id)
-    log.info("receipt_uploaded", filename=filename, file_type=file_type, file_size_bytes=len(file_content))
+    log.info(
+        "receipt_uploaded",
+        filename=filename,
+        file_type=file_type,
+        file_size_bytes=len(file_content),
+    )
 
     async with async_session_maker() as session:
         try:
@@ -56,7 +61,9 @@ async def process_receipt_background(
             t0 = time.monotonic()
             image_validator = ImageValidator()
             image_validator.raise_if_invalid(file_content, content_type)
-            log.info("image_validated", duration_ms=round((time.monotonic() - t0) * 1000, 1))
+            log.info(
+                "image_validated", duration_ms=round((time.monotonic() - t0) * 1000, 1)
+            )
 
             # Step 3: Extract via Gemini Vision
             t0 = time.monotonic()

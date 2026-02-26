@@ -40,14 +40,18 @@ class Settings(BaseSettings):
     CORS_ORIGINS: List[str] = ["*"]
 
     # Database migrations
-    USE_ALEMBIC: bool = True  # If True, skip create_all() in init_db() (Alembic handles migrations)
+    USE_ALEMBIC: bool = (
+        True  # If True, skip create_all() in init_db() (Alembic handles migrations)
+    )
 
     # Apple Wallet Pass signing
     WALLET_PASS_TYPE_ID: str = "pass.com.deepmaind.milo"
     WALLET_TEAM_ID: str = ""
     WALLET_CERT_BASE64: Optional[str] = None  # Base64-encoded .p12 certificate
     WALLET_CERT_PASSWORD: str = ""
-    WALLET_WWDR_CERT_BASE64: Optional[str] = None  # Base64-encoded WWDR .pem certificate
+    WALLET_WWDR_CERT_BASE64: Optional[str] = (
+        None  # Base64-encoded WWDR .pem certificate
+    )
 
     @field_validator("DATABASE_URL", mode="before")
     @classmethod

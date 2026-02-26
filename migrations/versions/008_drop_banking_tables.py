@@ -8,6 +8,7 @@ Removes all banking-related tables (bank_connections, bank_accounts,
 bank_transactions) as the bank integration feature has been removed.
 The app is now focused purely on grocery receipt scanning.
 """
+
 from typing import Sequence, Union
 
 import sqlalchemy as sa

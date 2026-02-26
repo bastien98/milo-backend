@@ -8,6 +8,7 @@ from app.models.enums import Gender, Language
 
 class ProfileBase(BaseModel):
     """Base profile schema with common fields"""
+
     first_name: Optional[str] = Field(None, max_length=100)
     last_name: Optional[str] = Field(None, max_length=100)
     nickname: Optional[str] = Field(None, max_length=100)
@@ -19,11 +20,13 @@ class ProfileBase(BaseModel):
 
 class ProfileCreate(ProfileBase):
     """Schema for creating or updating a complete profile"""
+
     pass
 
 
 class ProfileUpdate(BaseModel):
     """Schema for partial profile updates"""
+
     first_name: Optional[str] = Field(None, max_length=100)
     last_name: Optional[str] = Field(None, max_length=100)
     nickname: Optional[str] = Field(None, max_length=100)
@@ -35,6 +38,7 @@ class ProfileUpdate(BaseModel):
 
 class ProfileResponse(ProfileBase):
     """Schema for profile responses"""
+
     user_id: str
     profile_completed: bool
     created_at: datetime
@@ -46,5 +50,6 @@ class ProfileResponse(ProfileBase):
 
 class ProfileNotFoundResponse(BaseModel):
     """Schema for profile not found response"""
+
     error: str = "Profile not found"
     profile_completed: bool = False

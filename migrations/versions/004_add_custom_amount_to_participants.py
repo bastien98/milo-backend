@@ -7,14 +7,15 @@ Create Date: 2026-02-03
 This migration adds a custom_amount field to split_participants to support
 custom split amounts (instead of equal splits).
 """
+
 from typing import Sequence, Union
 
 import sqlalchemy as sa
 from alembic import op
 
 # revision identifiers, used by Alembic.
-revision: str = '004_add_custom_amount'
-down_revision: Union[str, None] = '003_add_expense_splits'
+revision: str = "004_add_custom_amount"
+down_revision: Union[str, None] = "003_add_expense_splits"
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 

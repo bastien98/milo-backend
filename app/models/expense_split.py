@@ -2,7 +2,16 @@ import uuid
 from datetime import datetime
 from typing import TYPE_CHECKING, List, Optional
 
-from sqlalchemy import JSON, Boolean, DateTime, Float, ForeignKey, Index, Integer, String
+from sqlalchemy import (
+    JSON,
+    Boolean,
+    DateTime,
+    Float,
+    ForeignKey,
+    Index,
+    Integer,
+    String,
+)
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from sqlalchemy.sql import func
 
@@ -58,13 +67,22 @@ class SplitParticipant(Base):
         String, primary_key=True, default=lambda: str(uuid.uuid4())
     )
     split_id: Mapped[str] = mapped_column(
-        String, ForeignKey("expense_splits.id", ondelete="CASCADE"), nullable=False, index=True
+        String,
+        ForeignKey("expense_splits.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
     )
     name: Mapped[str] = mapped_column(String(100), nullable=False)
-    color: Mapped[str] = mapped_column(String(7), nullable=False)  # Hex color like #FF6B6B
+    color: Mapped[str] = mapped_column(
+        String(7), nullable=False
+    )  # Hex color like #FF6B6B
     display_order: Mapped[int] = mapped_column(Integer, default=0)
-    custom_amount: Mapped[Optional[float]] = mapped_column(Float, nullable=True)  # Custom split amount (null = equal split)
-    is_me: Mapped[bool] = mapped_column(Boolean, default=False)  # True if this participant represents the current user
+    custom_amount: Mapped[Optional[float]] = mapped_column(
+        Float, nullable=True
+    )  # Custom split amount (null = equal split)
+    is_me: Mapped[bool] = mapped_column(
+        Boolean, default=False
+    )  # True if this participant represents the current user
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
     )
@@ -88,13 +106,21 @@ class SplitAssignment(Base):
         String, primary_key=True, default=lambda: str(uuid.uuid4())
     )
     split_id: Mapped[str] = mapped_column(
-        String, ForeignKey("expense_splits.id", ondelete="CASCADE"), nullable=False, index=True
+        String,
+        ForeignKey("expense_splits.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
     )
     transaction_id: Mapped[str] = mapped_column(
-        String, ForeignKey("transactions.id", ondelete="CASCADE"), nullable=False, index=True
+        String,
+        ForeignKey("transactions.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
     )
     # JSON array of participant IDs who share this item
-    participant_ids: Mapped[List[str]] = mapped_column(JSON, nullable=False, default=list)
+    participant_ids: Mapped[List[str]] = mapped_column(
+        JSON, nullable=False, default=list
+    )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
     )
@@ -108,7 +134,12 @@ class SplitAssignment(Base):
     )
 
     __table_args__ = (
-        Index("ix_split_assignments_split_transaction", "split_id", "transaction_id", unique=True),
+        Index(
+            "ix_split_assignments_split_transaction",
+            "split_id",
+            "transaction_id",
+            unique=True,
+        ),
     )
 
 

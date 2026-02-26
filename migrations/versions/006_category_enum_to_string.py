@@ -7,6 +7,7 @@ Create Date: 2026-02-04
 Migrates the transactions.category column from a PostgreSQL enum type
 to a VARCHAR column with human-readable sub-category names.
 """
+
 from typing import Sequence, Union
 
 import sqlalchemy as sa

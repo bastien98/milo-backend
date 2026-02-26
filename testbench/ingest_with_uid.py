@@ -82,7 +82,9 @@ def get_id_token_for_uid(uid: str) -> str:
     response = requests.post(
         url,
         json={
-            "token": custom_token.decode() if isinstance(custom_token, bytes) else custom_token,
+            "token": custom_token.decode()
+            if isinstance(custom_token, bytes)
+            else custom_token,
             "returnSecureToken": True,
         },
         timeout=30,
@@ -124,7 +126,9 @@ def upload_receipt(api_url: str, token: str, file_path: Path) -> dict:
 
     return {
         "status_code": response.status_code,
-        "response": response.json() if response.headers.get("content-type", "").startswith("application/json") else response.text,
+        "response": response.json()
+        if response.headers.get("content-type", "").startswith("application/json")
+        else response.text,
     }
 
 
@@ -152,9 +156,9 @@ def main():
 
     api_url = API_URLS[args.env]
 
-    print(f"\n{'='*60}")
+    print(f"\n{'=' * 60}")
     print("PDF Receipt Ingestion (with Firebase UID)")
-    print(f"{'='*60}")
+    print(f"{'=' * 60}")
     print(f"Firebase UID: {args.uid}")
     print(f"Target API:   {api_url}")
     print(f"Directory:    {args.directory}")
@@ -196,9 +200,9 @@ def main():
         sys.exit(1)
 
     # Upload files
-    print(f"\n{'='*60}")
+    print(f"\n{'=' * 60}")
     print("Starting uploads...")
-    print(f"{'='*60}\n")
+    print(f"{'=' * 60}\n")
 
     results = {"success": [], "failed": [], "duplicates": []}
 
@@ -215,9 +219,21 @@ def main():
                     print("  -> Duplicate (skipped)")
                     results["duplicates"].append(pdf_file.name)
                 else:
-                    store = response.get("store_name", "?") if isinstance(response, dict) else "?"
-                    items = response.get("items_count", 0) if isinstance(response, dict) else 0
-                    total = response.get("total_amount", 0) if isinstance(response, dict) else 0
+                    store = (
+                        response.get("store_name", "?")
+                        if isinstance(response, dict)
+                        else "?"
+                    )
+                    items = (
+                        response.get("items_count", 0)
+                        if isinstance(response, dict)
+                        else 0
+                    )
+                    total = (
+                        response.get("total_amount", 0)
+                        if isinstance(response, dict)
+                        else 0
+                    )
                     print(f"  -> OK: {store}, {items} items, EUR {total:.2f}")
                     results["success"].append(pdf_file.name)
             elif status_code == 401:
@@ -228,7 +244,11 @@ def main():
                 results["failed"].append(pdf_file.name)
                 break  # Stop on rate limit
             else:
-                error = response.get("detail", str(response)[:100]) if isinstance(response, dict) else str(response)[:100]
+                error = (
+                    response.get("detail", str(response)[:100])
+                    if isinstance(response, dict)
+                    else str(response)[:100]
+                )
                 print(f"  -> Failed ({status_code}): {error}")
                 results["failed"].append(pdf_file.name)
 
@@ -237,9 +257,9 @@ def main():
             results["failed"].append(pdf_file.name)
 
     # Summary
-    print(f"\n{'='*60}")
+    print(f"\n{'=' * 60}")
     print("Summary")
-    print(f"{'='*60}")
+    print(f"{'=' * 60}")
     print(f"  Successful: {len(results['success'])}")
     print(f"  Duplicates: {len(results['duplicates'])}")
     print(f"  Failed:     {len(results['failed'])}")
