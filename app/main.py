@@ -1,21 +1,21 @@
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI, Request, HTTPException
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
+from app.api.v2.router import api_router as api_router_v2
 from app.config import get_settings
-from app.core.logging import setup_logging
 from app.core.exceptions import (
-    ReceiptProcessingError,
-    ImageValidationError,
-    VeryfiAPIError,
     GeminiAPIError,
-    ResourceNotFoundError,
+    ImageValidationError,
     PermissionDeniedError,
     RateLimitExceededError,
+    ReceiptProcessingError,
+    ResourceNotFoundError,
+    VeryfiAPIError,
 )
-from app.api.v2.router import api_router as api_router_v2
+from app.core.logging import setup_logging
 from app.db.session import init_db
 from app.middleware.request_logging import RequestLoggingMiddleware
 

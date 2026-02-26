@@ -12,7 +12,7 @@ this provides significant performance benefits with minimal complexity.
 import logging
 from datetime import date
 from functools import wraps
-from typing import Callable, Any
+from typing import Any, Callable
 
 from cachetools import TTLCache
 

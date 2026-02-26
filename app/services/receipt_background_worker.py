@@ -4,7 +4,6 @@ Runs outside the request lifecycle with its own DB session.
 Called via FastAPI BackgroundTasks from the upload endpoint.
 """
 
-import hashlib
 import time
 from datetime import date, datetime, timezone
 from datetime import time as dt_time
@@ -12,13 +11,13 @@ from typing import Optional
 
 import structlog
 
-from app.db.session import async_session_maker
 from app.db.repositories.receipt_repo import ReceiptRepository
 from app.db.repositories.transaction_repo import TransactionRepository
+from app.db.session import async_session_maker
 from app.models.enums import ReceiptStatus
-from app.services.image_validator import ImageValidator
-from app.services.gemini_vision_service import GeminiVisionService
 from app.services.enriched_profile_service import EnrichedProfileService
+from app.services.gemini_vision_service import GeminiVisionService
+from app.services.image_validator import ImageValidator
 
 logger = structlog.get_logger(__name__)
 

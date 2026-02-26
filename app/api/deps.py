@@ -5,9 +5,9 @@ from fastapi import Depends, Request
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.db.session import async_session_maker
-from app.core.security import get_current_user, FirebaseUser
+from app.core.security import FirebaseUser, get_current_user
 from app.db.repositories.user_repo import UserRepository
+from app.db.session import async_session_maker
 from app.models.user import User
 
 

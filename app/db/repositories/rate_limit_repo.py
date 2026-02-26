@@ -6,7 +6,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.user_rate_limit import UserRateLimit
 
-
 RATE_LIMIT_MESSAGES = 100
 RATE_LIMIT_RECEIPTS = 999999
 RATE_LIMIT_PERIOD_DAYS = 30

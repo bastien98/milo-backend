@@ -1,10 +1,11 @@
-import pandas as pd
-import numpy as np
-import uuid
-import random
 import os
+import random
+import uuid
 from datetime import datetime, timedelta
 from pathlib import Path
+
+import numpy as np
+import pandas as pd
 
 # Output goes to testbench/data/sample_csvs/<USER_ID>/
 SCRIPT_DIR = Path(__file__).resolve().parent

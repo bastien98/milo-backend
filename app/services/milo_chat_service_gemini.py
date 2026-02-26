@@ -1,12 +1,12 @@
 import time
-from datetime import date, timedelta
-from typing import List, Optional, AsyncGenerator
 from collections import defaultdict
+from datetime import date, timedelta
+from typing import AsyncGenerator, List, Optional
 
 import structlog
 from google import genai
 from google.genai import types
-from sqlalchemy import select, and_
+from sqlalchemy import and_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import get_settings
@@ -167,7 +167,7 @@ You will receive the user's profile information (name, etc.) and their full tran
             f"\nData Range: {earliest_date} to {latest_date}",
             f"Total Transactions: {transaction_count}",
             f"Total Spending: €{total_spend:.2f}",
-            f"\n--- SPENDING BY CATEGORY ---",
+            "\n--- SPENDING BY CATEGORY ---",
         ]
 
         # Sort categories by spending
@@ -177,19 +177,19 @@ You will receive the user's profile information (name, etc.) and their full tran
             pct = (amount / total_spend * 100) if total_spend > 0 else 0
             context_parts.append(f"  {category}: €{amount:.2f} ({pct:.1f}%, {count} items)")
 
-        context_parts.append(f"\n--- SPENDING BY STORE ---")
+        context_parts.append("\n--- SPENDING BY STORE ---")
         sorted_stores = sorted(store_totals.items(), key=lambda x: x[1], reverse=True)
         for store, amount in sorted_stores:
             visits = len(store_visits[store])
             pct = (amount / total_spend * 100) if total_spend > 0 else 0
             context_parts.append(f"  {store}: €{amount:.2f} ({pct:.1f}%, {visits} visits)")
 
-        context_parts.append(f"\n--- MONTHLY SPENDING ---")
+        context_parts.append("\n--- MONTHLY SPENDING ---")
         for month in sorted(monthly_totals.keys(), reverse=True)[:12]:
             context_parts.append(f"  {month}: €{monthly_totals[month]:.2f}")
 
         # Include recent transaction details (last 100)
-        context_parts.append(f"\n--- RECENT TRANSACTIONS (Last 100) ---")
+        context_parts.append("\n--- RECENT TRANSACTIONS (Last 100) ---")
         for t in transactions[:100]:
             context_parts.append(
                 f"  [{t.date}] {t.store_name} | {t.item_name} | €{t.item_price:.2f} | {t.category}"

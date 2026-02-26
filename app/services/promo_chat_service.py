@@ -335,7 +335,7 @@ class PromoChatService:
                             all_promos.append(promo)
 
         # Also run a search without category filter as fallback
-        logger.info(f"[promo_chat] Running fallback search without category filter")
+        logger.info("[promo_chat] Running fallback search without category filter")
         hits = self._pinecone_search_and_rerank(search_query.search_text, base_filter)
 
         for hit in hits:

@@ -2,9 +2,9 @@ import json
 from typing import Optional
 
 import firebase_admin
-from firebase_admin import auth, credentials
 from fastapi import HTTPException, Security
-from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
+from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
+from firebase_admin import auth, credentials
 
 from app.config import get_settings
 

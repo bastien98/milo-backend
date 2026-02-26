@@ -10,9 +10,8 @@ The app is now focused purely on grocery receipt scanning.
 """
 from typing import Sequence, Union
 
-from alembic import op
 import sqlalchemy as sa
-
+from alembic import op
 
 # revision identifiers, used by Alembic.
 revision: str = "008_drop_banking_tables"

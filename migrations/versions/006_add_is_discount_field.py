@@ -9,9 +9,8 @@ This migration adds the is_discount field for tracking discount/bonus line items
 """
 from typing import Sequence, Union
 
-from alembic import op
 import sqlalchemy as sa
-
+from alembic import op
 
 # revision identifiers, used by Alembic.
 revision: str = '006_add_is_discount'

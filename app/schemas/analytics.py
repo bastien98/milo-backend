@@ -1,10 +1,9 @@
-from typing import List, Optional, Dict
 from datetime import date
+from typing import Dict, List, Optional
 
 from pydantic import BaseModel
 
-from app.services.category_registry import get_category_registry, GROUP_COLORS
-
+from app.services.category_registry import get_category_registry
 
 # Legacy category color mapping for Pie Chart visualization
 # Kept for backward compatibility with old category names

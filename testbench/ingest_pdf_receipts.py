@@ -5,13 +5,13 @@ Uploads PDF receipt files to the Scandelicious backend API.
 Profile enrichment happens automatically after each successful upload.
 """
 
+import argparse
 import os
 import sys
-import argparse
-import requests
 from pathlib import Path
 from typing import Optional
 
+import requests
 
 # Default API endpoints
 API_URLS = {
@@ -227,14 +227,14 @@ Environment Variables:
 
             if status_code == 200:
                 if isinstance(response, dict) and response.get("is_duplicate"):
-                    print(f"  ⚠ Duplicate receipt detected (skipped)")
+                    print("  ⚠ Duplicate receipt detected (skipped)")
                     results["duplicates"].append(pdf_file.name)
                 else:
                     receipt_id = response.get("receipt_id", "N/A") if isinstance(response, dict) else "N/A"
                     store = response.get("store_name", "Unknown") if isinstance(response, dict) else "Unknown"
                     items = response.get("items_count", 0) if isinstance(response, dict) else 0
                     total = response.get("total_amount", 0) if isinstance(response, dict) else 0
-                    print(f"  ✓ Success!")
+                    print("  ✓ Success!")
                     print(f"    Receipt ID: {receipt_id}")
                     print(f"    Store: {store}")
                     print(f"    Items: {items}, Total: €{total:.2f}")
@@ -246,13 +246,13 @@ Environment Variables:
                         "total": total,
                     })
             elif status_code == 401:
-                print(f"  ✗ Authentication failed - check your Firebase token")
+                print("  ✗ Authentication failed - check your Firebase token")
                 results["failed"].append({"file": pdf_file.name, "error": "Authentication failed"})
                 if not args.continue_on_error:
                     print("\nStopping due to authentication error.")
                     break
             elif status_code == 429:
-                print(f"  ✗ Rate limit exceeded")
+                print("  ✗ Rate limit exceeded")
                 if isinstance(response, dict):
                     print(f"    Used: {response.get('receipts_used')}/{response.get('receipts_limit')}")
                 results["failed"].append({"file": pdf_file.name, "error": "Rate limit exceeded"})
@@ -267,7 +267,7 @@ Environment Variables:
                     break
 
         except requests.exceptions.Timeout:
-            print(f"  ✗ Request timed out")
+            print("  ✗ Request timed out")
             results["failed"].append({"file": pdf_file.name, "error": "Timeout"})
             if not args.continue_on_error:
                 break

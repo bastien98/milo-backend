@@ -2,20 +2,20 @@ import calendar
 from datetime import date
 from typing import List
 
-from sqlalchemy import select, and_
+from sqlalchemy import and_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.cache import cached
-from app.models.transaction import Transaction
 from app.models.budget import Budget
+from app.models.transaction import Transaction
 from app.schemas.budget import (
-    BudgetResponse,
     BudgetProgressResponse,
-    CategoryProgress,
+    BudgetResponse,
     CategoryAllocation,
+    CategoryProgress,
 )
-from app.services.split_aware_calculation import SplitAwareCalculation
 from app.services.category_registry import get_category_registry
+from app.services.split_aware_calculation import SplitAwareCalculation
 
 
 class BudgetService:

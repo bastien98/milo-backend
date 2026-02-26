@@ -2,10 +2,10 @@ from typing import List, Optional
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.db.repositories.user_profile_repo import UserProfileRepository
-from app.models.user_profile import UserProfile
-from app.models.enums import Gender, Language
 from app.core.exceptions import ResourceNotFoundError
+from app.db.repositories.user_profile_repo import UserProfileRepository
+from app.models.enums import Gender, Language
+from app.models.user_profile import UserProfile
 
 
 class ProfileService:

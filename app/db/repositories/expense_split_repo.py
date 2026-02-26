@@ -1,15 +1,15 @@
 from datetime import datetime
-from typing import Optional, List
+from typing import List, Optional
 
-from sqlalchemy import select, and_, delete
+from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from app.models.expense_split import (
     ExpenseSplit,
-    SplitParticipant,
-    SplitAssignment,
     RecentFriend,
+    SplitAssignment,
+    SplitParticipant,
 )
 
 

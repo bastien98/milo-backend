@@ -12,9 +12,8 @@ This migration adds fields for semantic search and granular categorization:
 """
 from typing import Sequence, Union
 
-from alembic import op
 import sqlalchemy as sa
-
+from alembic import op
 
 # revision identifiers, used by Alembic.
 revision: str = '003_add_normalized_fields'

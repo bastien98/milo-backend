@@ -1,16 +1,16 @@
 import uuid
-from datetime import datetime
 from datetime import date as date_type
+from datetime import datetime
 from typing import TYPE_CHECKING, Optional
 
-from sqlalchemy import String, DateTime, Integer, Float, ForeignKey, Date, Index, Text, Boolean, func
+from sqlalchemy import Boolean, Date, DateTime, Float, ForeignKey, Index, Integer, String, Text, func
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db.base import Base
 
 if TYPE_CHECKING:
-    from app.models.user import User
     from app.models.receipt import Receipt
+    from app.models.user import User
 
 
 class Transaction(Base):

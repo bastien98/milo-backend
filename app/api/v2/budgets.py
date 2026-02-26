@@ -1,27 +1,27 @@
 import logging
 from datetime import date
-from dateutil.relativedelta import relativedelta
 
+from dateutil.relativedelta import relativedelta
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 logger = logging.getLogger(__name__)
 
-from app.api.deps import get_db, get_current_db_user
-from app.models.user import User
-from app.db.repositories.budget_repo import BudgetRepository
+from app.api.deps import get_current_db_user, get_db
 from app.db.repositories.budget_history_repo import BudgetHistoryRepository
-from app.services.budget_service import BudgetService
+from app.db.repositories.budget_repo import BudgetRepository
+from app.models.user import User
 from app.schemas.budget import (
     BudgetCreate,
-    BudgetUpdate,
-    BudgetResponse,
-    BudgetNotFoundResponse,
-    BudgetProgressResponse,
-    CategoryAllocation,
     BudgetHistoryEntry,
     BudgetHistoryResponse,
+    BudgetNotFoundResponse,
+    BudgetProgressResponse,
+    BudgetResponse,
+    BudgetUpdate,
+    CategoryAllocation,
 )
+from app.services.budget_service import BudgetService
 
 router = APIRouter()
 

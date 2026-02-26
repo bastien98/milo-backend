@@ -1,22 +1,22 @@
-from typing import Optional, List, Dict
+from typing import Dict, List, Optional
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.exceptions import ResourceNotFoundError
 from app.db.repositories.expense_split_repo import ExpenseSplitRepository
-from app.db.repositories.transaction_repo import TransactionRepository
 from app.db.repositories.receipt_repo import ReceiptRepository
-from app.models.expense_split import ExpenseSplit, SplitParticipant
+from app.db.repositories.transaction_repo import TransactionRepository
+from app.models.expense_split import ExpenseSplit
 from app.schemas.expense_split import (
+    FRIEND_COLORS,
     ExpenseSplitCreate,
     ExpenseSplitResponse,
-    SplitParticipantResponse,
-    SplitAssignmentResponse,
     ParticipantTotal,
-    SplitCalculationResponse,
     RecentFriendResponse,
-    FRIEND_COLORS,
+    SplitAssignmentResponse,
+    SplitCalculationResponse,
+    SplitParticipantResponse,
 )
-from app.core.exceptions import ResourceNotFoundError
 
 
 class ExpenseSplitService:
@@ -235,7 +235,7 @@ class ExpenseSplitService:
         transaction_map = {t.id: t for t in transactions}
 
         # Build participant map
-        participant_map = {p.id: p for p in split.participants}
+        {p.id: p for p in split.participants}
 
         # Calculate totals per participant
         participant_totals: Dict[str, ParticipantTotal] = {}

@@ -663,7 +663,7 @@ def main():
     )
     parser.add_argument(
         "pdf_filename",
-        help=f"PDF filename in the folder/ directory (e.g., AH - Bonus-week-7-2026.pdf)",
+        help="PDF filename in the folder/ directory (e.g., AH - Bonus-week-7-2026.pdf)",
     )
     parser.add_argument(
         "--dry-run",

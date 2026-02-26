@@ -1,11 +1,11 @@
 from datetime import date, datetime, time
-from typing import Optional, List
+from typing import List, Optional
 
-from sqlalchemy import select, func, and_
+from sqlalchemy import and_, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.models.enums import ReceiptSource, ReceiptStatus
 from app.models.receipt import Receipt
-from app.models.enums import ReceiptStatus, ReceiptSource
 
 
 class ReceiptRepository:

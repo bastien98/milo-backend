@@ -5,8 +5,8 @@ from typing import List, Optional
 
 import httpx
 
-from app.core.exceptions import VeryfiAPIError
 from app.config import get_settings
+from app.core.exceptions import VeryfiAPIError
 
 settings = get_settings()
 
@@ -121,7 +121,7 @@ class VeryfiService:
                 data = response.json()
                 return self._parse_response(data)
 
-        except httpx.TimeoutException as e:
+        except httpx.TimeoutException:
             raise VeryfiAPIError(
                 "Veryfi API request timed out",
                 details={"error_type": "timeout"},
@@ -177,7 +177,7 @@ class VeryfiService:
 
         # Veryfi duplicate detection - only provides boolean flag, no similarity score
         is_duplicate = data.get("is_duplicate", False)
-        original_doc_id = data.get("duplicate_of")  # Integer ID of original document
+        data.get("duplicate_of")  # Integer ID of original document
 
         # Note: Veryfi doesn't provide a similarity score, only boolean is_duplicate
         duplicate_score = None

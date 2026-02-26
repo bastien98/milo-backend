@@ -4,16 +4,14 @@ Split-aware calculation utilities for budget and analytics.
 This module provides functions to calculate user's actual spending
 by accounting for expense splits where the user only pays their portion.
 """
-from typing import Dict, List, Set, Optional
 from collections import defaultdict
+from typing import Dict, List
 
-from sqlalchemy import select, and_
+from sqlalchemy import and_, select
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.orm import selectinload
 
-from app.models.expense_split import ExpenseSplit, SplitParticipant, SplitAssignment
+from app.models.expense_split import ExpenseSplit, SplitAssignment, SplitParticipant
 from app.models.transaction import Transaction
-
 
 
 class SplitAwareCalculation:
@@ -59,7 +57,7 @@ class SplitAwareCalculation:
             .join(ExpenseSplit, SplitAssignment.split_id == ExpenseSplit.id)
             .join(SplitParticipant, and_(
                 SplitParticipant.split_id == ExpenseSplit.id,
-                SplitParticipant.is_me == True
+                SplitParticipant.is_me
             ))
             .where(
                 ExpenseSplit.user_id == user_id,

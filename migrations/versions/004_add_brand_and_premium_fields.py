@@ -10,9 +10,8 @@ This migration adds fields for brand tracking and premium classification:
 """
 from typing import Sequence, Union
 
-from alembic import op
 import sqlalchemy as sa
-
+from alembic import op
 
 # revision identifiers, used by Alembic.
 revision: str = '004_add_brand_premium'

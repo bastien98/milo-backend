@@ -1,7 +1,8 @@
-from datetime import datetime, date as date_type
-from typing import TYPE_CHECKING, Optional, Any
+from datetime import date as date_type
+from datetime import datetime
+from typing import TYPE_CHECKING, Any, Optional
 
-from sqlalchemy import String, DateTime, Date, Integer, ForeignKey
+from sqlalchemy import Date, DateTime, ForeignKey, Integer, String
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from sqlalchemy.sql import func

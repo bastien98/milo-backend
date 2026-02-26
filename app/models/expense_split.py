@@ -1,16 +1,16 @@
 import uuid
 from datetime import datetime
-from typing import TYPE_CHECKING, Optional, List
+from typing import TYPE_CHECKING, List, Optional
 
-from sqlalchemy import String, DateTime, Integer, ForeignKey, JSON, Index, Float, Boolean
+from sqlalchemy import JSON, Boolean, DateTime, Float, ForeignKey, Index, Integer, String
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from sqlalchemy.sql import func
 
 from app.db.base import Base
 
 if TYPE_CHECKING:
-    from app.models.user import User
     from app.models.receipt import Receipt
+    from app.models.user import User
 
 
 class ExpenseSplit(Base):

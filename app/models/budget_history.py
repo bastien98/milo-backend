@@ -1,10 +1,10 @@
 import uuid
 from datetime import datetime
-from typing import TYPE_CHECKING, Optional, List, Any
+from typing import TYPE_CHECKING, Any, List, Optional
 
-from sqlalchemy import String, DateTime, Float, ForeignKey, Boolean, Index, UniqueConstraint
-from sqlalchemy.orm import Mapped, mapped_column, relationship
+from sqlalchemy import Boolean, DateTime, Float, ForeignKey, Index, String, UniqueConstraint
 from sqlalchemy.dialects.postgresql import JSONB
+from sqlalchemy.orm import Mapped, mapped_column, relationship
 from sqlalchemy.sql import func
 
 from app.db.base import Base

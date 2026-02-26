@@ -3,23 +3,22 @@
 # Service for creating and signing Apple Wallet passes
 #
 
-import json
-import hashlib
-import zipfile
 import base64
+import hashlib
+import json
+import uuid
+import zipfile
+from datetime import datetime
 from io import BytesIO
 from typing import Optional
-from datetime import datetime
-import uuid
 
 from cryptography import x509
-from cryptography.hazmat.primitives.serialization import pkcs12, Encoding
-from cryptography.hazmat.primitives import hashes
 from cryptography.hazmat.backends import default_backend
-from cryptography.hazmat.primitives.serialization import pkcs7
+from cryptography.hazmat.primitives import hashes
+from cryptography.hazmat.primitives.serialization import Encoding, pkcs7, pkcs12
 
-from app.schemas.wallet_pass import WalletPassCreateRequest, PassColor
 from app.config import get_settings
+from app.schemas.wallet_pass import PassColor, WalletPassCreateRequest
 
 
 class WalletPassService:

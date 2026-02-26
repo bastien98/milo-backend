@@ -1,17 +1,16 @@
 from dataclasses import dataclass
 from datetime import datetime, timezone
-from typing import Optional, Callable, Awaitable
+from typing import Awaitable, Callable, Optional
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.repositories.rate_limit_repo import (
-    RateLimitRepository,
     RATE_LIMIT_MESSAGES,
     RATE_LIMIT_RECEIPTS,
+    RateLimitRepository,
 )
 from app.db.session import async_session_maker
 from app.models.user_rate_limit import UserRateLimit
-
 
 
 @dataclass
@@ -70,7 +69,7 @@ async def increment_rate_limit_counter(firebase_uid: str) -> None:
             if record:
                 record.messages_used += 1
                 await session.commit()
-        except Exception as e:
+        except Exception:
             await session.rollback()
 
 
@@ -88,7 +87,7 @@ async def increment_receipt_rate_limit_counter(firebase_uid: str) -> None:
             if record:
                 record.receipts_used += 1
                 await session.commit()
-        except Exception as e:
+        except Exception:
             await session.rollback()
 
 

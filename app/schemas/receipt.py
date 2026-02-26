@@ -1,9 +1,9 @@
 from datetime import date, datetime, time
-from typing import Optional, List
+from typing import List, Optional
 
 from pydantic import BaseModel
 
-from app.models.enums import ReceiptStatus, ReceiptSource
+from app.models.enums import ReceiptSource, ReceiptStatus
 
 
 class ExtractedItem(BaseModel):

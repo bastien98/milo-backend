@@ -10,9 +10,8 @@ for bank imports which have no associated files.
 """
 from typing import Sequence, Union
 
-from alembic import op
 import sqlalchemy as sa
-
+from alembic import op
 
 # revision identifiers, used by Alembic.
 revision: str = '002_add_receipt_source'

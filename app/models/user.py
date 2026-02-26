@@ -1,21 +1,21 @@
 import uuid
 from datetime import datetime
-from typing import TYPE_CHECKING, Optional, List
+from typing import TYPE_CHECKING, List, Optional
 
-from sqlalchemy import String, DateTime, Boolean
+from sqlalchemy import Boolean, DateTime, String
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from sqlalchemy.sql import func
 
 from app.db.base import Base
 
 if TYPE_CHECKING:
-    from app.models.transaction import Transaction
-    from app.models.receipt import Receipt
-    from app.models.user_profile import UserProfile
-    from app.models.user_enriched_profile import UserEnrichedProfile
     from app.models.budget import Budget
     from app.models.budget_history import BudgetHistory
     from app.models.expense_split import ExpenseSplit
+    from app.models.receipt import Receipt
+    from app.models.transaction import Transaction
+    from app.models.user_enriched_profile import UserEnrichedProfile
+    from app.models.user_profile import UserProfile
 
 
 class User(Base):

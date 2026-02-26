@@ -7,14 +7,14 @@ from fastapi.responses import StreamingResponse
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.deps import get_db, get_current_db_user
+from app.api.deps import get_current_db_user, get_db
 from app.config import get_settings
+from app.core.exceptions import GeminiAPIError, RateLimitExceededError
 from app.db.session import async_session_maker
 from app.models.user import User
 from app.schemas.chat import ChatRequest, ChatResponse
 from app.services.milo_chat_service_gemini import MiloChatServiceGemini
 from app.services.rate_limit_service import RateLimitService, RateLimitStatus
-from app.core.exceptions import GeminiAPIError, RateLimitExceededError
 
 router = APIRouter()
 settings = get_settings()
@@ -101,7 +101,7 @@ async def chat(
         return ChatResponse(response=response_text)
     except GeminiAPIError:
         raise
-    except Exception as e:
+    except Exception:
         raise HTTPException(status_code=500, detail="Failed to process chat request")
 
 
@@ -153,7 +153,7 @@ async def stream_response(
         except GeminiAPIError as e:
             error_data = json.dumps({"type": "error", "error": str(e.message)})
             yield f"data: {error_data}\n\n"
-        except Exception as e:
+        except Exception:
             error_data = json.dumps({"type": "error", "error": "Failed to process chat request"})
             yield f"data: {error_data}\n\n"
 
@@ -232,7 +232,7 @@ async def chat_test(
         return ChatResponse(response=response_text)
     except GeminiAPIError:
         raise
-    except Exception as e:
+    except Exception:
         raise HTTPException(status_code=500, detail="Failed to process chat request")
 
 

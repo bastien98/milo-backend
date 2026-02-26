@@ -12,7 +12,6 @@ from typing import Sequence, Union
 
 from alembic import op
 
-
 # revision identifiers, used by Alembic.
 revision: str = "012_merge_branches"
 down_revision: tuple = ("006_add_is_discount", "011_split_categories")

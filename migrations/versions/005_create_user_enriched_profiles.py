@@ -9,10 +9,9 @@ and promo interest items as JSONB for LLM consumption.
 """
 from typing import Sequence, Union
 
-from alembic import op
 import sqlalchemy as sa
+from alembic import op
 from sqlalchemy.dialects.postgresql import JSONB
-
 
 # revision identifiers, used by Alembic.
 revision: str = '005_enriched_profiles'

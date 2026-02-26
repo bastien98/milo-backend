@@ -13,15 +13,14 @@ from datetime import date, timedelta
 from typing import Any, List, Optional
 
 from pinecone import Pinecone
-from sqlalchemy.ext.asyncio import AsyncSession
-
 from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import get_settings
 from app.db.repositories.enriched_profile_repo import EnrichedProfileRepository
+from app.models.enums import Language
 from app.models.user import User
 from app.models.user_profile import UserProfile
-from app.models.enums import Language
 
 logger = logging.getLogger(__name__)
 
@@ -288,6 +287,7 @@ class PromoService:
     ) -> str:
         from google import genai
         from google.genai import types
+
         from app.schemas.promo import GeminiPromoOutput
 
         # Build language-aware system prompt
@@ -325,7 +325,7 @@ class PromoService:
                 logger.warning(f"Gemini returned truncated JSON (attempt {attempt}), retrying...")
                 time.sleep(1)
                 return self._call_gemini(user_message, attempt + 1, language, preferred_stores)
-            logger.warning(f"Gemini returned truncated JSON on final attempt")
+            logger.warning("Gemini returned truncated JSON on final attempt")
 
         return response.text
 
@@ -785,7 +785,9 @@ def _parse_llm_response(raw_response: str) -> dict:
     and discount_percentage (server-side recalculation for accuracy).
     """
     import re
+
     from pydantic import ValidationError
+
     from app.schemas.promo import GeminiPromoOutput
 
     clean = raw_response.strip()

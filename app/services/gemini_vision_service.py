@@ -21,8 +21,8 @@ from google import genai
 from google.genai import types
 from PIL import Image
 
-from app.core.exceptions import GeminiAPIError
 from app.config import get_settings
+from app.core.exceptions import GeminiAPIError
 from app.services.categories import CATEGORIES_PROMPT_LIST, GRANULAR_CATEGORIES, get_parent_category
 
 settings = get_settings()

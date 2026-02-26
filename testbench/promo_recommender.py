@@ -23,7 +23,6 @@ import asyncio
 import json
 import logging
 import os
-import ssl
 import sys
 import time
 from datetime import date, datetime
@@ -850,7 +849,7 @@ def main():
         return
 
     # --- Step 2: Search Pinecone + rerank ---
-    logger.info(f"\nStep 2: Searching Pinecone promos index + reranking...")
+    logger.info("\nStep 2: Searching Pinecone promos index + reranking...")
     pc = Pinecone(api_key=PINECONE_API_KEY)
     index = pc.Index(host=PINECONE_INDEX_HOST)
 
@@ -875,7 +874,7 @@ def main():
                     f"-- {p.get('promo_mechanism') or 'price reduction'}"
                 )
         else:
-            logger.info(f"    -> No matching promos found")
+            logger.info("    -> No matching promos found")
 
         # Small delay to avoid rate limits
         time.sleep(0.2)

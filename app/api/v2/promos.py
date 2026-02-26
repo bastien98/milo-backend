@@ -9,10 +9,10 @@ import logging
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.deps import get_db, get_current_db_user
+from app.api.deps import get_current_db_user, get_db
 from app.models.user import User
 from app.schemas.promo import PromoRecommendationResponse
-from app.services.promo_service import PromoService, ProfileNotFoundError, GeminiPromoError
+from app.services.promo_service import GeminiPromoError, ProfileNotFoundError, PromoService
 
 logger = logging.getLogger(__name__)
 

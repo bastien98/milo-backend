@@ -1,7 +1,7 @@
 from fastapi import APIRouter, Depends, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.deps import get_db, get_current_db_user
+from app.api.deps import get_current_db_user, get_db
 from app.models.user import User
 from app.schemas.analytics import PeriodsResponse
 from app.services.analytics_service import AnalyticsService

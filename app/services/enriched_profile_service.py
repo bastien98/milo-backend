@@ -3,14 +3,14 @@ from collections import Counter, defaultdict
 from datetime import date, timedelta
 from typing import Any
 
-from sqlalchemy import select, func, and_
+from sqlalchemy import and_, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.cache import invalidate_user
-from app.models.transaction import Transaction
-from app.models.receipt import Receipt
-from app.models.enums import ReceiptStatus
 from app.db.repositories.enriched_profile_repo import EnrichedProfileRepository
+from app.models.enums import ReceiptStatus
+from app.models.receipt import Receipt
+from app.models.transaction import Transaction
 
 logger = logging.getLogger(__name__)
 

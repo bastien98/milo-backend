@@ -12,7 +12,6 @@ from typing import Sequence, Union
 
 from alembic import op
 
-
 # revision identifiers, used by Alembic.
 revision: str = "013_cleanup_categories"
 down_revision: Union[str, None] = "012_merge_branches"

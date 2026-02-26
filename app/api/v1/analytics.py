@@ -5,17 +5,16 @@ from typing import Optional
 from fastapi import APIRouter, Depends, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.deps import get_db, get_current_db_user
+from app.api.deps import get_current_db_user, get_db
 from app.models.user import User
 from app.schemas.analytics import (
-    PeriodSummary,
-    CategoryBreakdown,
-    StoreBreakdown,
-    TrendsResponse,
     AggregateResponse,
     AllTimeResponse,
-    YearSummaryResponse,
+    CategoryBreakdown,
     PieChartSummaryResponse,
+    StoreBreakdown,
+    TrendsResponse,
+    YearSummaryResponse,
 )
 from app.services.analytics_service import AnalyticsService
 

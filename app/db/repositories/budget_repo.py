@@ -1,9 +1,8 @@
 from datetime import datetime
-from typing import Optional, List, Any
+from typing import Any, List, Optional
 
-from sqlalchemy import select, delete
+from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.sql import func
 
 from app.models.budget import Budget
 

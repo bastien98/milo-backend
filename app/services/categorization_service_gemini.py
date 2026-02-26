@@ -5,9 +5,9 @@ from typing import List, Optional
 from google import genai
 from google.genai import types
 
+from app.config import get_settings
 from app.core.exceptions import GeminiAPIError
 from app.services.category_registry import get_category_registry
-from app.config import get_settings
 from app.services.veryfi_service import VeryfiLineItem
 
 settings = get_settings()

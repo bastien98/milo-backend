@@ -17,10 +17,11 @@ import asyncio
 import json
 import os
 import sys
-from datetime import date, datetime
+from datetime import datetime
 from pathlib import Path
 
 import certifi
+
 os.environ["SSL_CERT_FILE"] = certifi.where()
 os.environ["REQUESTS_CA_BUNDLE"] = certifi.where()
 
@@ -28,16 +29,13 @@ BACKEND_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(BACKEND_ROOT))
 
 from dotenv import load_dotenv
+
 load_dotenv(BACKEND_ROOT / ".env")
 
-import asyncpg
 from pinecone import Pinecone
 
 # Import from promo_recommender
-from promo_recommender import (
-    DB_CONFIG, PINECONE_API_KEY, PINECONE_INDEX_HOST,
-    fetch_enriched_profile, search_promos_for_item
-)
+from promo_recommender import PINECONE_API_KEY, PINECONE_INDEX_HOST, fetch_enriched_profile, search_promos_for_item
 
 # Test user IDs (add more for broader testing)
 TEST_USER_IDS = [
@@ -187,35 +185,35 @@ def print_report(report: dict):
     print("=" * 70)
 
     ps = report["profile_summary"]
-    print(f"\n📊 PROFILE SUMMARY")
+    print("\n📊 PROFILE SUMMARY")
     print(f"   Receipts: {ps['receipts_analyzed']} | Period: {ps['data_period']}")
     print(f"   Total Spend: €{ps['total_spend']}")
     print(f"   Top Stores: {', '.join(ps['preferred_stores'])}")
 
     ii = report["interest_items"]
-    print(f"\n🎯 INTEREST ITEMS")
+    print("\n🎯 INTEREST ITEMS")
     print(f"   Total: {ii['total']} ({ii['specific_items']} specific + {ii['category_fallbacks']} category fallbacks)")
 
     mq = report["match_quality"]
-    print(f"\n✅ MATCH QUALITY")
+    print("\n✅ MATCH QUALITY")
     print(f"   Match Rate: {mq['match_rate']:.0%} ({mq['items_with_matches']}/{ii['total']} items)")
     print(f"   Total Promos: {mq['total_promos_found']} (avg {mq['avg_promos_per_item']:.1f}/item)")
 
     rs = report["relevance_scores"]
-    print(f"\n📈 RELEVANCE SCORES")
+    print("\n📈 RELEVANCE SCORES")
     print(f"   Average: {rs['avg_score']:.2f} | Range: {rs['min_score']:.2f} - {rs['max_score']:.2f}")
     print(f"   High Quality (>0.7): {rs['scores_above_0.7']} promos")
 
     sp = report["savings_potential"]
-    print(f"\n💰 SAVINGS POTENTIAL")
+    print("\n💰 SAVINGS POTENTIAL")
     print(f"   Total: €{sp['total_savings_eur']} | Avg per promo: €{sp['avg_savings_per_promo']}")
 
     pers = report["personalization"]
-    print(f"\n🎨 PERSONALIZATION")
+    print("\n🎨 PERSONALIZATION")
     print(f"   Brand Alignment: {pers['brand_alignment_rate']:.0%}")
     print(f"   Store Alignment: {pers['store_alignment_rate']:.0%}")
 
-    print(f"\n📦 PROMO BREAKDOWN BY ITEM")
+    print("\n📦 PROMO BREAKDOWN BY ITEM")
     for name, data in report["promo_breakdown"].items():
         status = "✓" if data["count"] > 0 else "✗"
         scores_str = ", ".join(f"{s:.2f}" for s in data["scores"][:3])
@@ -250,7 +248,7 @@ def print_aggregate_report(reports: list[dict]):
     print(f"   └─ Store Alignment:   {avg_store_align:.0%}")
 
     # Quality thresholds for investors
-    print(f"\n🎯 INVESTOR METRICS")
+    print("\n🎯 INVESTOR METRICS")
     print(f"   ├─ Match Rate > 60%:     {'✅ PASS' if avg_match_rate > 0.6 else '❌ NEEDS WORK'}")
     print(f"   ├─ Relevance > 0.65:     {'✅ PASS' if avg_relevance > 0.65 else '❌ NEEDS WORK'}")
     print(f"   ├─ Savings > €5/user:    {'✅ PASS' if total_savings/total_users > 5 else '❌ NEEDS WORK'}")

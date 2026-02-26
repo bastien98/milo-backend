@@ -17,9 +17,9 @@ def test_app_has_routes():
 
 def test_models_import():
     """Verify SQLAlchemy models can be imported."""
-    from app.models.user import User
-    from app.models.transaction import Transaction
     from app.models.receipt import Receipt
+    from app.models.transaction import Transaction
+    from app.models.user import User
     assert User is not None
     assert Transaction is not None
     assert Receipt is not None

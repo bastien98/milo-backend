@@ -12,14 +12,14 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Response
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.deps import get_db, get_current_db_user
+from app.api.deps import get_current_db_user, get_db
 from app.config import get_settings
+from app.core.exceptions import RateLimitExceededError
 from app.models.user import User
 from app.models.user_profile import UserProfile
 from app.schemas.promo_chat import PromoChatRequest, PromoChatResponse
 from app.services.promo_chat_service import PromoChatService
 from app.services.rate_limit_service import RateLimitService
-from app.core.exceptions import RateLimitExceededError
 
 router = APIRouter()
 logger = logging.getLogger(__name__)

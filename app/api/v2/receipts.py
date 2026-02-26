@@ -1,33 +1,30 @@
-import time
 from collections import defaultdict
 from datetime import date
 from math import ceil
 from typing import Optional
 
 import structlog
-from fastapi import APIRouter, BackgroundTasks, Depends, UploadFile, File, Query
-from fastapi.responses import JSONResponse
+from fastapi import APIRouter, BackgroundTasks, Depends, File, Query, UploadFile
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.deps import get_db, get_current_db_user
+from app.api.deps import get_current_db_user, get_db
+from app.core.exceptions import ResourceNotFoundError
+from app.db.repositories.receipt_repo import ReceiptRepository
+from app.db.repositories.transaction_repo import TransactionRepository
 from app.models.enums import ReceiptStatus
 from app.models.user import User
 from app.schemas.receipt import (
-    ReceiptUploadAcceptedResponse,
-    ReceiptStatusResponse,
-    ReceiptUploadResponse,
-    ReceiptResponse,
     GroupedReceipt,
-    GroupedReceiptTransaction,
     GroupedReceiptListResponse,
+    GroupedReceiptTransaction,
     LineItemDeleteResponse,
+    ReceiptResponse,
+    ReceiptStatusResponse,
+    ReceiptUploadAcceptedResponse,
 )
+from app.services.enriched_profile_service import EnrichedProfileService
 from app.services.image_validator import ImageValidator
 from app.services.receipt_background_worker import process_receipt_background
-from app.db.repositories.receipt_repo import ReceiptRepository
-from app.db.repositories.transaction_repo import TransactionRepository
-from app.core.exceptions import ResourceNotFoundError
-from app.services.enriched_profile_service import EnrichedProfileService
 
 logger = structlog.get_logger(__name__)
 router = APIRouter()

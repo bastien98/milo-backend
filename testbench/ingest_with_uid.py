@@ -8,18 +8,19 @@ This script:
 3. Uploads all PDFs from a directory to the backend
 """
 
+import argparse
+import json
 import os
 import sys
-import argparse
-import requests
-import json
 from pathlib import Path
+
+import requests
 
 # Add parent directory to path for imports
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 import firebase_admin
-from firebase_admin import credentials, auth
+from firebase_admin import auth, credentials
 
 # Firebase Web API Key (from GoogleService-Info.plist)
 FIREBASE_WEB_API_KEY = "AIzaSyBX431ZHYa4HSzf_gAUSu5dPWY6dfEz1Fc"
@@ -211,7 +212,7 @@ def main():
 
             if status_code == 200:
                 if isinstance(response, dict) and response.get("is_duplicate"):
-                    print(f"  -> Duplicate (skipped)")
+                    print("  -> Duplicate (skipped)")
                     results["duplicates"].append(pdf_file.name)
                 else:
                     store = response.get("store_name", "?") if isinstance(response, dict) else "?"
@@ -220,10 +221,10 @@ def main():
                     print(f"  -> OK: {store}, {items} items, EUR {total:.2f}")
                     results["success"].append(pdf_file.name)
             elif status_code == 401:
-                print(f"  -> Auth failed")
+                print("  -> Auth failed")
                 results["failed"].append(pdf_file.name)
             elif status_code == 429:
-                print(f"  -> Rate limited")
+                print("  -> Rate limited")
                 results["failed"].append(pdf_file.name)
                 break  # Stop on rate limit
             else:
@@ -244,7 +245,7 @@ def main():
     print(f"  Failed:     {len(results['failed'])}")
 
     if results["failed"]:
-        print(f"\nFailed files:")
+        print("\nFailed files:")
         for f in results["failed"]:
             print(f"  - {f}")
 

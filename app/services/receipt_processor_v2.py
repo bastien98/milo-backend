@@ -7,12 +7,12 @@ from typing import Optional
 import structlog
 from fastapi import UploadFile
 
-from app.models.enums import ReceiptStatus
-from app.schemas.receipt import ReceiptUploadResponse, ExtractedItem
-from app.services.image_validator import ImageValidator
-from app.services.gemini_vision_service import GeminiVisionService
 from app.db.repositories.receipt_repo import ReceiptRepository
 from app.db.repositories.transaction_repo import TransactionRepository
+from app.models.enums import ReceiptStatus
+from app.schemas.receipt import ExtractedItem, ReceiptUploadResponse
+from app.services.gemini_vision_service import GeminiVisionService
+from app.services.image_validator import ImageValidator
 
 logger = structlog.get_logger(__name__)
 

@@ -1,8 +1,8 @@
-from datetime import date
-from typing import Optional, List
 import re
+from datetime import date
+from typing import List, Optional
 
-from sqlalchemy import select, func, and_, delete, or_
+from sqlalchemy import and_, delete, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.transaction import Transaction

@@ -1,16 +1,16 @@
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.deps import get_db, get_current_db_user
+from app.api.deps import get_current_db_user, get_db
+from app.core.exceptions import ResourceNotFoundError
 from app.models.user import User
 from app.schemas.profile import (
     ProfileCreate,
-    ProfileUpdate,
-    ProfileResponse,
     ProfileNotFoundResponse,
+    ProfileResponse,
+    ProfileUpdate,
 )
 from app.services.profile_service import ProfileService
-from app.core.exceptions import ResourceNotFoundError
 
 router = APIRouter()
 

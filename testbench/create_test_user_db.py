@@ -10,14 +10,15 @@ Usage:
 """
 
 import asyncio
+import os
 import random
+import sys
 import uuid
 from datetime import date, datetime, timedelta
 from pathlib import Path
-import sys
 
 import certifi
-import os
+
 os.environ["SSL_CERT_FILE"] = certifi.where()
 os.environ["REQUESTS_CA_BUNDLE"] = certifi.where()
 
@@ -25,6 +26,7 @@ BACKEND_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(BACKEND_ROOT))
 
 from dotenv import load_dotenv
+
 load_dotenv(BACKEND_ROOT / ".env")
 
 import asyncpg
@@ -628,7 +630,7 @@ async def create_test_user(
     if display_name is None:
         display_name = f"Test User ({persona})"
 
-    print(f"Creating test user:")
+    print("Creating test user:")
     print(f"  firebase_uid: {firebase_uid}")
     print(f"  user_id: {user_id}")
     print(f"  email: {email}")
@@ -646,7 +648,7 @@ async def create_test_user(
         end_date=end_date,
     )
 
-    print(f"\nGenerated:")
+    print("\nGenerated:")
     print(f"  Receipts: {len(receipts)}")
     print(f"  Transactions: {len(transactions)}")
 
@@ -798,7 +800,7 @@ async def rebuild_enriched_profile(user_id: str):
         promo_interest_items = []
         for name, data in sorted_items[:25]:
             granular_cat = list(data["granular_categories"])[0] if data["granular_categories"] else None
-            avg_health = sum(data["health_scores"]) / len(data["health_scores"]) if data["health_scores"] else None
+            sum(data["health_scores"]) / len(data["health_scores"]) if data["health_scores"] else None
 
             promo_interest_items.append({
                 "normalized_name": name,
@@ -863,7 +865,7 @@ async def rebuild_enriched_profile(user_id: str):
             receipt_count
         )
 
-        print(f"\nEnriched profile rebuilt!")
+        print("\nEnriched profile rebuilt!")
         print(f"  Promo interest items: {len(promo_interest_items)}")
         print(f"  Receipts analyzed: {receipt_count}")
         print(f"  Date range: {min_date} to {max_date}")
@@ -925,7 +927,7 @@ async def main():
         await rebuild_enriched_profile(result["user_id"])
     else:
         print("\nTo rebuild enriched profile, run:")
-        print(f"  python testbench/create_test_user_db.py --rebuild-profile")
+        print("  python testbench/create_test_user_db.py --rebuild-profile")
         print(f"  Or upload a receipt through the app with firebase_uid: {result['firebase_uid']}")
 
 

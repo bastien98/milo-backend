@@ -1,6 +1,7 @@
 import os
-import pytest
 from unittest.mock import AsyncMock, patch
+
+import pytest
 
 os.environ.setdefault("TESTING", "true")
 os.environ.setdefault("DATABASE_URL", "postgresql+asyncpg://test:test@localhost:5432/test_scandalicious")

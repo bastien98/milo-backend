@@ -1,20 +1,20 @@
 import json
 import logging
-from typing import AsyncGenerator, Optional, Callable, Awaitable
+from typing import AsyncGenerator, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Response
 from fastapi.responses import StreamingResponse
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.deps import get_db, get_current_db_user
+from app.api.deps import get_current_db_user, get_db
 from app.config import get_settings
+from app.core.exceptions import ClaudeAPIError, RateLimitExceededError
 from app.db.session import async_session_maker
 from app.models.user import User
 from app.schemas.chat import ChatRequest, ChatResponse
 from app.services.dobby_chat_service import DobbyChatService
 from app.services.rate_limit_service import RateLimitService, RateLimitStatus
-from app.core.exceptions import ClaudeAPIError, RateLimitExceededError
 
 router = APIRouter()
 logger = logging.getLogger(__name__)

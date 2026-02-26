@@ -1,17 +1,17 @@
 import uuid
-from datetime import datetime, date, time
-from typing import TYPE_CHECKING, Optional, List
+from datetime import date, datetime, time
+from typing import TYPE_CHECKING, List, Optional
 
-from sqlalchemy import String, DateTime, Integer, Float, ForeignKey, Text, Enum, Date, Time, func
+from sqlalchemy import Date, DateTime, Enum, Float, ForeignKey, Integer, String, Text, Time, func
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db.base import Base
-from app.models.enums import ReceiptStatus, ReceiptSource
+from app.models.enums import ReceiptSource, ReceiptStatus
 
 if TYPE_CHECKING:
-    from app.models.user import User
-    from app.models.transaction import Transaction
     from app.models.expense_split import ExpenseSplit
+    from app.models.transaction import Transaction
+    from app.models.user import User
 
 
 class Receipt(Base):

@@ -1,40 +1,40 @@
-from datetime import date, timedelta
-from typing import Optional, Dict, List
 from collections import defaultdict
+from datetime import date, timedelta
+from typing import List, Optional
 
-from sqlalchemy import select, and_, func, case, cast, Date
+from sqlalchemy import and_, case, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.cache import cached
 from app.models.transaction import Transaction
 from app.schemas.analytics import (
-    PeriodSummary,
-    StoreSpending,
+    AggregateAverages,
+    AggregateExtremes,
+    AggregateResponse,
+    AggregateTotals,
+    AllTimeResponse,
     CategoryBreakdown,
     CategorySpending,
-    StoreBreakdown,
-    SpendingTrend,
-    TrendsResponse,
+    HealthScoreDistribution,
+    HealthScoreExtreme,
+    PeriodExtreme,
     PeriodMetadata,
     PeriodsResponse,
-    AggregateTotals,
-    AggregateAverages,
-    PeriodExtreme,
-    HealthScoreExtreme,
-    AggregateExtremes,
-    HealthScoreDistribution,
-    AggregateResponse,
-    StoreByVisits,
-    StoreBySpend,
-    TopCategory,
-    AllTimeResponse,
-    YearStoreSpending,
-    YearMonthlyBreakdown,
-    YearCategorySpending,
-    YearSummaryResponse,
+    PeriodSummary,
     PieChartCategory,
     PieChartStore,
     PieChartSummaryResponse,
+    SpendingTrend,
+    StoreBreakdown,
+    StoreBySpend,
+    StoreByVisits,
+    StoreSpending,
+    TopCategory,
+    TrendsResponse,
+    YearCategorySpending,
+    YearMonthlyBreakdown,
+    YearStoreSpending,
+    YearSummaryResponse,
     get_category_color,
 )
 from app.services.category_registry import get_category_registry
@@ -96,7 +96,7 @@ class AnalyticsService:
 
         if transactions:
             dates = [t.date for t in transactions]
-            unique_receipt_ids = set(t.receipt_id for t in transactions if t.receipt_id)
+            set(t.receipt_id for t in transactions if t.receipt_id)
 
         # Get split-adjusted amounts for all transactions
         tx_amounts = await self.split_calc.get_transaction_user_amounts(user_id, transactions)

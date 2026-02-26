@@ -11,10 +11,10 @@ internally (since category IS the leaf level).
 """
 import csv
 import os
-from typing import Dict, List, Optional, Tuple
 from dataclasses import dataclass, field
-from functools import lru_cache
 from difflib import SequenceMatcher
+from functools import lru_cache
+from typing import Dict, List, Optional
 
 
 @dataclass

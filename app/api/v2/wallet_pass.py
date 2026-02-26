@@ -3,6 +3,8 @@
 # API endpoints for Apple Wallet pass creation
 #
 
+import base64
+
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import Response
 
@@ -10,7 +12,6 @@ from app.api.deps import get_current_db_user
 from app.models.user import User
 from app.schemas.wallet_pass import WalletPassCreateRequest, WalletPassCreateResponse
 from app.services.wallet_pass_service import wallet_pass_service
-import base64
 
 router = APIRouter(prefix="/wallet-pass", tags=["wallet-pass"])
 

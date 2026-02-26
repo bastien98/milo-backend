@@ -3,15 +3,15 @@ from typing import Optional
 from fastapi import APIRouter, Depends, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.deps import get_db, get_current_db_user
+from app.api.deps import get_current_db_user, get_db
 from app.models.user import User
 from app.schemas.expense_split import (
+    FRIEND_COLORS,
     ExpenseSplitCreate,
     ExpenseSplitResponse,
-    SplitCalculationResponse,
     RecentFriendResponse,
     ShareTextResponse,
-    FRIEND_COLORS,
+    SplitCalculationResponse,
 )
 from app.services.expense_split_service import ExpenseSplitService
 
