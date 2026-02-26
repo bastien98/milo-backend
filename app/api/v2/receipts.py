@@ -79,6 +79,8 @@ async def upload_receipt(
         file_size=len(file_content),
         status=ReceiptStatus.PENDING,
     )
+    # Commit now so the background worker (separate session) can see the receipt
+    await db.commit()
 
     # Schedule background processing
     background_tasks.add_task(
