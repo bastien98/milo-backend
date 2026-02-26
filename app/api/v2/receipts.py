@@ -12,8 +12,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.api.deps import get_db, get_current_db_user
 from app.models.enums import ReceiptStatus
 from app.models.user import User
-
-logger = structlog.get_logger(__name__)
 from app.schemas.receipt import (
     ReceiptUploadAcceptedResponse,
     ReceiptStatusResponse,
@@ -31,6 +29,7 @@ from app.db.repositories.transaction_repo import TransactionRepository
 from app.core.exceptions import ResourceNotFoundError
 from app.services.enriched_profile_service import EnrichedProfileService
 
+logger = structlog.get_logger(__name__)
 router = APIRouter()
 
 
