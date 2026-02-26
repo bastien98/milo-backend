@@ -38,7 +38,7 @@ pinecone>=8.0.0
 structlog>=24.1.0
 
 # Observability
-axiom-py>=1.0.0
+axiom-py>=0.8.0
 sentry-sdk[fastapi]>=1.40.0
 
 # Apple Wallet pass signing
