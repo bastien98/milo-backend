@@ -152,6 +152,13 @@ class TransactionRepository:
         await self.db.refresh(transaction)
         return transaction
 
+    async def create_batch(self, transactions: list[Transaction]) -> list[Transaction]:
+        """Create multiple transactions with a single flush (much faster than N individual creates)."""
+        for txn in transactions:
+            self.db.add(txn)
+        await self.db.flush()
+        return transactions
+
     async def update(
         self,
         transaction_id: str,

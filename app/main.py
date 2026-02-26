@@ -1,6 +1,13 @@
+import logging
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, Request, HTTPException
+
+# Configure root logger so app.services.* INFO logs are visible in Railway
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(levelname)s:%(name)s:%(message)s",
+)
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 

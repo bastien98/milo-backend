@@ -14,6 +14,7 @@ from typing import Optional
 from app.db.session import async_session_maker
 from app.db.repositories.receipt_repo import ReceiptRepository
 from app.db.repositories.transaction_repo import TransactionRepository
+from app.models.transaction import Transaction
 from app.models.enums import ReceiptStatus
 from app.services.image_validator import ImageValidator
 from app.services.gemini_vision_service import GeminiVisionService
@@ -72,13 +73,14 @@ async def process_receipt_background(
                 f"items={len(extraction_result.line_items)}"
             )
 
-            # Step 4: Create transactions
+            # Step 4: Create transactions (batch insert — single flush)
             t0 = time.monotonic()
             cleaned_store_name = (extraction_result.vendor_name or "Unknown").lower()
             final_date = receipt_date_override or extraction_result.receipt_date
+            txn_date = final_date or date.today()
 
-            for item in extraction_result.line_items:
-                await transaction_repo.create(
+            transactions = [
+                Transaction(
                     user_id=user_id,
                     receipt_id=receipt_id,
                     store_name=cleaned_store_name,
@@ -87,7 +89,7 @@ async def process_receipt_background(
                     quantity=item.quantity,
                     unit_price=item.unit_price,
                     category=item.parent_category,
-                    date=final_date or date.today(),
+                    date=txn_date,
                     health_score=item.health_score,
                     original_description=item.original_description,
                     normalized_name=item.normalized_name,
@@ -99,9 +101,20 @@ async def process_receipt_background(
                     unit_of_measure=item.unit_of_measure,
                     weight_or_volume=item.weight_or_volume,
                     price_per_unit_measure=item.price_per_unit_measure,
+                    dp_expanded_description=item.dp_expanded_description,
+                    dp_pack_quantity=item.dp_pack_quantity,
+                    dp_pack_size=item.dp_pack_size,
+                    dp_pack_unit=item.dp_pack_unit,
+                    dp_packaging_type=item.dp_packaging_type,
+                    dp_product_variant=item.dp_product_variant,
+                    dp_article_code=item.dp_article_code,
+                    dp_is_bio=item.dp_is_bio,
                 )
+                for item in extraction_result.line_items
+            ]
+            await transaction_repo.create_batch(transactions)
             logger.info(
-                f"⏱ bg_create_transactions: {time.monotonic() - t0:.3f}s "
+                f"bg_create_transactions: {time.monotonic() - t0:.3f}s "
                 f"({len(extraction_result.line_items)} items)"
             )
 

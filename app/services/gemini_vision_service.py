@@ -77,7 +77,7 @@ class GeminiVisionService:
     """Gemini Vision integration for receipt OCR and extraction."""
 
     MODEL = "gemini-3-pro-preview"
-    MAX_TOKENS = 16384
+    MAX_TOKENS = 65536
 
     SYSTEM_PROMPT = '''You are a Belgian grocery receipt analyzer. Extract and normalize line items from receipt images.
 
@@ -653,7 +653,7 @@ Return a JSON object with this structure:
         """
 
         # Build prompt with shared category list
-        system_prompt = self.SYSTEM_PROMPT.format(categories=CATEGORIES_PROMPT_LIST)
+        system_prompt = self.SYSTEM_PROMPT.replace("{categories}", CATEGORIES_PROMPT_LIST)
 
         # Log input details for debugging
         logger.info(f"Gemini extraction: mime_type={mime_type}, content_size={len(file_content)} bytes")
@@ -684,7 +684,15 @@ Return a JSON object with this structure:
                 ),
             )
 
-            # Parse response - JSON mode guarantees valid JSON
+            # Check for truncation (max_output_tokens reached)
+            if response.candidates and response.candidates[0].finish_reason:
+                finish_reason = str(response.candidates[0].finish_reason)
+                if "MAX_TOKENS" in finish_reason or "LENGTH" in finish_reason:
+                    logger.warning(
+                        f"Gemini response truncated (finish_reason={finish_reason}). "
+                        f"Receipt may have too many items for current token limit."
+                    )
+
             response_text = response.text
             if not response_text:
                 logger.error(f"Gemini returned empty response. Candidates: {getattr(response, 'candidates', 'N/A')}")
