@@ -17,7 +17,7 @@ from app.db.repositories.transaction_repo import TransactionRepository
 from app.models.transaction import Transaction
 from app.models.enums import ReceiptStatus
 from app.services.image_validator import ImageValidator
-from app.services.gemini_vision_service import GeminiVisionService
+from app.services.mistral_document_service import MistralDocumentService
 from app.services.enriched_profile_service import EnrichedProfileService
 
 logger = logging.getLogger(__name__)
@@ -61,14 +61,14 @@ async def process_receipt_background(
             image_validator.raise_if_invalid(file_content, content_type)
             logger.info(f"⏱ bg_image_validation: {time.monotonic() - t0:.3f}s")
 
-            # Step 3: Extract via Gemini Vision
+            # Step 3: Extract via Mistral Document AI
             t0 = time.monotonic()
-            gemini_service = GeminiVisionService()
-            extraction_result = await gemini_service.extract_receipt(
+            mistral_service = MistralDocumentService()
+            extraction_result = await mistral_service.extract_receipt(
                 file_content, content_type
             )
             logger.info(
-                f"⏱ bg_gemini_extraction: {time.monotonic() - t0:.3f}s - "
+                f"⏱ bg_mistral_extraction: {time.monotonic() - t0:.3f}s - "
                 f"vendor={extraction_result.vendor_name}, "
                 f"items={len(extraction_result.line_items)}"
             )
