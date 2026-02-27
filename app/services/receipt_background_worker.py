@@ -20,7 +20,6 @@ from app.core.exceptions import UnsupportedStoreError
 from app.core.stores import resolve_store_name
 from app.services.image_validator import ImageValidator
 from app.services.mistral_document_service import MistralDocumentService
-from app.services.enriched_profile_service import EnrichedProfileService
 
 logger = logging.getLogger(__name__)
 
@@ -163,16 +162,6 @@ async def process_receipt_background(
                 f"store={cleaned_store_name}, items={len(extraction_result.line_items)}"
             )
 
-            # Step 7: Rebuild enriched profile
-            try:
-                await EnrichedProfileService.rebuild_profile(user_id, session)
-                await session.commit()
-            except Exception as profile_err:
-                logger.warning(
-                    f"Failed to rebuild enriched profile after receipt {receipt_id}: "
-                    f"{profile_err}"
-                )
-                await session.rollback()
 
         except UnsupportedStoreError as e:
             logger.warning(

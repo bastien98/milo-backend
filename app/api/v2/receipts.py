@@ -29,7 +29,6 @@ from app.services.receipt_background_worker import process_receipt_background
 from app.db.repositories.receipt_repo import ReceiptRepository
 from app.db.repositories.transaction_repo import TransactionRepository
 from app.core.exceptions import ResourceNotFoundError
-from app.services.enriched_profile_service import EnrichedProfileService
 
 router = APIRouter()
 
@@ -317,9 +316,6 @@ async def delete_receipt(
 
     await receipt_repo.delete(receipt_id)
 
-    # Rebuild enriched profile after deletion
-    await EnrichedProfileService.rebuild_profile(current_user.id, db)
-
     return {"message": "Receipt deleted successfully"}
 
 
@@ -372,9 +368,6 @@ async def delete_line_item(
         # Delete the entire receipt (cascade will delete the transaction)
         await receipt_repo.delete(receipt_id)
 
-        # Rebuild enriched profile after deletion
-        await EnrichedProfileService.rebuild_profile(current_user.id, db)
-
         return LineItemDeleteResponse(
             success=True,
             message="Last item deleted - receipt removed",
@@ -406,9 +399,6 @@ async def delete_line_item(
         receipt_id=receipt_id,
         total_amount=round(new_total_amount, 2),
     )
-
-    # Rebuild enriched profile after line item deletion
-    await EnrichedProfileService.rebuild_profile(current_user.id, db)
 
     return LineItemDeleteResponse(
         success=True,
