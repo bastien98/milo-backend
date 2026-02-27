@@ -25,11 +25,23 @@ _STORES = [
         "name": "colruyt",
         "display_name": "Colruyt",
         "aliases": ["colruyt"],
+        # Colruyt Group also owns OKay, Bio-Planet, Cru, Spar, Comarkt
+        # but those are separate banners, not "Colruyt" sub-brands.
+        "rejected_aliases": [],
     },
     {
         "name": "delhaize",
         "display_name": "Delhaize",
-        "aliases": ["delhaize"],
+        # AD Delhaize = full-size Delhaize supermarket (Ahold Delhaize rebrand)
+        "aliases": ["ad delhaize", "delhaize"],
+        "rejected_aliases": [
+            "proxy delhaize",
+            "delhaize proxy",
+            "shop & go",
+            "shop&go",
+            "delhaize shop",
+            "delhaize city",
+        ],
     },
     {
         "name": "carrefour",
@@ -37,25 +49,33 @@ _STORES = [
         "aliases": [
             "carrefour hypermarché",
             "carrefour hypermarkt",
+            "carrefour hypermarket",
             "carrefour market",
-            "carrefour express",
             "carrefour",
+        ],
+        "rejected_aliases": [
+            "carrefour express",
+            "carrefour city",
+            "carrefour contact",
         ],
     },
     {
         "name": "aldi",
         "display_name": "Aldi",
         "aliases": ["aldi"],
+        "rejected_aliases": [],
     },
     {
         "name": "lidl",
         "display_name": "Lidl",
         "aliases": ["lidl"],
+        "rejected_aliases": [],
     },
     {
         "name": "albert heijn",
         "display_name": "Albert Heijn",
         "aliases": ["albert heijn", "ah"],
+        "rejected_aliases": ["ah to go", "albert heijn to go"],
     },
 ]
 
@@ -68,6 +88,9 @@ _STORES = [
 # so "carrefour market" is tried before "carrefour".
 ALLOWED_STORE_ALIASES: List[tuple] = []
 
+# Rejected aliases sorted by length descending (checked before allowed)
+REJECTED_STORE_ALIASES: List[str] = []
+
 # canonical name → display name
 STORE_DISPLAY_NAMES: Dict[str, str] = {}
 
@@ -78,6 +101,7 @@ ALL_STORE_NAMES: List[str] = []
 def _build_lookups() -> None:
     """Build all lookup tables from _STORES at module load time."""
     alias_pairs = []
+    rejected = []
 
     for store in _STORES:
         name = store["name"]
@@ -87,9 +111,15 @@ def _build_lookups() -> None:
         for alias in store["aliases"]:
             alias_pairs.append((alias, name))
 
+        for alias in store.get("rejected_aliases", []):
+            rejected.append(alias)
+
     # Sort by alias length descending so longest prefixes match first
     alias_pairs.sort(key=lambda pair: len(pair[0]), reverse=True)
     ALLOWED_STORE_ALIASES.extend(alias_pairs)
+
+    rejected.sort(key=len, reverse=True)
+    REJECTED_STORE_ALIASES.extend(rejected)
 
 
 _build_lookups()
@@ -115,6 +145,9 @@ def resolve_store_name(vendor_name: str) -> Optional[str]:
     Uses longest-prefix matching so "carrefour market etterbeek"
     matches "carrefour market" → "carrefour" (not just "carrefour").
 
+    Rejected aliases (e.g. "carrefour express", "delhaize proxy") are
+    checked first and return None even if a shorter allowed alias would match.
+
     Returns the canonical lowercase store name (e.g. "colruyt", "carrefour"),
     or None if the store is not in the supported list.
     """
@@ -122,6 +155,11 @@ def resolve_store_name(vendor_name: str) -> Optional[str]:
         return None
 
     normalized = vendor_name.lower().strip()
+
+    # Check rejected aliases first (e.g. "carrefour express", "delhaize proxy")
+    for rejected in REJECTED_STORE_ALIASES:
+        if normalized == rejected or normalized.startswith(rejected + " "):
+            return None
 
     for alias, canonical in ALLOWED_STORE_ALIASES:
         if normalized == alias or normalized.startswith(alias + " "):
