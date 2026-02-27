@@ -198,3 +198,4 @@ class ReceiptStatusResponse(BaseModel):
     total_amount: Optional[float] = None
     items_count: int = 0
     error_message: Optional[str] = None
+    error_code: Optional[str] = None

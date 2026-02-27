@@ -274,6 +274,7 @@ async def get_receipt_status(
         total_amount=receipt.total_amount,
         items_count=items_count,
         error_message=receipt.error_message,
+        error_code=receipt.error_code,
     )
 
 

@@ -52,3 +52,9 @@ class GeminiAPIError(ScandaliciousException):
     pass
 
 
+class UnsupportedStoreError(ScandaliciousException):
+    """Raised when receipt is from an unsupported store."""
+
+    pass
+
+

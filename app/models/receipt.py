@@ -39,6 +39,7 @@ class Receipt(Base):
         nullable=False
     )
     error_message: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    error_code: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)
 
     # Extracted metadata
     store_name: Mapped[Optional[str]] = mapped_column(String, nullable=True)

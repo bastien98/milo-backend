@@ -16,6 +16,8 @@ from app.db.repositories.receipt_repo import ReceiptRepository
 from app.db.repositories.transaction_repo import TransactionRepository
 from app.models.transaction import Transaction
 from app.models.enums import ReceiptStatus
+from app.core.exceptions import UnsupportedStoreError
+from app.core.stores import resolve_store_name
 from app.services.image_validator import ImageValidator
 from app.services.mistral_document_service import MistralDocumentService
 from app.services.enriched_profile_service import EnrichedProfileService
@@ -73,9 +75,17 @@ async def process_receipt_background(
                 f"items={len(extraction_result.line_items)}"
             )
 
+            # Step 3.5: Validate store is supported
+            canonical_store = resolve_store_name(extraction_result.vendor_name)
+            if canonical_store is None:
+                raise UnsupportedStoreError(
+                    f"Unsupported store: {extraction_result.vendor_name}",
+                    details={"vendor_name": extraction_result.vendor_name},
+                )
+            cleaned_store_name = canonical_store
+
             # Step 4: Create transactions (batch insert — single flush)
             t0 = time.monotonic()
-            cleaned_store_name = (extraction_result.vendor_name or "Unknown").lower()
             final_date = receipt_date_override or extraction_result.receipt_date
             txn_date = final_date or date.today()
 
@@ -163,6 +173,26 @@ async def process_receipt_background(
                 logger.warning(
                     f"Failed to rebuild enriched profile after receipt {receipt_id}: "
                     f"{profile_err}"
+                )
+                await session.rollback()
+
+        except UnsupportedStoreError as e:
+            logger.warning(
+                f"Unsupported store for receipt {receipt_id}: {e.message}"
+            )
+            await session.rollback()
+            try:
+                await receipt_repo.update(
+                    receipt_id=receipt_id,
+                    status=ReceiptStatus.FAILED,
+                    error_code="unsupported_store",
+                    error_message=e.message,
+                )
+                await session.commit()
+            except Exception as update_err:
+                logger.error(
+                    f"Failed to update receipt status to FAILED: "
+                    f"receipt_id={receipt_id}, error={update_err}"
                 )
                 await session.rollback()
 

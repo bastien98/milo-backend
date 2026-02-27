@@ -21,6 +21,7 @@ from PIL import Image
 from app.config import get_settings
 from app.core.categories import CATEGORIES_PROMPT_LIST, GRANULAR_CATEGORIES, get_parent_category
 from app.core.exceptions import GeminiAPIError  # Reuse existing exception class
+from app.core.stores import STORES_PROMPT_LIST
 from app.services.gemini_vision_service import ExtractedLineItem
 
 settings = get_settings()
@@ -60,7 +61,9 @@ class MistralDocumentService:
 
 ### Vendor Name
 - Clean OCR artifacts, use proper store name
-- Common Belgian stores: Colruyt, Delhaize, Carrefour, Aldi, Lidl, Albert Heijn
+- Supported Belgian stores: {stores}
+- Return the store name EXACTLY as it appears on the receipt header (e.g., "Carrefour Market", not just "Carrefour")
+- If the store is not in the supported list, still return the actual vendor name as-is
 
 ### Receipt Date
 - Extract the date from the receipt in YYYY-MM-DD format
@@ -82,6 +85,14 @@ class MistralDocumentService:
 ### Total Savings
 - Calculate the total discount amount as a POSITIVE number
 - Sum up all discount lines (lines where is_discount=true) and return the absolute value
+- Many Belgian receipts show a savings summary at the bottom — use it as a cross-check:
+  - Colruyt/OKay/Spar: "Besparing" / "Uw besparing" / "Totaal besparing" / "Votre économie"
+  - Delhaize: "Uw voordeel" / "Totaal voordeel" / "Votre avantage" / "Total avantage"
+  - Carrefour: "Uw voordeel" / "Totaal korting" / "Votre avantage" / "Total remise"
+  - Lidl: "Uw besparing" / "Besparing" / "Votre économie"
+  - Albert Heijn: "Uw voordeel"
+  - Intermarché: "Totaal voordelen van de dag" / "Total avantages du jour"
+- If a savings summary line exists on the receipt, prefer that value over manually summing discount lines
 - Return null if there are no discounts
 
 ### Store Branch
@@ -150,13 +161,60 @@ class MistralDocumentService:
    - For discount/bonus lines, use NEGATIVE values (e.g., -1.50 for a 1.50€ discount)
    - Handle "Actieprijs" (promotional price): use that price for the item
 
-8. **is_discount**: True for discount/bonus line items:
-   - "Hoeveelheidsvoordeel" (quantity discount)
-   - "Korting", "Bon korting", "Promotie"
-   - "Actie", "Reductie"
-   - Any line that reduces the total (negative amount)
-   - These lines should have NEGATIVE total_price values
-   - The normalized_name should describe the discount (e.g., "korting hoeveelheidsvoordeel")
+8. **is_discount**: True for discount/bonus line items. These lines should have NEGATIVE total_price values.
+   The normalized_name should describe the discount (e.g., "korting hoeveelheidsvoordeel", "remise superplus").
+
+   **General Dutch terms**: "Korting", "Bon korting", "Kortingsbon", "Promotie", "Actie", "Actieprijs", "Reductie", "Voordeel", "Besparing", "Gratis", "Halve prijs"
+   **General French terms**: "Remise", "Réduction", "Bon de réduction", "Promotion", "Action", "Prix action", "Avantage", "Économie", "Gratuit", "Moitié prix"
+
+   **Colruyt / OKay / Spar Colruyt Group**:
+   - "Rode prijs" / "Prix rouge" (competitor price match — may show reduced price inline, not separate line)
+   - "Extra korting" / "Remise supplémentaire" (Colruyt's own promo)
+   - "Hoeveelheidsvoordeel" / "Hoeveelheidskorting" / "Remise de quantité" (quantity discount)
+   - "Xtra korting" / "Xtra-korting" / "Remise Xtra" (personalized Xtra app discounts)
+   - "Leveranciersbon" / "Bon fournisseur" (manufacturer coupon)
+   - "Colruyt trakteert" / "Colruyt offre" (free product promo)
+   - "3% korting" / "Remise 3%" (Xtra campaign discount)
+
+   **Delhaize**:
+   - "SuperPlus korting" / "SP korting" / "Réduction SuperPlus" / "Remise SuperPlus"
+   - "Nutri-Boost" / "Nutri Boost korting" (10% on Nutri-Score A/B fresh products)
+   - "SuperPlus-tegoed" / "SP tegoed" / "Crédit SuperPlus" (points redemption)
+
+   **Carrefour**:
+   - "Bonus korting" / "Bonuskaart korting" / "Remise Bonus" / "Réduction carte Bonus"
+   - "Bonuscheck" / "Bonus cheque" / "Chèque Bonus" (voucher redemption)
+   - "E-coupon" / "Coupon" (digital app coupons)
+   - "Mijn Bonus" / "Mon Bonus" (personalized offers)
+
+   **Lidl**:
+   - "Lidl Plus korting" / "Lidl Plus voordeel" / "Remise Lidl Plus" / "Avantage Lidl Plus"
+   - "Lidl Plus prijs" / "Prix Lidl Plus" (app-exclusive price)
+   - "Kassabonkorting" / "Remise ticket" (5% cashback on every 100 EUR)
+
+   **Aldi**:
+   - "Punten korting" / "Remise points" (loyalty points redemption)
+   - "Aldi Enjoy" (voucher discount)
+
+   **Albert Heijn**:
+   - "BONUS" indicator next to items or as separate discount line with negative amount
+   - "Bonus Box" (personalized weekly offers)
+
+   **Intermarché**:
+   - "Kaart korting" / "Remise carte" / "Avantage carte" (loyalty card discount)
+   - "Directe korting" / "Remise directe" / "Réduction directe"
+
+   **Spar (independent)**:
+   - "Spar Friends korting" / "Friends korting" / "Remise Spar Friends"
+
+   **Multi-buy deals** (all retailers):
+   - "1+1 gratis" / "1+1 gratuit" — the free item appears as a separate negative line
+   - "2+1 gratis" / "2+1 gratuit" — third item free
+   - "2e aan -50%" / "2de halve prijs" / "2ème à -50%" / "Le 2ème à moitié prix" — second at half price
+   - "-XX%" — direct percentage off
+   - These multi-buy discount lines should have is_discount=true with NEGATIVE total_price
+
+   **Any line that reduces the receipt total (negative amount) is a discount.**
 
 9. **is_deposit**: True ONLY for deposit items:
    - "Leeggoed" (Dutch)
@@ -220,6 +278,24 @@ class MistralDocumentService:
 "ART 541014  DEVOS LEMMENS MAYO 300ML  2,49" →
 ```json
 {"original_description":"ART 541014  DEVOS LEMMENS MAYO 300ML  2,49","normalized_name":"devos lemmens mayonaise","normalized_brand":"devos lemmens","is_premium":true,"quantity":1,"unit_price":null,"total_price":2.49,"is_discount":false,"is_deposit":false,"granular_category":"Mayonnaise","health_score":2,"unit_of_measure":null,"weight_or_volume":null,"price_per_unit_measure":null,"dp_expanded_description":"devos lemmens mayonaise 300ml","dp_pack_quantity":1,"dp_pack_size":300.0,"dp_pack_unit":"ml","dp_packaging_type":null,"dp_product_variant":null,"dp_article_code":"541014","dp_is_bio":false}
+```
+
+### Example 5: Multi-buy discount (1+1 gratis at Delhaize)
+"1+1 GRATIS  -2,99" →
+```json
+{"original_description":"1+1 GRATIS  -2,99","normalized_name":"korting 1+1 gratis","normalized_brand":null,"is_premium":false,"quantity":1,"unit_price":null,"total_price":-2.99,"is_discount":true,"is_deposit":false,"granular_category":"Discount","health_score":null,"unit_of_measure":null,"weight_or_volume":null,"price_per_unit_measure":null,"dp_expanded_description":"1+1 gratis","dp_pack_quantity":null,"dp_pack_size":null,"dp_pack_unit":null,"dp_packaging_type":null,"dp_product_variant":null,"dp_article_code":null,"dp_is_bio":false}
+```
+
+### Example 6: Loyalty card discount (Colruyt Xtra)
+"XTRA KORTING  -0,75" →
+```json
+{"original_description":"XTRA KORTING  -0,75","normalized_name":"korting xtra","normalized_brand":null,"is_premium":false,"quantity":1,"unit_price":null,"total_price":-0.75,"is_discount":true,"is_deposit":false,"granular_category":"Discount","health_score":null,"unit_of_measure":null,"weight_or_volume":null,"price_per_unit_measure":null,"dp_expanded_description":"xtra korting","dp_pack_quantity":null,"dp_pack_size":null,"dp_pack_unit":null,"dp_packaging_type":null,"dp_product_variant":null,"dp_article_code":null,"dp_is_bio":false}
+```
+
+### Example 7: 2nd at half price (Delhaize/Carrefour)
+"2DE HALVE PRIJS  -1,50" →
+```json
+{"original_description":"2DE HALVE PRIJS  -1,50","normalized_name":"korting 2de halve prijs","normalized_brand":null,"is_premium":false,"quantity":1,"unit_price":null,"total_price":-1.50,"is_discount":true,"is_deposit":false,"granular_category":"Discount","health_score":null,"unit_of_measure":null,"weight_or_volume":null,"price_per_unit_measure":null,"dp_expanded_description":"2de halve prijs","dp_pack_quantity":null,"dp_pack_size":null,"dp_pack_unit":null,"dp_packaging_type":null,"dp_product_variant":null,"dp_article_code":null,"dp_is_bio":false}
 ```
 
 ### IMPORTANT RULES
@@ -319,7 +395,7 @@ Return a JSON object with this structure:
         content to chat.complete(), which runs OCR internally then extracts
         structured data via JSON mode.
         """
-        system_prompt = self.SYSTEM_PROMPT.replace("{categories}", CATEGORIES_PROMPT_LIST)
+        system_prompt = self.SYSTEM_PROMPT.replace("{categories}", CATEGORIES_PROMPT_LIST).replace("{stores}", STORES_PROMPT_LIST)
 
         logger.info(f"Mistral extraction: mime_type={mime_type}, content_size={len(file_content)} bytes")
 

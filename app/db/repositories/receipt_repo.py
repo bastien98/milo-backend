@@ -100,6 +100,7 @@ class ReceiptRepository:
         receipt_date: Optional[date] = None,
         total_amount: Optional[float] = None,
         error_message: Optional[str] = None,
+        error_code: Optional[str] = None,
         processed_at: Optional[datetime] = None,
         receipt_time: Optional[time] = None,
         payment_method: Optional[str] = None,
@@ -121,6 +122,8 @@ class ReceiptRepository:
             receipt.total_amount = total_amount
         if error_message is not None:
             receipt.error_message = error_message
+        if error_code is not None:
+            receipt.error_code = error_code
         if processed_at is not None:
             receipt.processed_at = processed_at
         if receipt_time is not None:
