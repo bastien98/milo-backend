@@ -18,5 +18,5 @@ COPY . .
 ENV PORT=8000
 EXPOSE ${PORT}
 
-# Run the application using shell form to expand $PORT
-CMD uvicorn app.main:app --host 0.0.0.0 --port $PORT
+# Default: start the API server (overridden per-service via railway config)
+CMD sh -c 'alembic upgrade head && uvicorn app.main:app --host 0.0.0.0 --port ${PORT:-8000}'
