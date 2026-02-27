@@ -92,7 +92,6 @@ class TransactionRepository:
         unit_price: Optional[float] = None,
         health_score: Optional[int] = None,
         # New fields for semantic search
-        original_description: Optional[str] = None,
         normalized_name: Optional[str] = None,
         normalized_brand: Optional[str] = None,
         is_premium: bool = False,
@@ -108,7 +107,6 @@ class TransactionRepository:
         dp_pack_quantity: Optional[int] = None,
         dp_pack_size: Optional[float] = None,
         dp_pack_unit: Optional[str] = None,
-        dp_packaging_type: Optional[str] = None,
         dp_product_variant: Optional[str] = None,
         dp_article_code: Optional[str] = None,
         dp_is_bio: bool = False,
@@ -126,7 +124,6 @@ class TransactionRepository:
             date=date,
             health_score=health_score,
             # New fields
-            original_description=original_description,
             normalized_name=normalized_name,
             normalized_brand=normalized_brand,
             is_premium=is_premium,
@@ -142,7 +139,6 @@ class TransactionRepository:
             dp_pack_quantity=dp_pack_quantity,
             dp_pack_size=dp_pack_size,
             dp_pack_unit=dp_pack_unit,
-            dp_packaging_type=dp_packaging_type,
             dp_product_variant=dp_product_variant,
             dp_article_code=dp_article_code,
             dp_is_bio=dp_is_bio,

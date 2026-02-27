@@ -103,7 +103,7 @@ class MistralDocumentService:
 
 ### Line Items - Extract these fields:
 
-1. **original_description**: Raw text exactly as appears on receipt (including codes, quantities, etc.)
+1. **item_name**: Raw text exactly as appears on receipt (including codes, quantities, etc.). This is the unmodified line item text from the receipt — no cleaning, no normalization.
 
 2. **normalized_name**: Clean, full product name used for product matching. This is the primary field for matching receipt items to product databases (EAN lookup).
    - ALWAYS output in **lowercase**
@@ -246,56 +246,54 @@ class MistralDocumentService:
 
 16. **dp_pack_unit**: "ml" for liquids, "g" for solids. null if no size info.
 
-17. **dp_packaging_type**: Container type (lowercase): blik/pet/fles/doos/brik/glas/zak. Parse from "PET","BLIK","BL.","FLES","FL." etc. null if not mentioned.
+17. **dp_product_variant**: Flavor/style/sub-type (lowercase). "zero","bruin","paprika","pils". null if base product.
 
-18. **dp_product_variant**: Flavor/style/sub-type (lowercase). "zero","bruin","paprika","pils". null if base product.
+18. **dp_article_code**: Article/PLU/barcode from receipt ("ART 123456", "PLU 4011"). null if not visible.
 
-19. **dp_article_code**: Article/PLU/barcode from receipt ("ART 123456", "PLU 4011"). null if not visible.
-
-20. **dp_is_bio**: true if BIO/BIOLOGISCH/BIOLOGIQUE/ORGANIC in text, false otherwise.
+19. **dp_is_bio**: true if BIO/BIOLOGISCH/BIOLOGIQUE/ORGANIC in text, false otherwise.
 
 ## FEW-SHOT EXAMPLES
 
 ### Example 1: Multi-pack with packaging + dp_ fields
 "JUPILER PILS 6X33CL PET  8,99" →
 ```json
-{"original_description":"JUPILER PILS 6X33CL PET  8,99","normalized_name":"jupiler pils","normalized_brand":"jupiler","is_premium":true,"quantity":1,"unit_price":null,"total_price":8.99,"is_discount":false,"is_deposit":false,"granular_category":"Beer Pils & Lager","health_score":0,"unit_of_measure":null,"weight_or_volume":null,"price_per_unit_measure":null,"dp_expanded_description":"jupiler pils 6x33cl pet","dp_pack_quantity":6,"dp_pack_size":1980.0,"dp_pack_unit":"ml","dp_packaging_type":"pet","dp_product_variant":"pils","dp_article_code":null,"dp_is_bio":false}
+{"item_name":"JUPILER PILS 6X33CL PET  8,99","normalized_name":"jupiler pils","normalized_brand":"jupiler","is_premium":true,"quantity":1,"unit_price":null,"total_price":8.99,"is_discount":false,"is_deposit":false,"granular_category":"Beer Pils & Lager","health_score":0,"unit_of_measure":null,"weight_or_volume":null,"price_per_unit_measure":null,"dp_expanded_description":"jupiler pils 6x33cl pet","dp_pack_quantity":6,"dp_pack_size":1980.0,"dp_pack_unit":"ml","dp_product_variant":"pils","dp_article_code":null,"dp_is_bio":false}
 ```
 
 ### Example 2: Fresh produce by weight
 "BANANEN  1.234 kg x 1,99/kg  2,46" →
 ```json
-{"original_description":"BANANEN  1.234 kg x 1,99/kg  2,46","normalized_name":"bananen","normalized_brand":null,"is_premium":false,"quantity":1,"unit_price":null,"total_price":2.46,"is_discount":false,"is_deposit":false,"granular_category":"Fruit Bananas","health_score":5,"unit_of_measure":"kg","weight_or_volume":1.234,"price_per_unit_measure":1.99,"dp_expanded_description":"bananen","dp_pack_quantity":1,"dp_pack_size":1234.0,"dp_pack_unit":"g","dp_packaging_type":null,"dp_product_variant":null,"dp_article_code":null,"dp_is_bio":false}
+{"item_name":"BANANEN  1.234 kg x 1,99/kg  2,46","normalized_name":"bananen","normalized_brand":null,"is_premium":false,"quantity":1,"unit_price":null,"total_price":2.46,"is_discount":false,"is_deposit":false,"granular_category":"Fruit Bananas","health_score":5,"unit_of_measure":"kg","weight_or_volume":1.234,"price_per_unit_measure":1.99,"dp_expanded_description":"bananen","dp_pack_quantity":1,"dp_pack_size":1234.0,"dp_pack_unit":"g","dp_product_variant":null,"dp_article_code":null,"dp_is_bio":false}
 ```
 
 ### Example 3: Discount line (negative price)
 "HOEVEELHEIDSVOORDEEL  -1,50" →
 ```json
-{"original_description":"HOEVEELHEIDSVOORDEEL  -1,50","normalized_name":"korting hoeveelheidsvoordeel","normalized_brand":null,"is_premium":false,"quantity":1,"unit_price":null,"total_price":-1.50,"is_discount":true,"is_deposit":false,"granular_category":"Other","health_score":null,"unit_of_measure":null,"weight_or_volume":null,"price_per_unit_measure":null,"dp_expanded_description":"hoeveelheidsvoordeel","dp_pack_quantity":null,"dp_pack_size":null,"dp_pack_unit":null,"dp_packaging_type":null,"dp_product_variant":null,"dp_article_code":null,"dp_is_bio":false}
+{"item_name":"HOEVEELHEIDSVOORDEEL  -1,50","normalized_name":"korting hoeveelheidsvoordeel","normalized_brand":null,"is_premium":false,"quantity":1,"unit_price":null,"total_price":-1.50,"is_discount":true,"is_deposit":false,"granular_category":"Other","health_score":null,"unit_of_measure":null,"weight_or_volume":null,"price_per_unit_measure":null,"dp_expanded_description":"hoeveelheidsvoordeel","dp_pack_quantity":null,"dp_pack_size":null,"dp_pack_unit":null,"dp_product_variant":null,"dp_article_code":null,"dp_is_bio":false}
 ```
 
 ### Example 4: Product with article code
 "ART 541014  DEVOS LEMMENS MAYO 300ML  2,49" →
 ```json
-{"original_description":"ART 541014  DEVOS LEMMENS MAYO 300ML  2,49","normalized_name":"devos lemmens mayonaise","normalized_brand":"devos lemmens","is_premium":true,"quantity":1,"unit_price":null,"total_price":2.49,"is_discount":false,"is_deposit":false,"granular_category":"Mayonnaise","health_score":2,"unit_of_measure":null,"weight_or_volume":null,"price_per_unit_measure":null,"dp_expanded_description":"devos lemmens mayonaise 300ml","dp_pack_quantity":1,"dp_pack_size":300.0,"dp_pack_unit":"ml","dp_packaging_type":null,"dp_product_variant":null,"dp_article_code":"541014","dp_is_bio":false}
+{"item_name":"ART 541014  DEVOS LEMMENS MAYO 300ML  2,49","normalized_name":"devos lemmens mayonaise","normalized_brand":"devos lemmens","is_premium":true,"quantity":1,"unit_price":null,"total_price":2.49,"is_discount":false,"is_deposit":false,"granular_category":"Mayonnaise","health_score":2,"unit_of_measure":null,"weight_or_volume":null,"price_per_unit_measure":null,"dp_expanded_description":"devos lemmens mayonaise 300ml","dp_pack_quantity":1,"dp_pack_size":300.0,"dp_pack_unit":"ml","dp_product_variant":null,"dp_article_code":"541014","dp_is_bio":false}
 ```
 
 ### Example 5: Multi-buy discount (1+1 gratis at Delhaize)
 "1+1 GRATIS  -2,99" →
 ```json
-{"original_description":"1+1 GRATIS  -2,99","normalized_name":"korting 1+1 gratis","normalized_brand":null,"is_premium":false,"quantity":1,"unit_price":null,"total_price":-2.99,"is_discount":true,"is_deposit":false,"granular_category":"Discount","health_score":null,"unit_of_measure":null,"weight_or_volume":null,"price_per_unit_measure":null,"dp_expanded_description":"1+1 gratis","dp_pack_quantity":null,"dp_pack_size":null,"dp_pack_unit":null,"dp_packaging_type":null,"dp_product_variant":null,"dp_article_code":null,"dp_is_bio":false}
+{"item_name":"1+1 GRATIS  -2,99","normalized_name":"korting 1+1 gratis","normalized_brand":null,"is_premium":false,"quantity":1,"unit_price":null,"total_price":-2.99,"is_discount":true,"is_deposit":false,"granular_category":"Discount","health_score":null,"unit_of_measure":null,"weight_or_volume":null,"price_per_unit_measure":null,"dp_expanded_description":"1+1 gratis","dp_pack_quantity":null,"dp_pack_size":null,"dp_pack_unit":null,"dp_product_variant":null,"dp_article_code":null,"dp_is_bio":false}
 ```
 
 ### Example 6: Loyalty card discount (Colruyt Xtra)
 "XTRA KORTING  -0,75" →
 ```json
-{"original_description":"XTRA KORTING  -0,75","normalized_name":"korting xtra","normalized_brand":null,"is_premium":false,"quantity":1,"unit_price":null,"total_price":-0.75,"is_discount":true,"is_deposit":false,"granular_category":"Discount","health_score":null,"unit_of_measure":null,"weight_or_volume":null,"price_per_unit_measure":null,"dp_expanded_description":"xtra korting","dp_pack_quantity":null,"dp_pack_size":null,"dp_pack_unit":null,"dp_packaging_type":null,"dp_product_variant":null,"dp_article_code":null,"dp_is_bio":false}
+{"item_name":"XTRA KORTING  -0,75","normalized_name":"korting xtra","normalized_brand":null,"is_premium":false,"quantity":1,"unit_price":null,"total_price":-0.75,"is_discount":true,"is_deposit":false,"granular_category":"Discount","health_score":null,"unit_of_measure":null,"weight_or_volume":null,"price_per_unit_measure":null,"dp_expanded_description":"xtra korting","dp_pack_quantity":null,"dp_pack_size":null,"dp_pack_unit":null,"dp_product_variant":null,"dp_article_code":null,"dp_is_bio":false}
 ```
 
 ### Example 7: 2nd at half price (Delhaize/Carrefour)
 "2DE HALVE PRIJS  -1,50" →
 ```json
-{"original_description":"2DE HALVE PRIJS  -1,50","normalized_name":"korting 2de halve prijs","normalized_brand":null,"is_premium":false,"quantity":1,"unit_price":null,"total_price":-1.50,"is_discount":true,"is_deposit":false,"granular_category":"Discount","health_score":null,"unit_of_measure":null,"weight_or_volume":null,"price_per_unit_measure":null,"dp_expanded_description":"2de halve prijs","dp_pack_quantity":null,"dp_pack_size":null,"dp_pack_unit":null,"dp_packaging_type":null,"dp_product_variant":null,"dp_article_code":null,"dp_is_bio":false}
+{"item_name":"2DE HALVE PRIJS  -1,50","normalized_name":"korting 2de halve prijs","normalized_brand":null,"is_premium":false,"quantity":1,"unit_price":null,"total_price":-1.50,"is_discount":true,"is_deposit":false,"granular_category":"Discount","health_score":null,"unit_of_measure":null,"weight_or_volume":null,"price_per_unit_measure":null,"dp_expanded_description":"2de halve prijs","dp_pack_quantity":null,"dp_pack_size":null,"dp_pack_unit":null,"dp_product_variant":null,"dp_article_code":null,"dp_is_bio":false}
 ```
 
 ### IMPORTANT RULES
@@ -327,7 +325,7 @@ Return a JSON object with this structure:
 - "store_branch": string or null (location/branch name)
 - "total": number (receipt total)
 - "line_items": array of objects, each with:
-  - "original_description": string (raw OCR text)
+  - "item_name": string (raw receipt text, unmodified)
   - "normalized_name": string (cleaned name, lowercase)
   - "normalized_brand": string or null
   - "is_premium": boolean
@@ -345,7 +343,6 @@ Return a JSON object with this structure:
   - "dp_pack_quantity": integer or null (multi-pack count, 1 for singles)
   - "dp_pack_size": number or null (total pack size in ml or g)
   - "dp_pack_unit": string or null ("ml" or "g")
-  - "dp_packaging_type": string or null (blik/pet/fles/doos/brik/glas/zak)
   - "dp_product_variant": string or null (flavor/style/sub-type)
   - "dp_article_code": string or null (article/PLU code from receipt)
   - "dp_is_bio": boolean (true if organic)'''
@@ -481,7 +478,7 @@ Return a JSON object with this structure:
             if data.get("line_items"):
                 first_item = data["line_items"][0]
                 logger.info(
-                    f"First item sample: original_desc={first_item.get('original_description')}, "
+                    f"First item sample: item_name={first_item.get('item_name')}, "
                     f"normalized={first_item.get('normalized_name')}, "
                     f"granular_cat={first_item.get('granular_category')}"
                 )
@@ -601,13 +598,6 @@ Return a JSON object with this structure:
             elif dp_pack_unit:
                 dp_pack_unit = dp_pack_unit.lower()
 
-            dp_packaging_type = item.get("dp_packaging_type")
-            valid_packaging = {"blik", "pet", "fles", "doos", "brik", "glas", "zak"}
-            if dp_packaging_type and dp_packaging_type.lower() not in valid_packaging:
-                dp_packaging_type = None
-            elif dp_packaging_type:
-                dp_packaging_type = dp_packaging_type.lower()
-
             dp_product_variant = item.get("dp_product_variant")
             if dp_product_variant:
                 dp_product_variant = dp_product_variant.lower().strip()
@@ -622,7 +612,7 @@ Return a JSON object with this structure:
 
             line_items.append(
                 ExtractedLineItem(
-                    original_description=item.get("original_description", ""),
+                    item_name=item.get("item_name", ""),
                     normalized_name=normalized_name,
                     normalized_brand=normalized_brand,
                     is_premium=bool(item.get("is_premium", False)),
@@ -641,7 +631,6 @@ Return a JSON object with this structure:
                     dp_pack_quantity=dp_pack_quantity,
                     dp_pack_size=dp_pack_size,
                     dp_pack_unit=dp_pack_unit,
-                    dp_packaging_type=dp_packaging_type,
                     dp_product_variant=dp_product_variant,
                     dp_article_code=dp_article_code,
                     dp_is_bio=bool(item.get("dp_is_bio", False)),

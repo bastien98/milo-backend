@@ -34,7 +34,6 @@ class Transaction(Base):
     unit_price: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
 
     # Semantic search fields
-    original_description: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     normalized_name: Mapped[Optional[str]] = mapped_column(
         String(255), nullable=True, index=True
     )
@@ -58,7 +57,6 @@ class Transaction(Base):
     dp_pack_quantity: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
     dp_pack_size: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
     dp_pack_unit: Mapped[Optional[str]] = mapped_column(String(5), nullable=True)
-    dp_packaging_type: Mapped[Optional[str]] = mapped_column(String(10), nullable=True)
     dp_product_variant: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
     dp_article_code: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)
     dp_is_bio: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)

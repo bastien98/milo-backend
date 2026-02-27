@@ -8,14 +8,12 @@ from app.models.enums import ReceiptStatus, ReceiptSource
 
 class ExtractedItem(BaseModel):
     item_id: str  # UUID from the transactions table
-    item_name: str  # Contains normalized_name for display
+    item_name: str  # Raw receipt text (unmodified line item)
     item_price: float
     quantity: int = 1
     unit_price: Optional[float] = None
     category: str
     health_score: Optional[int] = None  # 0-5, None for non-food items
-    # New fields for semantic search and granular categorization
-    original_description: Optional[str] = None  # Raw OCR text
     normalized_name: Optional[str] = None  # Cleaned name for semantic search
     normalized_brand: Optional[str] = None  # Brand name only for semantic search
     is_premium: bool = False  # True if premium brand, False if store/house brand
@@ -30,7 +28,7 @@ class ExtractedItem(BaseModel):
     dp_pack_quantity: Optional[int] = None
     dp_pack_size: Optional[float] = None
     dp_pack_unit: Optional[str] = None
-    dp_packaging_type: Optional[str] = None
+
     dp_product_variant: Optional[str] = None
     dp_article_code: Optional[str] = None
     dp_is_bio: bool = False
@@ -101,14 +99,12 @@ class GroupedReceiptTransaction(BaseModel):
     """A single transaction within a grouped receipt."""
 
     item_id: str  # UUID from the transactions table
-    item_name: str  # Contains normalized_name for display
+    item_name: str  # Raw receipt text (unmodified line item)
     item_price: float
     quantity: int
     unit_price: Optional[float]
     category: str
     health_score: Optional[int]
-    # New fields for semantic search and granular categorization
-    original_description: Optional[str] = None  # Raw OCR text
     normalized_name: Optional[str] = None  # Cleaned name for semantic search
     normalized_brand: Optional[str] = None  # Brand name only for semantic search
     is_premium: bool = False  # True if premium brand, False if store/house brand
@@ -123,7 +119,7 @@ class GroupedReceiptTransaction(BaseModel):
     dp_pack_quantity: Optional[int] = None
     dp_pack_size: Optional[float] = None
     dp_pack_unit: Optional[str] = None
-    dp_packaging_type: Optional[str] = None
+
     dp_product_variant: Optional[str] = None
     dp_article_code: Optional[str] = None
     dp_is_bio: bool = False
