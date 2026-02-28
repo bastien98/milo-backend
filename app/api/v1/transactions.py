@@ -15,6 +15,7 @@ from app.schemas.transaction import (
     TransactionBulkDeleteResponse,
 )
 from app.db.repositories.transaction_repo import TransactionRepository
+from app.core.cache import invalidate_user
 from app.core.exceptions import ResourceNotFoundError
 
 router = APIRouter()
@@ -115,6 +116,7 @@ async def update_transaction(
         date=update_data.date,
     )
 
+    invalidate_user(current_user.id)
     return TransactionResponse.model_validate(updated)
 
 
@@ -145,6 +147,7 @@ async def delete_transactions_bulk(
             f"between {request.start_date} and {request.end_date}"
         )
 
+    invalidate_user(current_user.id)
     return TransactionBulkDeleteResponse(
         success=True,
         deleted_count=deleted_count,
@@ -172,5 +175,6 @@ async def delete_transaction(
         raise ResourceNotFoundError(f"Transaction {transaction_id} not found")
 
     await transaction_repo.delete(transaction_id)
+    invalidate_user(current_user.id)
 
     return {"message": "Transaction deleted successfully"}

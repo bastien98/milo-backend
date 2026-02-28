@@ -20,6 +20,7 @@ from app.core.exceptions import (
     ResourceNotFoundError,
     PermissionDeniedError,
     RateLimitExceededError,
+    DuplicateReceiptError,
 )
 from app.api.v2.router import api_router as api_router_v2
 from app.db.session import init_db
@@ -197,6 +198,20 @@ async def rate_limit_exceeded_exception_handler(
         },
         headers={
             "Retry-After": str(retry_after),
+        },
+    )
+
+
+@app.exception_handler(DuplicateReceiptError)
+async def duplicate_receipt_exception_handler(
+    request: Request, exc: DuplicateReceiptError
+):
+    return JSONResponse(
+        status_code=409,
+        content={
+            "error": "duplicate_receipt",
+            "message": exc.message,
+            "details": exc.details,
         },
     )
 

@@ -218,8 +218,8 @@ class AnalyticsService:
             if t.health_score is not None:
                 category_data[t.category]["health_scores"].append(t.health_score)
 
-        # Recalculate total from included categories only
-        total_spend = sum(data["amount"] for data in category_data.values())
+        # Use the net total (including discounts) for accurate percentages and total
+        # Excluded categories are hidden from the pie chart but still affect the total
 
         # Build category list with color_hex
         categories = []

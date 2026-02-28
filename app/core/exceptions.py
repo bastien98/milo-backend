@@ -58,3 +58,9 @@ class UnsupportedStoreError(ScandaliciousException):
     pass
 
 
+class DuplicateReceiptError(ScandaliciousException):
+    """Raised when a duplicate receipt is detected via content hash."""
+
+    pass
+
+

@@ -52,6 +52,10 @@ class Receipt(Base):
     total_savings: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
     store_branch: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
 
+    # Object storage
+    storage_key: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+    content_hash: Mapped[Optional[str]] = mapped_column(String(64), nullable=True, index=True)
+
     # Timestamps
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()

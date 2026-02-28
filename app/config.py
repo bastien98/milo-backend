@@ -38,6 +38,17 @@ class Settings(BaseSettings):
     MAX_UPLOAD_SIZE_MB: int = 20
     ALLOWED_EXTENSIONS: set = {"pdf", "jpg", "jpeg", "png"}
 
+    # Object Storage (Railway S3-compatible Bucket)
+    # Railway auto-injects these AWS_* env vars when a bucket is attached
+    AWS_S3_BUCKET_NAME: str = ""
+    AWS_ENDPOINT_URL: str = ""
+    AWS_ACCESS_KEY_ID: str = ""
+    AWS_SECRET_ACCESS_KEY: str = ""
+    AWS_DEFAULT_REGION: str = "auto"
+
+    # Duplicate detection
+    DUPLICATE_DETECTION_ENABLED: bool = True
+
     # CORS
     CORS_ORIGINS: List[str] = ["*"]
 

@@ -23,6 +23,7 @@ from PIL import Image
 from app.core.exceptions import GeminiAPIError
 from app.config import get_settings
 from app.core.categories import CATEGORIES_PROMPT_LIST, GRANULAR_CATEGORIES, get_parent_category
+from app.core.stores import STORES_PROMPT_LIST
 
 settings = get_settings()
 logger = logging.getLogger(__name__)
@@ -83,8 +84,9 @@ class GeminiVisionService:
 ## EXTRACTION RULES
 
 ### Vendor Name
-- Clean OCR artifacts, use proper store name
-- Common Belgian stores: Colruyt, Delhaize, Carrefour, Aldi, Lidl, Albert Heijn
+- Identify the store/retailer from the receipt
+- You MUST use one of these exact store names: {stores}
+- If the store is not in the list above, use "Other"
 
 ### Receipt Date
 - Extract the date from the receipt in YYYY-MM-DD format
@@ -218,32 +220,6 @@ class GeminiVisionService:
 
 19. **dp_is_bio**: true if BIO/BIOLOGISCH/BIOLOGIQUE/ORGANIC in text, false otherwise.
 
-## FEW-SHOT EXAMPLES
-
-### Example 1: Multi-pack with packaging + dp_ fields
-"JUPILER PILS 6X33CL PET  8,99" →
-```json
-{"item_name":"JUPILER PILS 6X33CL PET  8,99","normalized_name":"jupiler pils","normalized_brand":"jupiler","is_premium":true,"quantity":1,"unit_price":null,"total_price":8.99,"is_discount":false,"is_deposit":false,"granular_category":"Beer Pils & Lager","health_score":0,"unit_of_measure":null,"weight_or_volume":null,"price_per_unit_measure":null,"dp_expanded_description":"jupiler pils 6x33cl pet","dp_pack_quantity":6,"dp_pack_size":1980.0,"dp_pack_unit":"ml","dp_product_variant":"pils","dp_article_code":null,"dp_is_bio":false}
-```
-
-### Example 2: Fresh produce by weight
-"BANANEN  1.234 kg x 1,99/kg  2,46" →
-```json
-{"item_name":"BANANEN  1.234 kg x 1,99/kg  2,46","normalized_name":"bananen","normalized_brand":null,"is_premium":false,"quantity":1,"unit_price":null,"total_price":2.46,"is_discount":false,"is_deposit":false,"granular_category":"Fruit Bananas","health_score":5,"unit_of_measure":"kg","weight_or_volume":1.234,"price_per_unit_measure":1.99,"dp_expanded_description":"bananen","dp_pack_quantity":1,"dp_pack_size":1234.0,"dp_pack_unit":"g","dp_product_variant":null,"dp_article_code":null,"dp_is_bio":false}
-```
-
-### Example 3: Discount line (negative price)
-"HOEVEELHEIDSVOORDEEL  -1,50" →
-```json
-{"item_name":"HOEVEELHEIDSVOORDEEL  -1,50","normalized_name":"korting hoeveelheidsvoordeel","normalized_brand":null,"is_premium":false,"quantity":1,"unit_price":null,"total_price":-1.50,"is_discount":true,"is_deposit":false,"granular_category":"Other","health_score":null,"unit_of_measure":null,"weight_or_volume":null,"price_per_unit_measure":null,"dp_expanded_description":"hoeveelheidsvoordeel","dp_pack_quantity":null,"dp_pack_size":null,"dp_pack_unit":null,"dp_product_variant":null,"dp_article_code":null,"dp_is_bio":false}
-```
-
-### Example 4: Product with article code
-"ART 541014  DEVOS LEMMENS MAYO 300ML  2,49" →
-```json
-{"item_name":"ART 541014  DEVOS LEMMENS MAYO 300ML  2,49","normalized_name":"devos lemmens mayonaise","normalized_brand":"devos lemmens","is_premium":true,"quantity":1,"unit_price":null,"total_price":2.49,"is_discount":false,"is_deposit":false,"granular_category":"Mayonnaise","health_score":2,"unit_of_measure":null,"weight_or_volume":null,"price_per_unit_measure":null,"dp_expanded_description":"devos lemmens mayonaise 300ml","dp_pack_quantity":1,"dp_pack_size":300.0,"dp_pack_unit":"ml","dp_product_variant":null,"dp_article_code":"541014","dp_is_bio":false}
-```
-
 ### IMPORTANT RULES
 - INCLUDE discount/bonus lines with NEGATIVE total_price values (these reduce the receipt total)
 - Skip subtotals, totals, payment lines
@@ -265,7 +241,7 @@ Assign ONE category from this list for each item:
 
 ## OUTPUT FORMAT
 Return a JSON object with this structure:
-- "vendor_name": string
+- "vendor_name": string (MUST be one of the store names listed above)
 - "receipt_date": "YYYY-MM-DD"
 - "receipt_time": "HH:MM" or null
 - "payment_method": string or null (bancontact/visa/mastercard/cash/payconiq/meal_vouchers/mixed)
@@ -350,8 +326,12 @@ Return a JSON object with this structure:
         Large images are also compressed.
         """
 
-        # Build prompt with shared category list
-        system_prompt = self.SYSTEM_PROMPT.replace("{categories}", CATEGORIES_PROMPT_LIST)
+        # Build prompt with category + store lists from source of truth modules
+        system_prompt = (
+            self.SYSTEM_PROMPT
+            .replace("{categories}", CATEGORIES_PROMPT_LIST)
+            .replace("{stores}", STORES_PROMPT_LIST)
+        )
 
         # Log input details for debugging
         logger.info(f"Gemini extraction: mime_type={mime_type}, content_size={len(file_content)} bytes")

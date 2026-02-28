@@ -7,8 +7,6 @@ Mistral runs OCR internally, then the LLM extracts structured data via JSON mode
 Drop-in replacement for GeminiVisionService — returns the same dataclass types.
 """
 
-import base64
-import io
 import json
 import logging
 from dataclasses import dataclass
@@ -16,7 +14,6 @@ from datetime import date
 from typing import Optional
 
 from mistralai import Mistral
-from PIL import Image
 
 from app.config import get_settings
 from app.core.categories import CATEGORIES_PROMPT_LIST, GRANULAR_CATEGORIES, get_parent_category
@@ -347,76 +344,32 @@ Return a JSON object with this structure:
   - "dp_article_code": string or null (article/PLU code from receipt)
   - "dp_is_bio": boolean (true if organic)'''
 
-    # Image compression settings (same as Gemini service)
-    MAX_IMAGE_SIZE = (1600, 2400)
-    JPEG_QUALITY = 85
-
     def __init__(self, api_key: Optional[str] = None):
         self.api_key = api_key or settings.MISTRAL_API_KEY
         if not self.api_key:
             raise ValueError("Mistral API key not configured")
         self.client = Mistral(api_key=self.api_key)
 
-    def _compress_image(self, image_content: bytes, mime_type: str) -> tuple[bytes, str]:
-        """Compress image if it's too large."""
-        try:
-            if len(image_content) < 500_000:
-                return image_content, mime_type
+    async def extract_receipt(self, file_content: bytes) -> MistralExtractionResult:
+        """Extract receipt data from PDF bytes via base64 encoding."""
+        import base64
 
-            img = Image.open(io.BytesIO(image_content))
-            if img.mode in ("RGBA", "P"):
-                img = img.convert("RGB")
-
-            img.thumbnail(self.MAX_IMAGE_SIZE, Image.Resampling.LANCZOS)
-
-            output = io.BytesIO()
-            img.save(output, format="JPEG", quality=self.JPEG_QUALITY, optimize=True)
-            compressed_bytes = output.getvalue()
-
-            logger.info(
-                f"Image compressed: {len(image_content)} bytes → {len(compressed_bytes)} bytes "
-                f"({len(compressed_bytes) / len(image_content) * 100:.1f}%)"
-            )
-            return compressed_bytes, "image/jpeg"
-
-        except Exception as e:
-            logger.warning(f"Image compression failed, using original: {e}")
-            return image_content, mime_type
-
-    async def extract_receipt(
-        self, file_content: bytes, mime_type: str
-    ) -> MistralExtractionResult:
-        """Extract and normalize receipt data using Mistral Document AI.
-
-        Uses the Document QnA approach: sends the receipt as base64-encoded
-        content to chat.complete(), which runs OCR internally then extracts
-        structured data via JSON mode.
-        """
         system_prompt = self.SYSTEM_PROMPT.replace("{categories}", CATEGORIES_PROMPT_LIST).replace("{stores}", STORES_PROMPT_LIST)
 
-        logger.info(f"Mistral extraction: mime_type={mime_type}, content_size={len(file_content)} bytes")
+        b64_content = base64.b64encode(file_content).decode("utf-8")
+        logger.info(f"Mistral PDF extraction: {len(file_content)} bytes")
 
-        # Compress large images (PDFs sent as-is)
-        if mime_type == "application/pdf":
-            processed_content, processed_mime = file_content, mime_type
-        else:
-            processed_content, processed_mime = self._compress_image(file_content, mime_type)
+        document_block = {
+            "type": "document_url",
+            "document_url": f"data:application/pdf;base64,{b64_content}",
+        }
 
-        # Base64 encode the content for the data URI
-        b64_content = base64.b64encode(processed_content).decode("utf-8")
+        return await self._call_mistral(system_prompt, document_block)
 
-        # Build the content block based on file type
-        if mime_type == "application/pdf":
-            document_block = {
-                "type": "document_url",
-                "document_url": f"data:application/pdf;base64,{b64_content}",
-            }
-        else:
-            document_block = {
-                "type": "image_url",
-                "image_url": f"data:{processed_mime};base64,{b64_content}",
-            }
-
+    async def _call_mistral(
+        self, system_prompt: str, document_block: dict
+    ) -> MistralExtractionResult:
+        """Send extraction request to Mistral and parse the response."""
         messages = [
             {
                 "role": "system",
@@ -492,6 +445,8 @@ Return a JSON object with this structure:
                 "Failed to parse extraction response",
                 details={"error_type": "parse_error", "parse_error": str(e)},
             )
+        except GeminiAPIError:
+            raise
         except Exception as e:
             logger.exception(f"Mistral extraction failed: {e}")
             raise GeminiAPIError(

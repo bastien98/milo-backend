@@ -17,7 +17,7 @@ from alembic import op
 
 
 revision: str = '018_fix_constraints'
-down_revision: Union[str, None] = '017_fix_budget_id_defaults'
+down_revision: Union[str, None] = '019_add_preferred_stores'
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 

@@ -1,19 +1,23 @@
+import hashlib
 import logging
-import time
 from collections import defaultdict
 from datetime import date
 from math import ceil
 from typing import Optional
 
 from fastapi import APIRouter, BackgroundTasks, Depends, UploadFile, File, Query
-from fastapi.responses import JSONResponse
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_db, get_current_db_user
+from app.config import get_settings
+from app.core.cache import invalidate_user
 from app.models.enums import ReceiptStatus
 from app.models.user import User
 
 logger = logging.getLogger(__name__)
+settings = get_settings()
+
 from app.schemas.receipt import (
     ReceiptUploadAcceptedResponse,
     ReceiptStatusResponse,
@@ -24,11 +28,10 @@ from app.schemas.receipt import (
     GroupedReceiptListResponse,
     LineItemDeleteResponse,
 )
-from app.services.image_validator import ImageValidator
 from app.services.receipt_background_worker import process_receipt_background
 from app.db.repositories.receipt_repo import ReceiptRepository
 from app.db.repositories.transaction_repo import TransactionRepository
-from app.core.exceptions import ResourceNotFoundError
+from app.core.exceptions import ResourceNotFoundError, DuplicateReceiptError
 
 router = APIRouter()
 
@@ -42,54 +45,79 @@ async def upload_receipt(
     current_user: User = Depends(get_current_db_user),
 ):
     """
-    Upload a receipt for async processing.
+    Upload a PDF receipt for async processing.
 
-    Accepts PDF, JPG, or PNG files. Returns immediately with a receipt ID
-    and PENDING status. The receipt is processed in the background via
-    Google Gemini Vision for OCR, normalization, and categorization.
+    Returns immediately with a receipt ID and PENDING status.
+    The receipt is processed in the background via Gemini Vision
+    for OCR, normalization, and categorization.
 
     Poll `GET /receipts/{receipt_id}/status` to track processing progress.
     """
-    # Validate content type synchronously (fail fast on bad files)
+    # Validate content type — PDF only
     content_type = file.content_type or "application/octet-stream"
-    image_validator = ImageValidator()
-    image_validator.validate_content_type(content_type)
+    if content_type != "application/pdf":
+        from app.core.exceptions import ImageValidationError
+        raise ImageValidationError(
+            f"Only PDF files are supported, got: {content_type}",
+            details={"supported_types": ["application/pdf"]},
+        )
 
     # Read file bytes now — the UploadFile stream closes with the request
     file_content = await file.read()
-    filename = file.filename or "receipt"
-    file_type_mapping = {
-        "image/jpeg": "jpg", "image/jpg": "jpg",
-        "image/png": "png", "application/pdf": "pdf",
-    }
-    file_type = file_type_mapping.get(content_type, "unknown")
+    filename = file.filename or "receipt.pdf"
+    file_type = "pdf"
+
+    # Compute content hash for duplicate detection
+    content_hash = hashlib.sha256(file_content).hexdigest()
 
     logger.info(
         f"Receipt upload accepted: user_id={current_user.id}, "
-        f"filename={filename}, type={file_type}, size={len(file_content)} bytes"
+        f"filename={filename}, type={file_type}, size={len(file_content)} bytes, "
+        f"hash={content_hash[:12]}..."
     )
 
-    # Create receipt record with PENDING status
+    # Check for duplicate receipt (global, across all users)
     receipt_repo = ReceiptRepository(db)
+    if settings.DUPLICATE_DETECTION_ENABLED:
+        existing = await receipt_repo.find_by_content_hash(content_hash)
+        if existing:
+            raise DuplicateReceiptError(
+                "Duplicate receipt detected — this receipt has already been uploaded",
+                details={
+                    "existing_receipt_id": existing.id,
+                    "existing_user_id": existing.user_id,
+                    "uploaded_at": existing.created_at.isoformat() if existing.created_at else None,
+                },
+            )
+
+    # Create receipt record with PENDING status
     receipt = await receipt_repo.create(
         user_id=current_user.id,
         filename=filename,
         file_type=file_type,
         file_size=len(file_content),
         status=ReceiptStatus.PENDING,
+        content_hash=content_hash,
     )
-    # Commit now so the background worker (separate session) can see the receipt
-    await db.commit()
 
-    # Schedule background processing
+    # Commit DB — catch IntegrityError from the unique partial index on content_hash
+    # (race condition: two concurrent uploads with the same hash)
+    try:
+        await db.commit()
+    except IntegrityError:
+        await db.rollback()
+        raise DuplicateReceiptError(
+            "Duplicate receipt detected — this receipt has already been uploaded",
+            details={"content_hash": content_hash},
+        )
+
+    # Schedule background processing — pass PDF bytes directly to Mistral
     background_tasks.add_task(
         process_receipt_background,
         receipt_id=receipt.id,
         user_id=current_user.id,
         file_content=file_content,
-        content_type=content_type,
         filename=filename,
-        file_type=file_type,
         receipt_date_override=receipt_date,
     )
 
@@ -315,6 +343,7 @@ async def delete_receipt(
         raise ResourceNotFoundError(f"Receipt {receipt_id} not found")
 
     await receipt_repo.delete(receipt_id)
+    invalidate_user(current_user.id)
 
     return {"message": "Receipt deleted successfully"}
 
@@ -399,6 +428,7 @@ async def delete_line_item(
         receipt_id=receipt_id,
         total_amount=round(new_total_amount, 2),
     )
+    invalidate_user(current_user.id)
 
     return LineItemDeleteResponse(
         success=True,

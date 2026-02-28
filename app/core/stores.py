@@ -16,33 +16,29 @@ from typing import Dict, List, Optional
 #
 # Each entry:
 #   name         — Canonical DB name (lowercase, stored in receipts/transactions)
-#   display_name — Clean display name for UI
-#   aliases      — Lowercase prefixes to match against LLM vendor_name output.
+#   display_name — Clean display name for UI and LLM prompt
+#   aliases      — Lowercase strings to match against LLM vendor_name output.
 #                  Ordered longest-first within each store for correct prefix matching.
+#
+# Every sub-brand is a SEPARATE entry. The LLM is instructed to pick
+# exactly one display_name from this list. Unknown stores → "Other".
 
 _STORES = [
-    {
-        "name": "colruyt",
-        "display_name": "Colruyt",
-        "aliases": ["colruyt"],
-        # Colruyt Group also owns OKay, Bio-Planet, Cru, Spar, Comarkt
-        # but those are separate banners, not "Colruyt" sub-brands.
-        "rejected_aliases": [],
-    },
-    {
-        "name": "delhaize",
-        "display_name": "Delhaize",
-        # AD Delhaize = full-size Delhaize supermarket (Ahold Delhaize rebrand)
-        "aliases": ["ad delhaize", "delhaize"],
-        "rejected_aliases": [
-            "proxy delhaize",
-            "delhaize proxy",
-            "shop & go",
-            "shop&go",
-            "delhaize shop",
-            "delhaize city",
-        ],
-    },
+    # ── Colruyt Group ──
+    {"name": "colruyt", "display_name": "Colruyt", "aliases": ["colruyt"]},
+    {"name": "okay", "display_name": "OKay", "aliases": ["okay", "o'kay"]},
+    {"name": "okay compact", "display_name": "OKay Compact", "aliases": ["okay compact"]},
+    {"name": "bio-planet", "display_name": "Bio-Planet", "aliases": ["bio-planet", "bio planet", "bioplanet"]},
+    {"name": "cru", "display_name": "Cru", "aliases": ["cru"]},
+    {"name": "spar", "display_name": "Spar", "aliases": ["spar"]},
+    {"name": "comarkt", "display_name": "Comarkt", "aliases": ["comarkt"]},
+
+    # ── Ahold Delhaize ──
+    {"name": "delhaize", "display_name": "Delhaize", "aliases": ["ad delhaize", "delhaize"]},
+    {"name": "proxy delhaize", "display_name": "Proxy Delhaize", "aliases": ["proxy delhaize", "delhaize proxy"]},
+    {"name": "shop & go", "display_name": "Shop & Go", "aliases": ["shop & go", "shop&go", "delhaize shop & go"]},
+
+    # ── Carrefour ──
     {
         "name": "carrefour",
         "display_name": "Carrefour",
@@ -50,33 +46,28 @@ _STORES = [
             "carrefour hypermarché",
             "carrefour hypermarkt",
             "carrefour hypermarket",
-            "carrefour market",
             "carrefour",
         ],
-        "rejected_aliases": [
-            "carrefour express",
-            "carrefour city",
-            "carrefour contact",
-        ],
     },
-    {
-        "name": "aldi",
-        "display_name": "Aldi",
-        "aliases": ["aldi"],
-        "rejected_aliases": [],
-    },
-    {
-        "name": "lidl",
-        "display_name": "Lidl",
-        "aliases": ["lidl"],
-        "rejected_aliases": [],
-    },
-    {
-        "name": "albert heijn",
-        "display_name": "Albert Heijn",
-        "aliases": ["albert heijn", "ah"],
-        "rejected_aliases": ["ah to go", "albert heijn to go"],
-    },
+    {"name": "carrefour market", "display_name": "Carrefour Market", "aliases": ["carrefour market"]},
+    {"name": "carrefour express", "display_name": "Carrefour Express", "aliases": ["carrefour express"]},
+
+    # ── Discounters ──
+    {"name": "aldi", "display_name": "Aldi", "aliases": ["aldi"]},
+    {"name": "lidl", "display_name": "Lidl", "aliases": ["lidl"]},
+
+    # ── Albert Heijn ──
+    {"name": "albert heijn", "display_name": "Albert Heijn", "aliases": ["albert heijn", "ah"]},
+    {"name": "ah to go", "display_name": "AH To Go", "aliases": ["ah to go", "albert heijn to go"]},
+
+    # ── Other Belgian retailers ──
+    {"name": "intermarche", "display_name": "Intermarché", "aliases": ["intermarché", "intermarche"]},
+    {"name": "match", "display_name": "Match", "aliases": ["match"]},
+    {"name": "makro", "display_name": "Makro", "aliases": ["makro"]},
+    {"name": "jumbo", "display_name": "Jumbo", "aliases": ["jumbo"]},
+
+    # ── Fallback ──
+    {"name": "other", "display_name": "Other", "aliases": ["other"]},
 ]
 
 
@@ -88,9 +79,6 @@ _STORES = [
 # so "carrefour market" is tried before "carrefour".
 ALLOWED_STORE_ALIASES: List[tuple] = []
 
-# Rejected aliases sorted by length descending (checked before allowed)
-REJECTED_STORE_ALIASES: List[str] = []
-
 # canonical name → display name
 STORE_DISPLAY_NAMES: Dict[str, str] = {}
 
@@ -101,7 +89,6 @@ ALL_STORE_NAMES: List[str] = []
 def _build_lookups() -> None:
     """Build all lookup tables from _STORES at module load time."""
     alias_pairs = []
-    rejected = []
 
     for store in _STORES:
         name = store["name"]
@@ -111,15 +98,9 @@ def _build_lookups() -> None:
         for alias in store["aliases"]:
             alias_pairs.append((alias, name))
 
-        for alias in store.get("rejected_aliases", []):
-            rejected.append(alias)
-
     # Sort by alias length descending so longest prefixes match first
     alias_pairs.sort(key=lambda pair: len(pair[0]), reverse=True)
     ALLOWED_STORE_ALIASES.extend(alias_pairs)
-
-    rejected.sort(key=len, reverse=True)
-    REJECTED_STORE_ALIASES.extend(rejected)
 
 
 _build_lookups()
@@ -143,10 +124,7 @@ def resolve_store_name(vendor_name: str) -> Optional[str]:
     """Resolve a vendor name from LLM output to a canonical store name.
 
     Uses longest-prefix matching so "carrefour market etterbeek"
-    matches "carrefour market" → "carrefour" (not just "carrefour").
-
-    Rejected aliases (e.g. "carrefour express", "delhaize proxy") are
-    checked first and return None even if a shorter allowed alias would match.
+    matches "carrefour market" → "carrefour market" (not just "carrefour").
 
     Returns the canonical lowercase store name (e.g. "colruyt", "carrefour"),
     or None if the store is not in the supported list.
@@ -155,11 +133,6 @@ def resolve_store_name(vendor_name: str) -> Optional[str]:
         return None
 
     normalized = vendor_name.lower().strip()
-
-    # Check rejected aliases first (e.g. "carrefour express", "delhaize proxy")
-    for rejected in REJECTED_STORE_ALIASES:
-        if normalized == rejected or normalized.startswith(rejected + " "):
-            return None
 
     for alias, canonical in ALLOWED_STORE_ALIASES:
         if normalized == alias or normalized.startswith(alias + " "):

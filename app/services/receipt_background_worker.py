@@ -4,7 +4,6 @@ Runs outside the request lifecycle with its own DB session.
 Called via FastAPI BackgroundTasks from the upload endpoint.
 """
 
-import hashlib
 import logging
 import time
 from datetime import date, datetime, timezone
@@ -16,10 +15,9 @@ from app.db.repositories.receipt_repo import ReceiptRepository
 from app.db.repositories.transaction_repo import TransactionRepository
 from app.models.transaction import Transaction
 from app.models.enums import ReceiptStatus
-from app.core.exceptions import UnsupportedStoreError
 from app.core.stores import resolve_store_name
-from app.services.image_validator import ImageValidator
-from app.services.mistral_document_service import MistralDocumentService
+from app.services.gemini_vision_service import GeminiVisionService
+from app.core.cache import invalidate_user
 
 logger = logging.getLogger(__name__)
 
@@ -28,9 +26,7 @@ async def process_receipt_background(
     receipt_id: str,
     user_id: str,
     file_content: bytes,
-    content_type: str,
     filename: str,
-    file_type: str,
     receipt_date_override: Optional[date] = None,
 ) -> None:
     """Process a receipt in the background.
@@ -38,10 +34,13 @@ async def process_receipt_background(
     Creates its own DB session since the request session is closed
     by the time this runs. All exceptions are caught and recorded
     as FAILED status on the receipt.
+
+    Sends PDF bytes directly to Gemini Vision — no S3 needed.
     """
     logger.info(
         f"Background processing started: receipt_id={receipt_id}, "
-        f"user_id={user_id}, filename={filename}"
+        f"user_id={user_id}, filename={filename}, "
+        f"size={len(file_content)} bytes"
     )
 
     async with async_session_maker() as session:
@@ -56,31 +55,25 @@ async def process_receipt_background(
             )
             await session.commit()
 
-            # Step 2: Validate image quality
+            # Step 2: Send PDF bytes directly to Gemini Vision
             t0 = time.monotonic()
-            image_validator = ImageValidator()
-            image_validator.raise_if_invalid(file_content, content_type)
-            logger.info(f"⏱ bg_image_validation: {time.monotonic() - t0:.3f}s")
+            gemini_service = GeminiVisionService()
+            extraction_result = await gemini_service.extract_receipt(file_content, "application/pdf")
 
-            # Step 3: Extract via Mistral Document AI
-            t0 = time.monotonic()
-            mistral_service = MistralDocumentService()
-            extraction_result = await mistral_service.extract_receipt(
-                file_content, content_type
-            )
             logger.info(
-                f"⏱ bg_mistral_extraction: {time.monotonic() - t0:.3f}s - "
+                f"bg_gemini_extraction: {time.monotonic() - t0:.3f}s - "
                 f"vendor={extraction_result.vendor_name}, "
                 f"items={len(extraction_result.line_items)}"
             )
 
-            # Step 3.5: Validate store is supported
+            # Step 3: Resolve store name (fallback to "other" if unknown)
             canonical_store = resolve_store_name(extraction_result.vendor_name)
             if canonical_store is None:
-                raise UnsupportedStoreError(
-                    f"Unsupported store: {extraction_result.vendor_name}",
-                    details={"vendor_name": extraction_result.vendor_name},
+                logger.warning(
+                    f"Unknown store '{extraction_result.vendor_name}' for "
+                    f"receipt {receipt_id}, using 'other'"
                 )
+                canonical_store = "other"
             cleaned_store_name = canonical_store
 
             # Step 4: Create transactions (batch insert — single flush)
@@ -157,31 +150,13 @@ async def process_receipt_background(
             )
             await session.commit()
 
+            # Invalidate analytics cache so fresh data is returned
+            invalidate_user(user_id)
+
             logger.info(
                 f"Background processing completed: receipt_id={receipt_id}, "
                 f"store={cleaned_store_name}, items={len(extraction_result.line_items)}"
             )
-
-
-        except UnsupportedStoreError as e:
-            logger.warning(
-                f"Unsupported store for receipt {receipt_id}: {e.message}"
-            )
-            await session.rollback()
-            try:
-                await receipt_repo.update(
-                    receipt_id=receipt_id,
-                    status=ReceiptStatus.FAILED,
-                    error_code="unsupported_store",
-                    error_message=e.message,
-                )
-                await session.commit()
-            except Exception as update_err:
-                logger.error(
-                    f"Failed to update receipt status to FAILED: "
-                    f"receipt_id={receipt_id}, error={update_err}"
-                )
-                await session.rollback()
 
         except Exception as e:
             logger.error(
