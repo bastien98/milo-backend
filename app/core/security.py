@@ -1,3 +1,4 @@
+import asyncio
 import json
 from typing import Optional
 
@@ -65,8 +66,8 @@ async def get_current_user(
     token = credentials.credentials
 
     try:
-        # Verify the ID token
-        decoded_token = auth.verify_id_token(token)
+        # Verify the ID token — run in thread pool so the event loop isn't blocked
+        decoded_token = await asyncio.to_thread(auth.verify_id_token, token)
 
         return FirebaseUser(
             uid=decoded_token["uid"],

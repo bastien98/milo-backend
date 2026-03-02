@@ -37,6 +37,7 @@ async def process_receipt_background(
 
     Sends PDF bytes directly to Gemini Vision — no S3 needed.
     """
+    task_start = time.monotonic()
     logger.info(
         f"Background processing started: receipt_id={receipt_id}, "
         f"user_id={user_id}, filename={filename}, "
@@ -49,24 +50,26 @@ async def process_receipt_background(
             transaction_repo = TransactionRepository(session)
 
             # Step 1: Mark as PROCESSING
+            t0 = time.monotonic()
             await receipt_repo.update(
                 receipt_id=receipt_id,
                 status=ReceiptStatus.PROCESSING,
             )
             await session.commit()
+            logger.info(f"⏱ bg_mark_processing: {time.monotonic() - t0:.3f}s")
 
-            # Step 2: Send PDF bytes directly to Gemini Vision
+            # Step 2: Upload PDF to Gemini Files API and extract
             t0 = time.monotonic()
             gemini_service = GeminiVisionService()
-            extraction_result = await gemini_service.extract_receipt(file_content, "application/pdf")
-
+            extraction_result = await gemini_service.extract_receipt(file_content)
             logger.info(
-                f"bg_gemini_extraction: {time.monotonic() - t0:.3f}s - "
+                f"⏱ bg_gemini_extraction: {time.monotonic() - t0:.3f}s - "
                 f"vendor={extraction_result.vendor_name}, "
                 f"items={len(extraction_result.line_items)}"
             )
 
             # Step 3: Resolve store name (fallback to "other" if unknown)
+            t0 = time.monotonic()
             canonical_store = resolve_store_name(extraction_result.vendor_name)
             if canonical_store is None:
                 logger.warning(
@@ -75,6 +78,7 @@ async def process_receipt_background(
                 )
                 canonical_store = "other"
             cleaned_store_name = canonical_store
+            logger.info(f"⏱ bg_store_resolution: {time.monotonic() - t0:.3f}s")
 
             # Step 4: Create transactions (batch insert — single flush)
             t0 = time.monotonic()
@@ -134,7 +138,8 @@ async def process_receipt_background(
                 except (ValueError, IndexError):
                     pass
 
-            # Step 6: Update receipt to COMPLETED
+            # Step 6: Update receipt to COMPLETED + invalidate cache
+            t0 = time.monotonic()
             await receipt_repo.update(
                 receipt_id=receipt_id,
                 status=ReceiptStatus.COMPLETED,
@@ -148,19 +153,19 @@ async def process_receipt_background(
                 store_branch=extraction_result.store_branch,
             )
             await session.commit()
-
-            # Invalidate analytics cache so fresh data is returned
             invalidate_user(user_id)
+            logger.info(f"⏱ bg_mark_completed: {time.monotonic() - t0:.3f}s")
 
             logger.info(
-                f"Background processing completed: receipt_id={receipt_id}, "
-                f"store={cleaned_store_name}, items={len(extraction_result.line_items)}"
+                f"⏱ bg_total: {time.monotonic() - task_start:.3f}s — "
+                f"receipt_id={receipt_id}, store={cleaned_store_name}, "
+                f"items={len(extraction_result.line_items)}"
             )
 
         except Exception as e:
             logger.error(
                 f"Background processing failed: receipt_id={receipt_id}, "
-                f"error={e}",
+                f"elapsed={time.monotonic() - task_start:.3f}s, error={e}",
                 exc_info=True,
             )
             await session.rollback()

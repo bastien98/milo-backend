@@ -11,13 +11,13 @@ Replaces Veryfi for OCR extraction and handles:
 import io
 import json
 import logging
+import time
 from dataclasses import dataclass
 from datetime import date
 from typing import Optional
 
 from google import genai
 from google.genai import types
-from PIL import Image
 
 from app.core.exceptions import GeminiAPIError
 from app.config import get_settings
@@ -64,7 +64,6 @@ class GeminiExtractionResult:
     receipt_date: Optional[date]
     total: Optional[float]
     line_items: list[ExtractedLineItem]
-    ocr_text: Optional[str]  # Full OCR for debugging
     receipt_time: Optional[str]  # HH:MM format
     payment_method: Optional[str]  # bancontact/visa/mastercard/cash/payconiq/meal_vouchers/mixed
     total_savings: Optional[float]  # total discount amount (positive number)
@@ -74,8 +73,8 @@ class GeminiExtractionResult:
 class GeminiVisionService:
     """Gemini Vision integration for receipt OCR and extraction."""
 
-    MODEL = "gemini-3-pro-preview"
-    MAX_TOKENS = 32768
+    MODEL = "gemini-3.1-pro-preview"
+    MAX_TOKENS = 32000  # Actual output ~6k tokens + high thinking budget; pro model supports 64k output
 
     SYSTEM_PROMPT = '''You are a Belgian grocery receipt analyzer. Extract and normalize line items from receipt images.
 
@@ -259,109 +258,64 @@ Return a JSON object with this structure:
   - "dp_article_code": string or null (article/PLU code from receipt)
   - "dp_is_bio": boolean (true if organic)'''
 
-    # Image compression settings (for large images only)
-    MAX_IMAGE_SIZE = (1600, 2400)  # Max dimensions for compressed image
-    JPEG_QUALITY = 85  # JPEG compression quality
-
     def __init__(self, api_key: Optional[str] = None):
         self.api_key = api_key or settings.GEMINI_API_KEY
         if not self.api_key:
             raise ValueError("Gemini API key not configured")
         self.client = genai.Client(api_key=self.api_key)
 
-    def _compress_image(self, image_content: bytes, mime_type: str) -> tuple[bytes, str]:
-        """Compress image if it's too large.
-
-        Returns:
-            Tuple of (compressed image bytes, mime_type)
-        """
-        try:
-            # Only compress if larger than 500KB
-            if len(image_content) < 500_000:
-                return image_content, mime_type
-
-            img = Image.open(io.BytesIO(image_content))
-
-            # Convert to RGB if necessary (for PNG with transparency)
-            if img.mode in ("RGBA", "P"):
-                img = img.convert("RGB")
-
-            # Resize if too large
-            img.thumbnail(self.MAX_IMAGE_SIZE, Image.Resampling.LANCZOS)
-
-            # Compress to JPEG
-            output = io.BytesIO()
-            img.save(output, format="JPEG", quality=self.JPEG_QUALITY, optimize=True)
-            compressed_bytes = output.getvalue()
-
-            logger.info(
-                f"Image compressed: {len(image_content)} bytes → {len(compressed_bytes)} bytes "
-                f"({len(compressed_bytes) / len(image_content) * 100:.1f}%)"
-            )
-
-            return compressed_bytes, "image/jpeg"
-
-        except Exception as e:
-            logger.warning(f"Image compression failed, using original: {e}")
-            return image_content, mime_type
-
-    async def extract_receipt(
-        self, file_content: bytes, mime_type: str
-    ) -> GeminiExtractionResult:
+    async def extract_receipt(self, file_content: bytes) -> GeminiExtractionResult:
         """Extract and normalize receipt data using Gemini Vision.
 
-        PDFs are converted to compressed images for better reliability.
-        Large images are also compressed.
+        Uploads PDF via Files API, runs extraction with low thinking level, then cleans up.
         """
-
-        # Build prompt with category + store lists from source of truth modules
         system_prompt = (
             self.SYSTEM_PROMPT
             .replace("{categories}", CATEGORIES_PROMPT_LIST)
             .replace("{stores}", STORES_PROMPT_LIST)
         )
 
-        # Log input details for debugging
-        logger.info(f"Gemini extraction: mime_type={mime_type}, content_size={len(file_content)} bytes")
+        logger.info(f"Gemini extraction: content_size={len(file_content)} bytes")
 
-        # Pass PDFs directly to Gemini, compress large images only
-        if mime_type == "application/pdf":
-            processed_content, processed_mime = file_content, mime_type
-        else:
-            processed_content, processed_mime = self._compress_image(file_content, mime_type)
+        # Upload PDF to Gemini Files API
+        t0 = time.monotonic()
+        uploaded_file = await self.client.aio.files.upload(
+            file=io.BytesIO(file_content),
+            config=types.UploadFileConfig(
+                mime_type="application/pdf",
+                display_name="receipt.pdf",
+            ),
+        )
+        logger.info(f"⏱ gemini_file_upload: {time.monotonic() - t0:.3f}s")
 
-        extract_prompt = "Extract all line items from this receipt image. Return JSON only."
+        extract_prompt = "Extract all line items from this receipt."
 
+        response_text = None
         try:
-            response = self.client.models.generate_content(
+            t0 = time.monotonic()
+            response = await self.client.aio.models.generate_content(
                 model=self.MODEL,
-                contents=[
-                    types.Part.from_bytes(
-                        data=processed_content,
-                        mime_type=processed_mime,
-                    ),
-                    extract_prompt,
-                ],
+                contents=[uploaded_file, extract_prompt],
                 config=types.GenerateContentConfig(
                     system_instruction=system_prompt,
                     max_output_tokens=self.MAX_TOKENS,
-                    temperature=0.1,
+                    temperature=1.0,
                     response_mime_type="application/json",
-                    thinking_config=types.ThinkingConfig(thinking_budget=128),
                 ),
             )
+            logger.info(f"⏱ gemini_generate_content: {time.monotonic() - t0:.3f}s")
 
-            # Log token usage for performance analysis
+            # Log token usage
             if hasattr(response, 'usage_metadata') and response.usage_metadata:
                 um = response.usage_metadata
                 logger.info(
-                    f"⏱ Gemini token usage: "
+                    f"Gemini token usage: "
                     f"input={getattr(um, 'prompt_token_count', '?')}, "
                     f"output={getattr(um, 'candidates_token_count', '?')}, "
                     f"total={getattr(um, 'total_token_count', '?')}"
                 )
 
-            # Check for truncation (max_output_tokens reached)
+            # Check for truncation
             if response.candidates and response.candidates[0].finish_reason:
                 finish_reason = str(response.candidates[0].finish_reason)
                 if "MAX_TOKENS" in finish_reason or "LENGTH" in finish_reason:
@@ -379,15 +333,9 @@ Return a JSON object with this structure:
                     "Gemini returned empty response",
                     details={"error_type": "empty_response"},
                 )
-            data = json.loads(response_text)
 
-            # Debug logging to see what Gemini returned
+            data = json.loads(response_text)
             logger.info(f"Gemini response parsed: vendor={data.get('vendor_name')}, items={len(data.get('line_items', []))}")
-            if data.get('line_items'):
-                first_item = data['line_items'][0]
-                logger.info(f"First item sample: item_name={first_item.get('item_name')}, "
-                           f"normalized={first_item.get('normalized_name')}, "
-                           f"granular_cat={first_item.get('granular_category')}")
 
             return self._build_result(data)
 
@@ -398,12 +346,20 @@ Return a JSON object with this structure:
                 "Failed to parse extraction response",
                 details={"error_type": "parse_error", "parse_error": str(e)},
             )
+        except GeminiAPIError:
+            raise
         except Exception as e:
             logger.exception(f"Extraction failed: {e}")
             raise GeminiAPIError(
                 f"Extraction failed: {str(e)}",
                 details={"error_type": "unexpected", "error": str(e)},
             )
+        finally:
+            # Best-effort cleanup — files auto-expire after 48h anyway
+            try:
+                await self.client.aio.files.delete(name=uploaded_file.name)
+            except Exception:
+                pass
 
     def _build_result(self, data: dict) -> GeminiExtractionResult:
         """Build extraction result from parsed JSON."""
@@ -573,7 +529,6 @@ Return a JSON object with this structure:
             receipt_date=receipt_date,
             total=data.get("total"),
             line_items=line_items,
-            ocr_text=data.get("ocr_text"),
             receipt_time=receipt_time,
             payment_method=payment_method,
             total_savings=total_savings,

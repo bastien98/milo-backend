@@ -31,7 +31,7 @@ from app.schemas.receipt import (
 from app.services.receipt_background_worker import process_receipt_background
 from app.db.repositories.receipt_repo import ReceiptRepository
 from app.db.repositories.transaction_repo import TransactionRepository
-from app.core.exceptions import ResourceNotFoundError, DuplicateReceiptError
+from app.core.exceptions import ResourceNotFoundError, DuplicateReceiptError, ImageValidationError
 
 router = APIRouter()
 
@@ -56,16 +56,14 @@ async def upload_receipt(
     # Validate content type — PDF only
     content_type = file.content_type or "application/octet-stream"
     if content_type != "application/pdf":
-        from app.core.exceptions import ImageValidationError
         raise ImageValidationError(
             f"Only PDF files are supported, got: {content_type}",
             details={"supported_types": ["application/pdf"]},
         )
 
-    # Read file bytes now — the UploadFile stream closes with the request
+    # Read file bytes — the UploadFile stream closes with the request
     file_content = await file.read()
     filename = file.filename or "receipt.pdf"
-    file_type = "pdf"
 
     # Compute content hash for duplicate detection (only when enabled — storing NULL
     # bypasses the partial unique index ix_receipts_content_hash_active which only
@@ -94,7 +92,7 @@ async def upload_receipt(
     receipt = await receipt_repo.create(
         user_id=current_user.id,
         filename=filename,
-        file_type=file_type,
+        file_type="pdf",
         file_size=len(file_content),
         status=ReceiptStatus.PENDING,
         content_hash=content_hash,
@@ -111,14 +109,12 @@ async def upload_receipt(
             details={"content_hash": content_hash},
         )
 
-    # Log after commit — receipt is guaranteed to be in DB at this point
     logger.info(
-        f"Receipt upload accepted: user_id={current_user.id}, "
-        f"filename={filename}, type={file_type}, size={len(file_content)} bytes, "
-        f"hash={content_hash[:12] + '...' if content_hash else 'disabled'}, receipt_id={receipt.id}"
+        f"Receipt upload accepted: receipt_id={receipt.id}, user_id={current_user.id}, "
+        f"filename={filename}, size={len(file_content)} bytes"
     )
 
-    # Schedule background processing — pass PDF bytes directly to Gemini Vision
+    # Schedule background processing
     background_tasks.add_task(
         process_receipt_background,
         receipt_id=receipt.id,
