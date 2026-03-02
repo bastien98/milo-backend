@@ -18,6 +18,7 @@ from datetime import date
 from typing import Optional
 
 from google import genai
+from pydantic import BaseModel as PydanticBaseModel
 from google.genai import types
 
 from app.core.exceptions import GeminiAPIError
@@ -32,6 +33,18 @@ logger = logging.getLogger(__name__)
 # Without this, concurrent uploads from the same user hit the API simultaneously and
 # get queued server-side, escalating latency from ~60s to 180s+ for later requests.
 _user_semaphores: dict[str, asyncio.Semaphore] = {}
+
+# Singleton genai.Client — reuses the underlying httpx.AsyncClient connection pool across
+# all background tasks. Creating a new client per task means a new TLS handshake and new
+# connection pool for every receipt. The singleton is safe for concurrent asyncio use.
+_gemini_client: genai.Client | None = None
+
+
+def _get_gemini_client() -> genai.Client:
+    global _gemini_client
+    if _gemini_client is None:
+        _gemini_client = genai.Client(api_key=settings.GEMINI_API_KEY)
+    return _gemini_client
 
 
 def _get_user_semaphore(user_id: str) -> asyncio.Semaphore:
@@ -80,6 +93,42 @@ class GeminiExtractionResult:
     payment_method: Optional[str]  # bancontact/visa/mastercard/cash/payconiq/meal_vouchers/mixed
     total_savings: Optional[float]  # total discount amount (positive number)
     store_branch: Optional[str]  # store location/branch
+
+
+# Pydantic schemas passed as response_schema to Gemini — structurally constrains the JSON output
+# so the model cannot return a bare array instead of the expected object.
+class _LineItemSchema(PydanticBaseModel):
+    item_name: str
+    normalized_name: str
+    normalized_brand: Optional[str] = None
+    is_premium: bool
+    quantity: int
+    unit_price: Optional[float] = None
+    total_price: float
+    is_discount: bool
+    is_deposit: bool
+    granular_category: str
+    unit_of_measure: Optional[str] = None
+    weight_or_volume: Optional[float] = None
+    price_per_unit_measure: Optional[float] = None
+    dp_expanded_description: Optional[str] = None
+    dp_pack_quantity: Optional[int] = None
+    dp_pack_size: Optional[float] = None
+    dp_pack_unit: Optional[str] = None
+    dp_product_variant: Optional[str] = None
+    dp_article_code: Optional[str] = None
+    dp_is_bio: bool
+
+
+class _ReceiptSchema(PydanticBaseModel):
+    vendor_name: str
+    receipt_date: Optional[str] = None
+    receipt_time: Optional[str] = None
+    payment_method: Optional[str] = None
+    total_savings: Optional[float] = None
+    store_branch: Optional[str] = None
+    total: Optional[float] = None
+    line_items: list[_LineItemSchema]
 
 
 class GeminiVisionService:
@@ -268,13 +317,12 @@ Return a JSON object with this structure:
   - "dp_pack_unit": string or null ("ml" or "g")
   - "dp_product_variant": string or null (flavor/style/sub-type)
   - "dp_article_code": string or null (article/PLU code from receipt)
-  - "dp_is_bio": boolean (true if organic)'''
+  - "dp_is_bio": boolean (true if organic)
 
-    def __init__(self, api_key: Optional[str] = None):
-        self.api_key = api_key or settings.GEMINI_API_KEY
-        if not self.api_key:
-            raise ValueError("Gemini API key not configured")
-        self.client = genai.Client(api_key=self.api_key)
+Extract all line items from this receipt.'''
+
+    def __init__(self):
+        self.client = _get_gemini_client()
 
     async def extract_receipt(self, file_content: bytes, user_id: str) -> GeminiExtractionResult:
         """Extract and normalize receipt data using Gemini Vision.
@@ -302,20 +350,19 @@ Return a JSON object with this structure:
         )
         logger.info(f"⏱ gemini_file_upload: {time.monotonic() - t0:.3f}s")
 
-        extract_prompt = "Extract all line items from this receipt."
-
         response_text = None
         try:
             t0 = time.monotonic()
             async with _get_user_semaphore(user_id):
                 response = await self.client.aio.models.generate_content(
                     model=self.MODEL,
-                    contents=[uploaded_file, extract_prompt],
+                    contents=[uploaded_file],
                     config=types.GenerateContentConfig(
                         system_instruction=system_prompt,
                         max_output_tokens=self.MAX_TOKENS,
                         temperature=1.0,
                         response_mime_type="application/json",
+                        response_schema=_ReceiptSchema,
                         media_resolution=types.MediaResolution.MEDIA_RESOLUTION_MEDIUM,
                     ),
                 )
@@ -550,3 +597,4 @@ Return a JSON object with this structure:
             total_savings=total_savings,
             store_branch=store_branch,
         )
+
