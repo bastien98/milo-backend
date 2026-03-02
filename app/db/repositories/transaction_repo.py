@@ -90,7 +90,6 @@ class TransactionRepository:
         receipt_id: Optional[str] = None,
         quantity: int = 1,
         unit_price: Optional[float] = None,
-        health_score: Optional[int] = None,
         # New fields for semantic search
         normalized_name: Optional[str] = None,
         normalized_brand: Optional[str] = None,
@@ -122,7 +121,6 @@ class TransactionRepository:
             unit_price=unit_price,
             category=category,
             date=date,
-            health_score=health_score,
             # New fields
             normalized_name=normalized_name,
             normalized_brand=normalized_brand,
@@ -165,7 +163,6 @@ class TransactionRepository:
         unit_price: Optional[float] = None,
         category: Optional[str] = None,
         date: Optional[date] = None,
-        health_score: Optional[int] = None,
     ) -> Optional[Transaction]:
         """Update a transaction."""
         transaction = await self.get_by_id(transaction_id)
@@ -186,8 +183,6 @@ class TransactionRepository:
             transaction.category = category
         if date is not None:
             transaction.date = date
-        if health_score is not None:
-            transaction.health_score = health_score
 
         await self.db.flush()
         await self.db.refresh(transaction)

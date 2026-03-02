@@ -47,8 +47,6 @@ The enriched profile (`enriched_profile_service.py`) classifies a user's purchas
 | `staple` | Bought on >= 0.5 trips/week, >= 3 unique trips | 8 |
 | `high_spend` | >= 2 unique trips, sorted by total spend | 6 |
 | `brand_loyal` | Dominant brand >= 80% of purchases, >= 2 trips | 4 |
-| `health_pick` | Avg health score >= 4, >= 3 trips | 4 |
-| `occasional_treat` | Avg health score <= 2, >= 2 trips | 3 |
 | `bulk_buy` | Avg >= 2 units/trip, >= 2 trips | 3 |
 
 Items are deduplicated across buckets (first bucket wins). A two-pass allocation guarantees at least 1 item per non-empty bucket before filling remaining slots. Max 25 items total.

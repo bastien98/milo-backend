@@ -19,13 +19,12 @@ settings = get_settings()
 
 @dataclass
 class CategorizedItem:
-    """Represents a categorized item with health score."""
+    """Represents a categorized item."""
     item_name: str
     item_price: float
     quantity: int
     unit_price: Optional[float]
     category: str
-    health_score: Optional[int]  # 0-5, None for non-food items
 
 
 @dataclass
@@ -36,12 +35,12 @@ class CategorizationResult:
 
 
 class CategorizationServiceGemini:
-    """Google Gemini integration for categorizing items and assigning health scores."""
+    """Google Gemini integration for categorizing grocery items."""
 
     MODEL = "gemini-2.0-flash"
     MAX_TOKENS = 4096
 
-    SYSTEM_PROMPT = """You are a grocery receipt categorization assistant. Given a store name and list of items from a grocery receipt, clean up the data, categorize each item into one of the grocery sub-categories below, assign a health score, and DEDUPLICATE items.
+    SYSTEM_PROMPT = """You are a grocery receipt categorization assistant. Given a store name and list of items from a grocery receipt, clean up the data, categorize each item into one of the grocery sub-categories below, and DEDUPLICATE items.
 
 IMPORTANT - MULTI-SECTION RECEIPT HANDLING:
 Receipt images may consist of multiple overlapping sections captured from a long receipt. This means the SAME LINE ITEM may appear multiple times in the input list due to overlap between sections. You MUST identify and merge these duplicates:
@@ -75,16 +74,7 @@ For each UNIQUE item (after deduplication), provide:
 
    IMPORTANT: Use the EXACT category string from the list above, including any text in parentheses.
 
-3. health_score: Rate healthiness from 0 to 5 for ALL food items:
-   - 5: Very healthy (fresh vegetables, fruits, water, plain nuts)
-   - 4: Healthy (whole grains, lean proteins, eggs, plain dairy)
-   - 3: Moderately healthy (bread, pasta, cheese, some ready meals)
-   - 2: Less healthy (processed meats, sweetened drinks, some snacks)
-   - 1: Unhealthy (chips, candy, cookies, sodas, sugary cereals)
-   - 0: Very unhealthy (alcohol, energy drinks, heavily processed foods)
-   For non-food items (household, personal care, tobacco, pet supplies), set health_score: null
-
-4. original_indices: List of indices from the input that correspond to this item.
+3. original_indices: List of indices from the input that correspond to this item.
    - For unique items: single index, e.g., [0]
    - For duplicates found in overlapping sections: all indices, e.g., [2, 7, 12]
 
@@ -102,14 +92,12 @@ Return ONLY valid JSON with this exact format:
     {
       "original_indices": [0],
       "item_name": "Clean Product Name",
-      "category": "Fruits",
-      "health_score": 5
+      "category": "Fruits"
     },
     {
       "original_indices": [1, 5, 9],
       "item_name": "Merged Duplicate Product",
-      "category": "Dairy, Eggs & Cheese",
-      "health_score": 4
+      "category": "Dairy, Eggs & Cheese"
     }
   ]
 }"""
@@ -124,7 +112,7 @@ Return ONLY valid JSON with this exact format:
         self, items: List[VeryfiLineItem], vendor_name: Optional[str] = None
     ) -> CategorizationResult:
         """
-        Categorize items and assign health scores using Gemini.
+        Categorize items using Gemini.
 
         Args:
             items: List of VeryfiLineItem from OCR extraction
@@ -240,13 +228,6 @@ Return ONLY valid JSON with this exact format:
                 matched = find_closest_match(category_str)
                 category_str = matched if matched else "Unknown Transaction"
 
-            # Parse health score
-            health_score_raw = cat_data.get("health_score")
-            if health_score_raw is not None:
-                health_score = max(0, min(5, int(health_score_raw)))
-            else:
-                health_score = None
-
             # Get cleaned item name from Gemini, fallback to raw description
             cleaned_name = cat_data.get("item_name") or primary_item.description
 
@@ -262,7 +243,6 @@ Return ONLY valid JSON with this exact format:
                     quantity=quantity,
                     unit_price=float(unit_price) if unit_price else None,
                     category=category_str,
-                    health_score=health_score,
                 )
             )
 

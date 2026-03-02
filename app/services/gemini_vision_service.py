@@ -6,7 +6,6 @@ Replaces Veryfi for OCR extraction and handles:
 - Belgian pricing conventions (comma→dot, Hoeveelheidsvoordeel)
 - Deposit item detection (Leeggoed/Vidange)
 - Granular categorization (~200 categories)
-- Health scoring
 """
 
 import io
@@ -44,7 +43,6 @@ class ExtractedLineItem:
     is_deposit: bool
     granular_category: str  # Detailed category
     parent_category: str  # Broad category
-    health_score: Optional[int]  # 0-5, None for non-food
     unit_of_measure: Optional[str]  # kg/g/l/ml/piece
     weight_or_volume: Optional[float]  # actual weight/volume
     price_per_unit_measure: Optional[float]  # price per kg/liter
@@ -230,15 +228,6 @@ class GeminiVisionService:
 Assign ONE category from this list for each item:
 {categories}
 
-### Health Scores (0-5)
-- 5: Fresh vegetables, fruits, water, plain nuts
-- 4: Whole grains, lean proteins, eggs, plain dairy
-- 3: Bread, pasta, cheese, some ready meals
-- 2: Processed meats, sweetened drinks, some snacks
-- 1: Chips, candy, cookies, sodas, sugary cereals
-- 0: Alcohol, energy drinks, heavily processed foods
-- null: Non-food items (household, personal care, pet supplies)
-
 ## OUTPUT FORMAT
 Return a JSON object with this structure:
 - "vendor_name": string (MUST be one of the store names listed above)
@@ -259,7 +248,6 @@ Return a JSON object with this structure:
   - "is_discount": boolean
   - "is_deposit": boolean
   - "granular_category": string (from list above)
-  - "health_score": integer 0-5 or null
   - "unit_of_measure": string or null (kg/g/l/ml/piece)
   - "weight_or_volume": number or null
   - "price_per_unit_measure": number or null
@@ -437,13 +425,6 @@ Return a JSON object with this structure:
                 granular = "Other"
             parent = get_parent_category(granular)
 
-            # Parse health score
-            health_score_raw = item.get("health_score")
-            if health_score_raw is not None:
-                health_score = max(0, min(5, int(health_score_raw)))
-            else:
-                health_score = None
-
             # Parse prices
             total_price = item.get("total_price")
             if total_price is None:
@@ -541,7 +522,6 @@ Return a JSON object with this structure:
                     is_deposit=bool(item.get("is_deposit", False)),
                     granular_category=granular,
                     parent_category=parent,
-                    health_score=health_score,
                     unit_of_measure=unit_of_measure,
                     weight_or_volume=weight_or_volume,
                     price_per_unit_measure=price_per_unit_measure,

@@ -66,9 +66,6 @@ class Transaction(Base):
         String, nullable=False, index=True
     )
 
-    # Health score (0-5, where 0 is unhealthy and 5 is very healthy)
-    health_score: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
-
     # Date
     date: Mapped[date_type] = mapped_column(Date, nullable=False, index=True)
 

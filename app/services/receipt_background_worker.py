@@ -92,7 +92,6 @@ async def process_receipt_background(
                     unit_price=item.unit_price,
                     category=item.parent_category,
                     date=txn_date,
-                    health_score=item.health_score,
                     normalized_name=item.normalized_name,
                     normalized_brand=item.normalized_brand,
                     is_premium=item.is_premium,

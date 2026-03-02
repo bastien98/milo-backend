@@ -25,7 +25,6 @@ class ReceiptProcessorV2:
     - OCR extraction (item names, prices, quantities)
     - Semantic normalization (cleaned product names for search)
     - Granular categorization (~200 categories)
-    - Health scoring
     - Belgian pricing conventions (comma→dot, Hoeveelheidsvoordeel)
     - Deposit detection (Leeggoed/Vidange)
     """
@@ -152,7 +151,7 @@ class ReceiptProcessorV2:
                     unit_price=item.unit_price,
                     category=item.parent_category,
                     date=final_date or date.today(),
-                    health_score=item.health_score,
+
                     normalized_name=item.normalized_name,
                     normalized_brand=item.normalized_brand,
                     is_premium=item.is_premium,
@@ -178,7 +177,7 @@ class ReceiptProcessorV2:
                         quantity=item.quantity,
                         unit_price=item.unit_price,
                         category=item.parent_category,
-                        health_score=item.health_score,
+    
                         normalized_name=item.normalized_name,
                         normalized_brand=item.normalized_brand,
                         is_premium=item.is_premium,

@@ -67,18 +67,18 @@ async def upload_receipt(
     filename = file.filename or "receipt.pdf"
     file_type = "pdf"
 
-    # Compute content hash for duplicate detection
-    content_hash = hashlib.sha256(file_content).hexdigest()
-
-    logger.info(
-        f"Receipt upload accepted: user_id={current_user.id}, "
-        f"filename={filename}, type={file_type}, size={len(file_content)} bytes, "
-        f"hash={content_hash[:12]}..."
+    # Compute content hash for duplicate detection (only when enabled — storing NULL
+    # bypasses the partial unique index ix_receipts_content_hash_active which only
+    # applies WHERE content_hash IS NOT NULL)
+    content_hash = (
+        hashlib.sha256(file_content).hexdigest()
+        if settings.DUPLICATE_DETECTION_ENABLED
+        else None
     )
 
     # Check for duplicate receipt (global, across all users)
     receipt_repo = ReceiptRepository(db)
-    if settings.DUPLICATE_DETECTION_ENABLED:
+    if settings.DUPLICATE_DETECTION_ENABLED and content_hash:
         existing = await receipt_repo.find_by_content_hash(content_hash)
         if existing:
             raise DuplicateReceiptError(
@@ -111,7 +111,14 @@ async def upload_receipt(
             details={"content_hash": content_hash},
         )
 
-    # Schedule background processing — pass PDF bytes directly to Mistral
+    # Log after commit — receipt is guaranteed to be in DB at this point
+    logger.info(
+        f"Receipt upload accepted: user_id={current_user.id}, "
+        f"filename={filename}, type={file_type}, size={len(file_content)} bytes, "
+        f"hash={content_hash[:12] + '...' if content_hash else 'disabled'}, receipt_id={receipt.id}"
+    )
+
+    # Schedule background processing — pass PDF bytes directly to Gemini Vision
     background_tasks.add_task(
         process_receipt_background,
         receipt_id=receipt.id,
@@ -193,14 +200,6 @@ async def list_receipts(
         total_amount = sum(t.item_price for t in txns)
         items_count = len(txns)
 
-        # Calculate average health score (excluding nulls)
-        health_scores = [t.health_score for t in txns if t.health_score is not None]
-        average_health_score = (
-            round(sum(health_scores) / len(health_scores), 1)
-            if health_scores
-            else None
-        )
-
         # Get receipt-level fields from the receipt object
         receipt_obj = receipt_map.get(receipt_id)
 
@@ -219,7 +218,6 @@ async def list_receipts(
                 total_savings=receipt_obj.total_savings if receipt_obj else None,
                 store_branch=receipt_obj.store_branch if receipt_obj else None,
                 items_count=items_count,
-                average_health_score=average_health_score,
                 source=source,
                 transactions=[
                     GroupedReceiptTransaction(
@@ -229,7 +227,6 @@ async def list_receipts(
                         quantity=t.quantity,
                         unit_price=t.unit_price,
                         category=t.category,
-                        health_score=t.health_score,
                         normalized_name=t.normalized_name,
                         normalized_brand=t.normalized_brand,
                         is_discount=t.is_discount,
@@ -360,7 +357,7 @@ async def delete_line_item(
 
     This will:
     - Remove the item from the receipt
-    - Recalculate the receipt's total_amount, items_count, and average_health_score
+    - Recalculate the receipt's total_amount and items_count
     - If this was the last item, the entire receipt will be deleted
 
     Returns the updated receipt totals after deletion.
@@ -402,7 +399,6 @@ async def delete_line_item(
             message="Last item deleted - receipt removed",
             updated_total_amount=0.0,
             updated_items_count=0,
-            updated_average_health_score=None,
             receipt_deleted=True,
         )
 
@@ -414,14 +410,6 @@ async def delete_line_item(
 
     new_total_amount = sum(t.item_price for t in remaining_transactions)
     new_items_count = len(remaining_transactions)
-
-    # Calculate new average health score (excluding nulls)
-    health_scores = [t.health_score for t in remaining_transactions if t.health_score is not None]
-    new_average_health_score = (
-        round(sum(health_scores) / len(health_scores), 1)
-        if health_scores
-        else None
-    )
 
     # Update the receipt with new total
     await receipt_repo.update(
@@ -435,6 +423,5 @@ async def delete_line_item(
         message="Item deleted successfully",
         updated_total_amount=round(new_total_amount, 2),
         updated_items_count=new_items_count,
-        updated_average_health_score=new_average_health_score,
         receipt_deleted=False,
     )

@@ -92,8 +92,6 @@ async def get_summary(
     - `color_hex`: Hex color code for visualization
     - `percentage`: Percentage of total spending
     - `transaction_count`: Number of transactions
-    - `average_health_score`: Average health score (0-5)
-
     This endpoint powers the Pie Chart visualization in the Analytics tab.
     """
     logger.info(
@@ -181,7 +179,7 @@ async def get_store_breakdown(
     summary="Get spending trends for a specific store",
     description="Returns spending trends filtered for a specific store over multiple time periods. "
     "Only periods with actual transactions are included (no empty periods). "
-    "The total_spend, transaction_count, and average_health_score only include transactions from the specified store.",
+    "The total_spend and transaction_count only include transactions from the specified store.",
 )
 async def get_store_trends(
     store_name: str,
@@ -248,7 +246,7 @@ async def get_trends(
     response_model=AggregateResponse,
     summary="Get aggregate statistics across multiple periods",
     description="Returns aggregate statistics including totals, averages, extremes, "
-    "top categories, top stores, and health score distribution across multiple time periods.",
+    "top categories, and top stores across multiple time periods.",
 )
 async def get_aggregate(
     period_type: str = Query("month", description="Period granularity: week, month, year"),
@@ -267,11 +265,10 @@ async def get_aggregate(
 
     Returns comprehensive aggregate data including:
     - **totals**: Total spend, transactions, receipts, and items
-    - **averages**: Average spend per period, transaction value, item price, health score, etc.
-    - **extremes**: Max/min spending periods and highest/lowest health score periods
-    - **top_categories**: Top spending categories with percentages and health scores
+    - **averages**: Average spend per period, transaction value, item price, etc.
+    - **extremes**: Max/min spending periods
+    - **top_categories**: Top spending categories with percentages
     - **top_stores**: Top stores by amount spent with visit counts
-    - **health_score_distribution**: Distribution of health scores across all transactions
 
     Use `all_time=true` to get statistics across the entire user history.
     Use `start_date` and `end_date` for custom date ranges.
@@ -313,10 +310,10 @@ async def get_all_time(
 
     Returns comprehensive all-time data including:
     - Total receipts, items, spend, and transactions
-    - Average item price and health score
+    - Average item price
     - Top stores by visit count (with ranks)
     - Top stores by total spend (with ranks)
-    - Top categories by total spend (with ranks, percentages, and health scores)
+    - Top categories by total spend (with ranks, percentages)
     - First and last receipt dates
 
     This endpoint is optimized for the scan view hero cards on the frontend.
@@ -353,10 +350,9 @@ async def get_year_summary(
     - **transaction_count**: Number of item transactions
     - **receipt_count**: Number of unique receipts
     - **total_items**: Sum of all item quantities
-    - **average_health_score**: Average health score across all items (0-5)
-    - **stores**: List of stores with amount spent, visits, percentage, and health score (sorted by amount_spent descending)
+    - **stores**: List of stores with amount spent, visits, and percentage (sorted by amount_spent descending)
     - **monthly_breakdown**: Per-month spending data (optional, only months with data, sorted by month_number ascending)
-    - **top_categories**: Top spending categories with percentages and health scores
+    - **top_categories**: Top spending categories with percentages
 
     All data is filtered by receipt_date within the specified year (Jan 1 - Dec 31).
     """

@@ -13,7 +13,6 @@ class ExtractedItem(BaseModel):
     quantity: int = 1
     unit_price: Optional[float] = None
     category: str
-    health_score: Optional[int] = None  # 0-5, None for non-food items
     normalized_name: Optional[str] = None  # Cleaned name for semantic search
     normalized_brand: Optional[str] = None  # Brand name only for semantic search
     is_premium: bool = False  # True if premium brand, False if store/house brand
@@ -104,7 +103,6 @@ class GroupedReceiptTransaction(BaseModel):
     quantity: int
     unit_price: Optional[float]
     category: str
-    health_score: Optional[int]
     normalized_name: Optional[str] = None  # Cleaned name for semantic search
     normalized_brand: Optional[str] = None  # Brand name only for semantic search
     is_premium: bool = False  # True if premium brand, False if store/house brand
@@ -141,7 +139,6 @@ class GroupedReceipt(BaseModel):
     total_savings: Optional[float] = None
     store_branch: Optional[str] = None
     items_count: int
-    average_health_score: Optional[float]
     source: ReceiptSource  # receipt_upload or bank_import
     transactions: List[GroupedReceiptTransaction]
 
@@ -163,7 +160,6 @@ class LineItemDeleteResponse(BaseModel):
     message: str
     updated_total_amount: float  # New receipt total after deletion
     updated_items_count: int  # New item count after deletion
-    updated_average_health_score: Optional[float]  # New average health score
     receipt_deleted: bool = False  # True if the entire receipt was deleted (last item)
 
 

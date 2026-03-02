@@ -2,7 +2,7 @@ from datetime import date, timedelta
 from typing import Optional, Dict, List
 from collections import defaultdict
 
-from sqlalchemy import select, and_, func, case, cast, Date
+from sqlalchemy import select, and_, func
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.cache import cached
@@ -20,9 +20,7 @@ from app.schemas.analytics import (
     AggregateTotals,
     AggregateAverages,
     PeriodExtreme,
-    HealthScoreExtreme,
     AggregateExtremes,
-    HealthScoreDistribution,
     AggregateResponse,
     StoreByVisits,
     StoreBySpend,
@@ -114,36 +112,24 @@ class AnalyticsService:
         total_spend = sum(amount for _, amount in tx_amounts)
         transaction_count = len(transactions)
 
-        # Calculate average health score (only for items with health scores)
-        health_scores = [t.health_score for t in transactions if t.health_score is not None]
-        average_health_score = round(sum(health_scores) / len(health_scores), 2) if health_scores else None
-
-        # Group by store (including health scores for per-store average)
-        store_data = defaultdict(lambda: {"amount": 0.0, "receipt_ids": set(), "health_scores": []})
+        # Group by store
+        store_data = defaultdict(lambda: {"amount": 0.0, "receipt_ids": set()})
         for t, amount in tx_amounts:
             store_data[t.store_name]["amount"] += amount
             if t.receipt_id:
                 store_data[t.store_name]["receipt_ids"].add(t.receipt_id)
-            if t.health_score is not None:
-                store_data[t.store_name]["health_scores"].append(t.health_score)
 
         # Build store spending list
         stores = []
         for store_name, data in store_data.items():
             percentage = (data["amount"] / total_spend * 100) if total_spend > 0 else 0
             visit_count = len(data["receipt_ids"])
-            store_avg_health = (
-                round(sum(data["health_scores"]) / len(data["health_scores"]), 2)
-                if data["health_scores"]
-                else None
-            )
             stores.append(
                 StoreSpending(
                     store_name=store_name,
                     amount_spent=round(data["amount"], 2),
                     store_visits=visit_count,
                     percentage=round(percentage, 1),
-                    average_health_score=store_avg_health,
                 )
             )
 
@@ -160,7 +146,6 @@ class AnalyticsService:
             total_spend=round(total_spend, 2),
             transaction_count=transaction_count,
             stores=stores,
-            average_health_score=average_health_score,
         )
 
     @cached()
@@ -209,14 +194,12 @@ class AnalyticsService:
         total_spend = sum(amount for _, amount in tx_amounts)
 
         # Group by category (split-adjusted), excluding non-product categories
-        category_data = defaultdict(lambda: {"amount": 0.0, "count": 0, "health_scores": []})
+        category_data = defaultdict(lambda: {"amount": 0.0, "count": 0})
         for t, amount in tx_amounts:
             if t.category in EXCLUDED_CATEGORIES:
                 continue
             category_data[t.category]["amount"] += amount
             category_data[t.category]["count"] += 1
-            if t.health_score is not None:
-                category_data[t.category]["health_scores"].append(t.health_score)
 
         # Use the net total (including discounts) for accurate percentages and total
         # Excluded categories are hidden from the pie chart but still affect the total
@@ -225,11 +208,6 @@ class AnalyticsService:
         categories = []
         for category_name, data in category_data.items():
             percentage = (data["amount"] / total_spend * 100) if total_spend > 0 else 0
-            avg_health = (
-                round(sum(data["health_scores"]) / len(data["health_scores"]), 2)
-                if data["health_scores"]
-                else None
-            )
             # Get color from group-based color mapping
             color_hex = get_category_color(category_name)
 
@@ -241,7 +219,6 @@ class AnalyticsService:
                     color_hex=color_hex,
                     percentage=round(percentage, 1),
                     transaction_count=data["count"],
-                    average_health_score=avg_health,
                 )
             )
 
@@ -249,22 +226,15 @@ class AnalyticsService:
         categories.sort(key=lambda x: x.total_spent, reverse=True)
 
         # Group by store (split-adjusted)
-        store_data = defaultdict(lambda: {"amount": 0.0, "receipts": set(), "health_scores": []})
+        store_data = defaultdict(lambda: {"amount": 0.0, "receipts": set()})
         for t, amount in tx_amounts:
             store_data[t.store_name]["amount"] += amount
             store_data[t.store_name]["receipts"].add(t.receipt_id)
-            if t.health_score is not None:
-                store_data[t.store_name]["health_scores"].append(t.health_score)
 
         # Build store list
         stores = []
         for store_name, data in store_data.items():
             percentage = (data["amount"] / total_spend * 100) if total_spend > 0 else 0
-            avg_health = (
-                round(sum(data["health_scores"]) / len(data["health_scores"]), 2)
-                if data["health_scores"]
-                else None
-            )
 
             stores.append(
                 PieChartStore(
@@ -272,7 +242,6 @@ class AnalyticsService:
                     total_spent=round(data["amount"], 2),
                     percentage=round(percentage, 1),
                     visit_count=len(data["receipts"]),
-                    average_health_score=avg_health,
                 )
             )
 
@@ -342,34 +311,22 @@ class AnalyticsService:
         # Calculate totals (split-adjusted)
         total_spend = sum(amount for _, amount in tx_amounts)
 
-        # Calculate overall average health score
-        all_health_scores = [t.health_score for t in transactions if t.health_score is not None]
-        overall_avg_health = round(sum(all_health_scores) / len(all_health_scores), 2) if all_health_scores else None
-
         # Group by category (split-adjusted)
-        category_data = defaultdict(lambda: {"amount": 0.0, "count": 0, "health_scores": []})
+        category_data = defaultdict(lambda: {"amount": 0.0, "count": 0})
         for t, amount in tx_amounts:
             category_data[t.category]["amount"] += amount
             category_data[t.category]["count"] += 1
-            if t.health_score is not None:
-                category_data[t.category]["health_scores"].append(t.health_score)
 
         # Build category spending list
         categories = []
         for category_name, data in category_data.items():
             percentage = (data["amount"] / total_spend * 100) if total_spend > 0 else 0
-            avg_health = (
-                round(sum(data["health_scores"]) / len(data["health_scores"]), 2)
-                if data["health_scores"]
-                else None
-            )
             categories.append(
                 CategorySpending(
                     name=get_display_name(category_name),
                     spent=round(data["amount"], 2),
                     percentage=round(percentage, 1),
                     transaction_count=data["count"],
-                    average_health_score=avg_health,
                 )
             )
 
@@ -385,7 +342,6 @@ class AnalyticsService:
             end_date=actual_end,
             total_spend=round(total_spend, 2),
             categories=categories,
-            average_health_score=overall_avg_health,
         )
 
     @cached()
@@ -445,38 +401,26 @@ class AnalyticsService:
         total_items = sum(t.quantity for t in transactions)
         receipt_ids = set(t.receipt_id for t in transactions if t.receipt_id)
 
-        # Calculate average health score for this store
-        store_health_scores = [t.health_score for t in transactions if t.health_score is not None]
-        store_avg_health = round(sum(store_health_scores) / len(store_health_scores), 2) if store_health_scores else None
-
         # Calculate average item price (NOT split-adjusted - this is the actual item price)
         total_raw_spend = sum(t.item_price for t in transactions)
         average_item_price = round(total_raw_spend / total_items, 2) if total_items > 0 else None
 
         # Group by category (split-adjusted)
-        category_data = defaultdict(lambda: {"amount": 0.0, "count": 0, "health_scores": []})
+        category_data = defaultdict(lambda: {"amount": 0.0, "count": 0})
         for t, amount in tx_amounts:
             category_data[t.category]["amount"] += amount
             category_data[t.category]["count"] += 1
-            if t.health_score is not None:
-                category_data[t.category]["health_scores"].append(t.health_score)
 
         # Build category spending list
         categories = []
         for category_name, data in category_data.items():
             percentage = (data["amount"] / total_spend * 100) if total_spend > 0 else 0
-            avg_health = (
-                round(sum(data["health_scores"]) / len(data["health_scores"]), 2)
-                if data["health_scores"]
-                else None
-            )
             categories.append(
                 CategorySpending(
                     name=get_display_name(category_name),
                     spent=round(data["amount"], 2),
                     percentage=round(percentage, 1),
                     transaction_count=data["count"],
-                    average_health_score=avg_health,
                 )
             )
 
@@ -499,7 +443,6 @@ class AnalyticsService:
                     spent=cat.spent,
                     percentage=cat.percentage,
                     transaction_count=cat.transaction_count,
-                    average_health_score=cat.average_health_score,
                     group=group_name,
                     group_color_hex=group_color,
                     group_icon=group_icon,
@@ -514,7 +457,6 @@ class AnalyticsService:
             total_store_spend=round(total_spend, 2),
             store_visits=len(receipt_ids),
             categories=enriched_categories,
-            average_health_score=store_avg_health,
             total_items=total_items,
             average_item_price=average_item_price,
         )
@@ -569,7 +511,6 @@ class AnalyticsService:
         period_data = defaultdict(lambda: {
             "total_spend": 0.0,
             "transaction_count": 0,
-            "health_scores": [],
         })
 
         for t, amount in tx_amounts:
@@ -586,8 +527,6 @@ class AnalyticsService:
             pd = period_data[period_start]
             pd["total_spend"] += amount
             pd["transaction_count"] += 1
-            if t.health_score is not None:
-                pd["health_scores"].append(t.health_score)
 
         # Build trends list
         trends = []
@@ -606,12 +545,6 @@ class AnalyticsService:
             else:  # year
                 period_end_date = date(period_start_date.year, 12, 31)
 
-            avg_health = (
-                round(sum(data["health_scores"]) / len(data["health_scores"]), 2)
-                if data["health_scores"]
-                else None
-            )
-
             trends.append(
                 SpendingTrend(
                     period=self._format_period(period_start_date, period_end_date),
@@ -619,7 +552,6 @@ class AnalyticsService:
                     end_date=period_end_date,
                     total_spend=round(data["total_spend"], 2),
                     transaction_count=data["transaction_count"],
-                    average_health_score=avg_health,
                 )
             )
 
@@ -684,7 +616,6 @@ class AnalyticsService:
         period_data = defaultdict(lambda: {
             "total_spend": 0.0,
             "transaction_count": 0,
-            "health_scores": [],
         })
 
         for t, amount in tx_amounts:
@@ -701,8 +632,6 @@ class AnalyticsService:
             pd = period_data[period_start]
             pd["total_spend"] += amount
             pd["transaction_count"] += 1
-            if t.health_score is not None:
-                pd["health_scores"].append(t.health_score)
 
         # Build trends list
         trends = []
@@ -721,12 +650,6 @@ class AnalyticsService:
             else:  # year
                 period_end_date = date(period_start_date.year, 12, 31)
 
-            avg_health = (
-                round(sum(data["health_scores"]) / len(data["health_scores"]), 2)
-                if data["health_scores"]
-                else None
-            )
-
             trends.append(
                 SpendingTrend(
                     period=self._format_period(period_start_date, period_end_date),
@@ -734,7 +657,6 @@ class AnalyticsService:
                     end_date=period_end_date,
                     total_spend=round(data["total_spend"], 2),
                     transaction_count=data["transaction_count"],
-                    average_health_score=avg_health,
                 )
             )
 
@@ -801,7 +723,6 @@ class AnalyticsService:
             "store_names": set(),
             "transaction_count": 0,
             "total_items": 0,
-            "health_scores": [],
         })
 
         for t, amount in tx_amounts:
@@ -822,8 +743,6 @@ class AnalyticsService:
             pd["store_names"].add(t.store_name)
             pd["transaction_count"] += 1
             pd["total_items"] += t.quantity
-            if t.health_score is not None:
-                pd["health_scores"].append(t.health_score)
 
         # Build period metadata list
         periods = []
@@ -842,12 +761,6 @@ class AnalyticsService:
             else:  # year
                 period_end_date = date(period_start_date.year, 12, 31)
 
-            avg_health = (
-                round(sum(data["health_scores"]) / len(data["health_scores"]), 2)
-                if data["health_scores"]
-                else None
-            )
-
             periods.append(
                 PeriodMetadata(
                     period=self._format_period(period_start_date, period_end_date),
@@ -858,7 +771,6 @@ class AnalyticsService:
                     store_count=len(data["store_names"]),
                     transaction_count=data["transaction_count"],
                     total_items=data["total_items"],
-                    average_health_score=avg_health,
                 )
             )
 
@@ -971,14 +883,13 @@ class AnalyticsService:
                     ),
                     averages=AggregateAverages(
                         average_spend_per_period=0, average_transaction_value=0,
-                        average_item_price=0, average_health_score=None,
+                        average_item_price=0,
                         average_receipts_per_period=0, average_transactions_per_period=0,
                         average_items_per_receipt=0
                     ),
                     extremes=AggregateExtremes(),
                     top_categories=[],
                     top_stores=[],
-                    health_score_distribution=HealthScoreDistribution(),
                 )
         else:
             query_start, query_end = self._get_period_boundaries(
@@ -1007,14 +918,13 @@ class AnalyticsService:
                 ),
                 averages=AggregateAverages(
                     average_spend_per_period=0, average_transaction_value=0,
-                    average_item_price=0, average_health_score=None,
+                    average_item_price=0,
                     average_receipts_per_period=0, average_transactions_per_period=0,
                     average_items_per_receipt=0
                 ),
                 extremes=AggregateExtremes(),
                 top_categories=[],
                 top_stores=[],
-                health_score_distribution=HealthScoreDistribution(),
             )
 
         # Get split-adjusted amounts for all transactions
@@ -1026,10 +936,6 @@ class AnalyticsService:
         total_items = sum(t.quantity for t in transactions)
         receipt_ids = set(t.receipt_id for t in transactions if t.receipt_id)
         total_receipts = len(receipt_ids)
-
-        # Calculate averages
-        health_scores = [t.health_score for t in transactions if t.health_score is not None]
-        avg_health_score = round(sum(health_scores) / len(health_scores), 2) if health_scores else None
 
         # Calculate raw total (not split-adjusted) for average item price
         total_raw_spend = sum(t.item_price for t in transactions)
@@ -1051,7 +957,6 @@ class AnalyticsService:
             average_spend_per_period=round(total_spend / actual_num_periods, 2),
             average_transaction_value=round(total_spend / total_transactions, 2) if total_transactions > 0 else 0,
             average_item_price=round(total_raw_spend / total_items, 2) if total_items > 0 else 0,
-            average_health_score=avg_health_score,
             average_receipts_per_period=round(total_receipts / actual_num_periods, 2),
             average_transactions_per_period=round(total_transactions / actual_num_periods, 2),
             average_items_per_receipt=round(total_items / total_receipts, 2) if total_receipts > 0 else 0,
@@ -1068,9 +973,6 @@ class AnalyticsService:
         # Calculate top stores (split-adjusted)
         top_stores = await self._calculate_top_stores_split_adjusted(user_id, tx_amounts, total_spend, top_stores_limit)
 
-        # Calculate health score distribution
-        health_distribution = self._calculate_health_distribution(transactions)
-
         return AggregateResponse(
             period_type=period_type,
             num_periods=actual_num_periods,
@@ -1081,7 +983,6 @@ class AnalyticsService:
             extremes=extremes,
             top_categories=top_categories,
             top_stores=top_stores,
-            health_score_distribution=health_distribution,
         )
 
     async def _count_periods_with_data(
@@ -1120,7 +1021,7 @@ class AnalyticsService:
         start_date: date,
         end_date: date,
     ) -> AggregateExtremes:
-        """Calculate extreme values (max/min spend, highest/lowest health) per period."""
+        """Calculate extreme values (max/min spend) per period."""
         if period_type == "week":
             trunc_interval = 'week'
         elif period_type == "month":
@@ -1135,12 +1036,6 @@ class AnalyticsService:
             select(
                 period_col,
                 func.sum(Transaction.item_price).label('total_spend'),
-                func.avg(
-                    case(
-                        (Transaction.health_score.isnot(None), Transaction.health_score),
-                        else_=None
-                    )
-                ).label('avg_health_score'),
             )
             .where(
                 and_(
@@ -1159,19 +1054,12 @@ class AnalyticsService:
 
         max_spend_row = None
         min_spend_row = None
-        max_health_row = None
-        min_health_row = None
 
         for row in rows:
             if max_spend_row is None or row.total_spend > max_spend_row.total_spend:
                 max_spend_row = row
             if min_spend_row is None or row.total_spend < min_spend_row.total_spend:
                 min_spend_row = row
-            if row.avg_health_score is not None:
-                if max_health_row is None or row.avg_health_score > max_health_row.avg_health_score:
-                    max_health_row = row
-                if min_health_row is None or row.avg_health_score < min_health_row.avg_health_score:
-                    min_health_row = row
 
         def get_period_end(period_start_date: date, p_type: str) -> date:
             if p_type == "week":
@@ -1186,8 +1074,6 @@ class AnalyticsService:
 
         max_spending_period = None
         min_spending_period = None
-        highest_health_period = None
-        lowest_health_period = None
 
         if max_spend_row:
             ps = max_spend_row.period_start.date() if hasattr(max_spend_row.period_start, 'date') else max_spend_row.period_start
@@ -1209,31 +1095,9 @@ class AnalyticsService:
                 total_spend=round(float(min_spend_row.total_spend), 2),
             )
 
-        if max_health_row:
-            ps = max_health_row.period_start.date() if hasattr(max_health_row.period_start, 'date') else max_health_row.period_start
-            pe = get_period_end(ps, period_type)
-            highest_health_period = HealthScoreExtreme(
-                period=self._format_period(ps, pe),
-                period_start=ps,
-                period_end=pe,
-                average_health_score=round(float(max_health_row.avg_health_score), 2),
-            )
-
-        if min_health_row:
-            ps = min_health_row.period_start.date() if hasattr(min_health_row.period_start, 'date') else min_health_row.period_start
-            pe = get_period_end(ps, period_type)
-            lowest_health_period = HealthScoreExtreme(
-                period=self._format_period(ps, pe),
-                period_start=ps,
-                period_end=pe,
-                average_health_score=round(float(min_health_row.avg_health_score), 2),
-            )
-
         return AggregateExtremes(
             max_spending_period=max_spending_period,
             min_spending_period=min_spending_period,
-            highest_health_score_period=highest_health_period,
-            lowest_health_score_period=lowest_health_period,
         )
 
     def _get_period_extremes_split_adjusted(
@@ -1241,12 +1105,12 @@ class AnalyticsService:
         tx_amounts: List[tuple],
         period_type: str,
     ) -> AggregateExtremes:
-        """Calculate extreme values (max/min spend, highest/lowest health) per period using split-adjusted amounts."""
+        """Calculate extreme values (max/min spend) per period using split-adjusted amounts."""
         if not tx_amounts:
             return AggregateExtremes()
 
         # Group transactions by period
-        period_data = defaultdict(lambda: {"total_spend": 0.0, "health_scores": []})
+        period_data = defaultdict(lambda: {"total_spend": 0.0})
 
         for t, amount in tx_amounts:
             # Determine period start based on period_type
@@ -1260,8 +1124,6 @@ class AnalyticsService:
 
             pd = period_data[period_start]
             pd["total_spend"] += amount
-            if t.health_score is not None:
-                pd["health_scores"].append(t.health_score)
 
         if not period_data:
             return AggregateExtremes()
@@ -1269,12 +1131,8 @@ class AnalyticsService:
         # Calculate extremes
         max_spend_period = None
         min_spend_period = None
-        max_health_period = None
-        min_health_period = None
         max_spend = float('-inf')
         min_spend = float('inf')
-        max_health = float('-inf')
-        min_health = float('inf')
 
         for period_start_date, data in period_data.items():
             if data["total_spend"] > max_spend:
@@ -1283,15 +1141,6 @@ class AnalyticsService:
             if data["total_spend"] < min_spend:
                 min_spend = data["total_spend"]
                 min_spend_period = period_start_date
-
-            if data["health_scores"]:
-                avg_health = sum(data["health_scores"]) / len(data["health_scores"])
-                if avg_health > max_health:
-                    max_health = avg_health
-                    max_health_period = period_start_date
-                if avg_health < min_health:
-                    min_health = avg_health
-                    min_health_period = period_start_date
 
         def get_period_end(period_start_date: date, p_type: str) -> date:
             if p_type == "week":
@@ -1306,8 +1155,6 @@ class AnalyticsService:
 
         max_spending_period = None
         min_spending_period = None
-        highest_health_period = None
-        lowest_health_period = None
 
         if max_spend_period:
             pe = get_period_end(max_spend_period, period_type)
@@ -1327,29 +1174,9 @@ class AnalyticsService:
                 total_spend=round(min_spend, 2),
             )
 
-        if max_health_period:
-            pe = get_period_end(max_health_period, period_type)
-            highest_health_period = HealthScoreExtreme(
-                period=self._format_period(max_health_period, pe),
-                period_start=max_health_period,
-                period_end=pe,
-                average_health_score=round(max_health, 2),
-            )
-
-        if min_health_period:
-            pe = get_period_end(min_health_period, period_type)
-            lowest_health_period = HealthScoreExtreme(
-                period=self._format_period(min_health_period, pe),
-                period_start=min_health_period,
-                period_end=pe,
-                average_health_score=round(min_health, 2),
-            )
-
         return AggregateExtremes(
             max_spending_period=max_spending_period,
             min_spending_period=min_spending_period,
-            highest_health_score_period=highest_health_period,
-            lowest_health_score_period=lowest_health_period,
         )
 
     def _calculate_top_categories(
@@ -1360,31 +1187,23 @@ class AnalyticsService:
         min_percentage: float,
     ) -> list[CategorySpending]:
         """Calculate top categories from transactions."""
-        category_data = defaultdict(lambda: {"amount": 0.0, "count": 0, "health_scores": []})
+        category_data = defaultdict(lambda: {"amount": 0.0, "count": 0})
 
         for t in transactions:
             category_data[t.category]["amount"] += t.item_price
             category_data[t.category]["count"] += 1
-            if t.health_score is not None:
-                category_data[t.category]["health_scores"].append(t.health_score)
 
         categories = []
         for category_name, data in category_data.items():
             percentage = (data["amount"] / total_spend * 100) if total_spend > 0 else 0
             if percentage < min_percentage:
                 continue
-            avg_health = (
-                round(sum(data["health_scores"]) / len(data["health_scores"]), 2)
-                if data["health_scores"]
-                else None
-            )
             categories.append(
                 CategorySpending(
                     name=get_display_name(category_name),
                     spent=round(data["amount"], 2),
                     percentage=round(percentage, 1),
                     transaction_count=data["count"],
-                    average_health_score=avg_health,
                 )
             )
 
@@ -1398,30 +1217,22 @@ class AnalyticsService:
         limit: int,
     ) -> list[StoreSpending]:
         """Calculate top stores from transactions."""
-        store_data = defaultdict(lambda: {"amount": 0.0, "receipt_ids": set(), "health_scores": []})
+        store_data = defaultdict(lambda: {"amount": 0.0, "receipt_ids": set()})
 
         for t in transactions:
             store_data[t.store_name]["amount"] += t.item_price
             if t.receipt_id:
                 store_data[t.store_name]["receipt_ids"].add(t.receipt_id)
-            if t.health_score is not None:
-                store_data[t.store_name]["health_scores"].append(t.health_score)
 
         stores = []
         for store_name, data in store_data.items():
             percentage = (data["amount"] / total_spend * 100) if total_spend > 0 else 0
-            store_avg_health = (
-                round(sum(data["health_scores"]) / len(data["health_scores"]), 2)
-                if data["health_scores"]
-                else None
-            )
             stores.append(
                 StoreSpending(
                     store_name=store_name,
                     amount_spent=round(data["amount"], 2),
                     store_visits=len(data["receipt_ids"]),
                     percentage=round(percentage, 1),
-                    average_health_score=store_avg_health,
                 )
             )
 
@@ -1437,31 +1248,23 @@ class AnalyticsService:
         min_percentage: float,
     ) -> list[CategorySpending]:
         """Calculate top categories from transactions with split-adjusted amounts."""
-        category_data = defaultdict(lambda: {"amount": 0.0, "count": 0, "health_scores": []})
+        category_data = defaultdict(lambda: {"amount": 0.0, "count": 0})
 
         for t, amount in tx_amounts:
             category_data[t.category]["amount"] += amount
             category_data[t.category]["count"] += 1
-            if t.health_score is not None:
-                category_data[t.category]["health_scores"].append(t.health_score)
 
         categories = []
         for category_name, data in category_data.items():
             percentage = (data["amount"] / total_spend * 100) if total_spend > 0 else 0
             if percentage < min_percentage:
                 continue
-            avg_health = (
-                round(sum(data["health_scores"]) / len(data["health_scores"]), 2)
-                if data["health_scores"]
-                else None
-            )
             categories.append(
                 CategorySpending(
                     name=get_display_name(category_name),
                     spent=round(data["amount"], 2),
                     percentage=round(percentage, 1),
                     transaction_count=data["count"],
-                    average_health_score=avg_health,
                 )
             )
 
@@ -1476,62 +1279,27 @@ class AnalyticsService:
         limit: int,
     ) -> list[StoreSpending]:
         """Calculate top stores from transactions with split-adjusted amounts."""
-        store_data = defaultdict(lambda: {"amount": 0.0, "receipt_ids": set(), "health_scores": []})
+        store_data = defaultdict(lambda: {"amount": 0.0, "receipt_ids": set()})
 
         for t, amount in tx_amounts:
             store_data[t.store_name]["amount"] += amount
             if t.receipt_id:
                 store_data[t.store_name]["receipt_ids"].add(t.receipt_id)
-            if t.health_score is not None:
-                store_data[t.store_name]["health_scores"].append(t.health_score)
 
         stores = []
         for store_name, data in store_data.items():
             percentage = (data["amount"] / total_spend * 100) if total_spend > 0 else 0
-            store_avg_health = (
-                round(sum(data["health_scores"]) / len(data["health_scores"]), 2)
-                if data["health_scores"]
-                else None
-            )
             stores.append(
                 StoreSpending(
                     store_name=store_name,
                     amount_spent=round(data["amount"], 2),
                     store_visits=len(data["receipt_ids"]),
                     percentage=round(percentage, 1),
-                    average_health_score=store_avg_health,
                 )
             )
 
         stores.sort(key=lambda x: x.amount_spent, reverse=True)
         return stores[:limit]
-
-    def _calculate_health_distribution(self, transactions: list) -> HealthScoreDistribution:
-        """Calculate health score distribution from transactions."""
-        distribution = {
-            "score_1": 0,
-            "score_2": 0,
-            "score_3": 0,
-            "score_4": 0,
-            "score_5": 0,
-            "unscored": 0,
-        }
-
-        for t in transactions:
-            if t.health_score is None:
-                distribution["unscored"] += 1
-            elif t.health_score == 1:
-                distribution["score_1"] += 1
-            elif t.health_score == 2:
-                distribution["score_2"] += 1
-            elif t.health_score == 3:
-                distribution["score_3"] += 1
-            elif t.health_score == 4:
-                distribution["score_4"] += 1
-            elif t.health_score == 5:
-                distribution["score_5"] += 1
-
-        return HealthScoreDistribution(**distribution)
 
     @cached()
     async def get_all_time_stats(
@@ -1548,7 +1316,7 @@ class AnalyticsService:
 
         Returns aggregate stats across all user transactions, including:
         - Total receipts, items, spend, transactions
-        - Average item price and health score
+        - Average item price
         - Top stores by visits and spend
         - Top categories by spend
         - First and last receipt dates
@@ -1566,7 +1334,6 @@ class AnalyticsService:
                 total_spend=0,
                 total_transactions=0,
                 average_item_price=None,
-                average_health_score=None,
                 top_stores_by_visits=[],
                 top_stores_by_spend=[],
                 top_categories=[],
@@ -1588,8 +1355,6 @@ class AnalyticsService:
         # Note: average_item_price uses raw prices (NOT split-adjusted) - it's the actual item cost
         total_raw_spend = sum(t.item_price for t in transactions)
         average_item_price = round(total_raw_spend / total_items, 2) if total_items > 0 else None
-        health_scores = [t.health_score for t in transactions if t.health_score is not None]
-        average_health_score = round(sum(health_scores) / len(health_scores), 2) if health_scores else None
 
         # Calculate first and last receipt dates
         dates = [t.date for t in transactions]
@@ -1635,27 +1400,19 @@ class AnalyticsService:
         ]
 
         # Calculate top categories (split-adjusted)
-        category_data = defaultdict(lambda: {"amount": 0.0, "count": 0, "health_scores": []})
+        category_data = defaultdict(lambda: {"amount": 0.0, "count": 0})
         for t, amount in tx_amounts:
             category_data[t.category]["amount"] += amount
             category_data[t.category]["count"] += 1
-            if t.health_score is not None:
-                category_data[t.category]["health_scores"].append(t.health_score)
 
         categories_list = []
         for category_name, data in category_data.items():
             percentage = (data["amount"] / total_spend * 100) if total_spend > 0 else 0
-            avg_health = (
-                round(sum(data["health_scores"]) / len(data["health_scores"]), 2)
-                if data["health_scores"]
-                else None
-            )
             categories_list.append({
                 "name": get_display_name(category_name),
                 "total_spent": round(data["amount"], 2),
                 "percentage": round(percentage, 1),
                 "transaction_count": data["count"],
-                "average_health_score": avg_health,
             })
 
         categories_list.sort(key=lambda x: x["total_spent"], reverse=True)
@@ -1665,7 +1422,6 @@ class AnalyticsService:
                 total_spent=c["total_spent"],
                 percentage=c["percentage"],
                 transaction_count=c["transaction_count"],
-                average_health_score=c["average_health_score"],
                 rank=i + 1,
             )
             for i, c in enumerate(categories_list[:top_categories_limit])
@@ -1677,7 +1433,6 @@ class AnalyticsService:
             total_spend=round(total_spend, 2),
             total_transactions=total_transactions,
             average_item_price=average_item_price,
-            average_health_score=average_health_score,
             top_stores_by_visits=top_stores_by_visits,
             top_stores_by_spend=top_stores_by_spend,
             top_categories=top_categories,
@@ -1731,7 +1486,6 @@ class AnalyticsService:
                 transaction_count=0,
                 receipt_count=0,
                 total_items=0,
-                average_health_score=None,
                 stores=[],
                 monthly_breakdown=[] if include_monthly_breakdown else None,
                 top_categories=[],
@@ -1747,35 +1501,23 @@ class AnalyticsService:
         receipt_ids = set(t.receipt_id for t in transactions if t.receipt_id)
         receipt_count = len(receipt_ids)
 
-        # Calculate average health score
-        health_scores = [t.health_score for t in transactions if t.health_score is not None]
-        average_health_score = round(sum(health_scores) / len(health_scores), 2) if health_scores else None
-
         # Aggregate store data (split-adjusted)
-        store_data = defaultdict(lambda: {"amount": 0.0, "receipt_ids": set(), "health_scores": []})
+        store_data = defaultdict(lambda: {"amount": 0.0, "receipt_ids": set()})
         for t, amount in tx_amounts:
             store_data[t.store_name]["amount"] += amount
             if t.receipt_id:
                 store_data[t.store_name]["receipt_ids"].add(t.receipt_id)
-            if t.health_score is not None:
-                store_data[t.store_name]["health_scores"].append(t.health_score)
 
         # Build store list sorted by amount_spent descending
         stores = []
         for store_name, data in store_data.items():
             percentage = (data["amount"] / total_spend * 100) if total_spend > 0 else 0
-            store_avg_health = (
-                round(sum(data["health_scores"]) / len(data["health_scores"]), 2)
-                if data["health_scores"]
-                else None
-            )
             stores.append(
                 YearStoreSpending(
                     store_name=store_name,
                     amount_spent=round(data["amount"], 2),
                     store_visits=len(data["receipt_ids"]),
                     percentage=round(percentage, 1),
-                    average_health_score=store_avg_health,
                 )
             )
         stores.sort(key=lambda x: x.amount_spent, reverse=True)
@@ -1783,14 +1525,12 @@ class AnalyticsService:
         # Calculate monthly breakdown if requested (split-adjusted)
         monthly_breakdown = None
         if include_monthly_breakdown:
-            month_data = defaultdict(lambda: {"amount": 0.0, "receipt_ids": set(), "health_scores": []})
+            month_data = defaultdict(lambda: {"amount": 0.0, "receipt_ids": set()})
             for t, amount in tx_amounts:
                 month_num = t.date.month
                 month_data[month_num]["amount"] += amount
                 if t.receipt_id:
                     month_data[month_num]["receipt_ids"].add(t.receipt_id)
-                if t.health_score is not None:
-                    month_data[month_num]["health_scores"].append(t.health_score)
 
             # Build monthly breakdown list, only including months with data
             month_names = [
@@ -1800,44 +1540,30 @@ class AnalyticsService:
             monthly_breakdown = []
             for month_num in sorted(month_data.keys()):
                 data = month_data[month_num]
-                month_avg_health = (
-                    round(sum(data["health_scores"]) / len(data["health_scores"]), 2)
-                    if data["health_scores"]
-                    else None
-                )
                 monthly_breakdown.append(
                     YearMonthlyBreakdown(
                         month=month_names[month_num - 1],
                         month_number=month_num,
                         total_spend=round(data["amount"], 2),
                         receipt_count=len(data["receipt_ids"]),
-                        average_health_score=month_avg_health,
                     )
                 )
 
         # Calculate top categories (split-adjusted)
-        category_data = defaultdict(lambda: {"amount": 0.0, "count": 0, "health_scores": []})
+        category_data = defaultdict(lambda: {"amount": 0.0, "count": 0})
         for t, amount in tx_amounts:
             category_data[t.category]["amount"] += amount
             category_data[t.category]["count"] += 1
-            if t.health_score is not None:
-                category_data[t.category]["health_scores"].append(t.health_score)
 
         categories = []
         for category_name, data in category_data.items():
             percentage = (data["amount"] / total_spend * 100) if total_spend > 0 else 0
-            cat_avg_health = (
-                round(sum(data["health_scores"]) / len(data["health_scores"]), 2)
-                if data["health_scores"]
-                else None
-            )
             categories.append(
                 YearCategorySpending(
                     name=get_display_name(category_name),
                     spent=round(data["amount"], 2),
                     percentage=round(percentage, 1),
                     transaction_count=data["count"],
-                    average_health_score=cat_avg_health,
                 )
             )
 
@@ -1853,7 +1579,6 @@ class AnalyticsService:
             transaction_count=transaction_count,
             receipt_count=receipt_count,
             total_items=total_items,
-            average_health_score=average_health_score,
             stores=stores,
             monthly_breakdown=monthly_breakdown,
             top_categories=top_categories,

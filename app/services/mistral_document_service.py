@@ -254,43 +254,43 @@ class MistralDocumentService:
 ### Example 1: Multi-pack with packaging + dp_ fields
 "JUPILER PILS 6X33CL PET  8,99" →
 ```json
-{"item_name":"JUPILER PILS 6X33CL PET  8,99","normalized_name":"jupiler pils","normalized_brand":"jupiler","is_premium":true,"quantity":1,"unit_price":null,"total_price":8.99,"is_discount":false,"is_deposit":false,"granular_category":"Beer Pils & Lager","health_score":0,"unit_of_measure":null,"weight_or_volume":null,"price_per_unit_measure":null,"dp_expanded_description":"jupiler pils 6x33cl pet","dp_pack_quantity":6,"dp_pack_size":1980.0,"dp_pack_unit":"ml","dp_product_variant":"pils","dp_article_code":null,"dp_is_bio":false}
+{"item_name":"JUPILER PILS 6X33CL PET  8,99","normalized_name":"jupiler pils","normalized_brand":"jupiler","is_premium":true,"quantity":1,"unit_price":null,"total_price":8.99,"is_discount":false,"is_deposit":false,"granular_category":"Beer Pils & Lager","unit_of_measure":null,"weight_or_volume":null,"price_per_unit_measure":null,"dp_expanded_description":"jupiler pils 6x33cl pet","dp_pack_quantity":6,"dp_pack_size":1980.0,"dp_pack_unit":"ml","dp_product_variant":"pils","dp_article_code":null,"dp_is_bio":false}
 ```
 
 ### Example 2: Fresh produce by weight
 "BANANEN  1.234 kg x 1,99/kg  2,46" →
 ```json
-{"item_name":"BANANEN  1.234 kg x 1,99/kg  2,46","normalized_name":"bananen","normalized_brand":null,"is_premium":false,"quantity":1,"unit_price":null,"total_price":2.46,"is_discount":false,"is_deposit":false,"granular_category":"Fruit Bananas","health_score":5,"unit_of_measure":"kg","weight_or_volume":1.234,"price_per_unit_measure":1.99,"dp_expanded_description":"bananen","dp_pack_quantity":1,"dp_pack_size":1234.0,"dp_pack_unit":"g","dp_product_variant":null,"dp_article_code":null,"dp_is_bio":false}
+{"item_name":"BANANEN  1.234 kg x 1,99/kg  2,46","normalized_name":"bananen","normalized_brand":null,"is_premium":false,"quantity":1,"unit_price":null,"total_price":2.46,"is_discount":false,"is_deposit":false,"granular_category":"Fruit Bananas","unit_of_measure":"kg","weight_or_volume":1.234,"price_per_unit_measure":1.99,"dp_expanded_description":"bananen","dp_pack_quantity":1,"dp_pack_size":1234.0,"dp_pack_unit":"g","dp_product_variant":null,"dp_article_code":null,"dp_is_bio":false}
 ```
 
 ### Example 3: Discount line (negative price)
 "HOEVEELHEIDSVOORDEEL  -1,50" →
 ```json
-{"item_name":"HOEVEELHEIDSVOORDEEL  -1,50","normalized_name":"korting hoeveelheidsvoordeel","normalized_brand":null,"is_premium":false,"quantity":1,"unit_price":null,"total_price":-1.50,"is_discount":true,"is_deposit":false,"granular_category":"Other","health_score":null,"unit_of_measure":null,"weight_or_volume":null,"price_per_unit_measure":null,"dp_expanded_description":"hoeveelheidsvoordeel","dp_pack_quantity":null,"dp_pack_size":null,"dp_pack_unit":null,"dp_product_variant":null,"dp_article_code":null,"dp_is_bio":false}
+{"item_name":"HOEVEELHEIDSVOORDEEL  -1,50","normalized_name":"korting hoeveelheidsvoordeel","normalized_brand":null,"is_premium":false,"quantity":1,"unit_price":null,"total_price":-1.50,"is_discount":true,"is_deposit":false,"granular_category":"Other","unit_of_measure":null,"weight_or_volume":null,"price_per_unit_measure":null,"dp_expanded_description":"hoeveelheidsvoordeel","dp_pack_quantity":null,"dp_pack_size":null,"dp_pack_unit":null,"dp_product_variant":null,"dp_article_code":null,"dp_is_bio":false}
 ```
 
 ### Example 4: Product with article code
 "ART 541014  DEVOS LEMMENS MAYO 300ML  2,49" →
 ```json
-{"item_name":"ART 541014  DEVOS LEMMENS MAYO 300ML  2,49","normalized_name":"devos lemmens mayonaise","normalized_brand":"devos lemmens","is_premium":true,"quantity":1,"unit_price":null,"total_price":2.49,"is_discount":false,"is_deposit":false,"granular_category":"Mayonnaise","health_score":2,"unit_of_measure":null,"weight_or_volume":null,"price_per_unit_measure":null,"dp_expanded_description":"devos lemmens mayonaise 300ml","dp_pack_quantity":1,"dp_pack_size":300.0,"dp_pack_unit":"ml","dp_product_variant":null,"dp_article_code":"541014","dp_is_bio":false}
+{"item_name":"ART 541014  DEVOS LEMMENS MAYO 300ML  2,49","normalized_name":"devos lemmens mayonaise","normalized_brand":"devos lemmens","is_premium":true,"quantity":1,"unit_price":null,"total_price":2.49,"is_discount":false,"is_deposit":false,"granular_category":"Mayonnaise","unit_of_measure":null,"weight_or_volume":null,"price_per_unit_measure":null,"dp_expanded_description":"devos lemmens mayonaise 300ml","dp_pack_quantity":1,"dp_pack_size":300.0,"dp_pack_unit":"ml","dp_product_variant":null,"dp_article_code":"541014","dp_is_bio":false}
 ```
 
 ### Example 5: Multi-buy discount (1+1 gratis at Delhaize)
 "1+1 GRATIS  -2,99" →
 ```json
-{"item_name":"1+1 GRATIS  -2,99","normalized_name":"korting 1+1 gratis","normalized_brand":null,"is_premium":false,"quantity":1,"unit_price":null,"total_price":-2.99,"is_discount":true,"is_deposit":false,"granular_category":"Discount","health_score":null,"unit_of_measure":null,"weight_or_volume":null,"price_per_unit_measure":null,"dp_expanded_description":"1+1 gratis","dp_pack_quantity":null,"dp_pack_size":null,"dp_pack_unit":null,"dp_product_variant":null,"dp_article_code":null,"dp_is_bio":false}
+{"item_name":"1+1 GRATIS  -2,99","normalized_name":"korting 1+1 gratis","normalized_brand":null,"is_premium":false,"quantity":1,"unit_price":null,"total_price":-2.99,"is_discount":true,"is_deposit":false,"granular_category":"Discount","unit_of_measure":null,"weight_or_volume":null,"price_per_unit_measure":null,"dp_expanded_description":"1+1 gratis","dp_pack_quantity":null,"dp_pack_size":null,"dp_pack_unit":null,"dp_product_variant":null,"dp_article_code":null,"dp_is_bio":false}
 ```
 
 ### Example 6: Loyalty card discount (Colruyt Xtra)
 "XTRA KORTING  -0,75" →
 ```json
-{"item_name":"XTRA KORTING  -0,75","normalized_name":"korting xtra","normalized_brand":null,"is_premium":false,"quantity":1,"unit_price":null,"total_price":-0.75,"is_discount":true,"is_deposit":false,"granular_category":"Discount","health_score":null,"unit_of_measure":null,"weight_or_volume":null,"price_per_unit_measure":null,"dp_expanded_description":"xtra korting","dp_pack_quantity":null,"dp_pack_size":null,"dp_pack_unit":null,"dp_product_variant":null,"dp_article_code":null,"dp_is_bio":false}
+{"item_name":"XTRA KORTING  -0,75","normalized_name":"korting xtra","normalized_brand":null,"is_premium":false,"quantity":1,"unit_price":null,"total_price":-0.75,"is_discount":true,"is_deposit":false,"granular_category":"Discount","unit_of_measure":null,"weight_or_volume":null,"price_per_unit_measure":null,"dp_expanded_description":"xtra korting","dp_pack_quantity":null,"dp_pack_size":null,"dp_pack_unit":null,"dp_product_variant":null,"dp_article_code":null,"dp_is_bio":false}
 ```
 
 ### Example 7: 2nd at half price (Delhaize/Carrefour)
 "2DE HALVE PRIJS  -1,50" →
 ```json
-{"item_name":"2DE HALVE PRIJS  -1,50","normalized_name":"korting 2de halve prijs","normalized_brand":null,"is_premium":false,"quantity":1,"unit_price":null,"total_price":-1.50,"is_discount":true,"is_deposit":false,"granular_category":"Discount","health_score":null,"unit_of_measure":null,"weight_or_volume":null,"price_per_unit_measure":null,"dp_expanded_description":"2de halve prijs","dp_pack_quantity":null,"dp_pack_size":null,"dp_pack_unit":null,"dp_product_variant":null,"dp_article_code":null,"dp_is_bio":false}
+{"item_name":"2DE HALVE PRIJS  -1,50","normalized_name":"korting 2de halve prijs","normalized_brand":null,"is_premium":false,"quantity":1,"unit_price":null,"total_price":-1.50,"is_discount":true,"is_deposit":false,"granular_category":"Discount","unit_of_measure":null,"weight_or_volume":null,"price_per_unit_measure":null,"dp_expanded_description":"2de halve prijs","dp_pack_quantity":null,"dp_pack_size":null,"dp_pack_unit":null,"dp_product_variant":null,"dp_article_code":null,"dp_is_bio":false}
 ```
 
 ### IMPORTANT RULES
@@ -302,15 +302,6 @@ class MistralDocumentService:
 ### Granular Categories
 Assign ONE category from this list for each item:
 {categories}
-
-### Health Scores (0-5)
-- 5: Fresh vegetables, fruits, water, plain nuts
-- 4: Whole grains, lean proteins, eggs, plain dairy
-- 3: Bread, pasta, cheese, some ready meals
-- 2: Processed meats, sweetened drinks, some snacks
-- 1: Chips, candy, cookies, sodas, sugary cereals
-- 0: Alcohol, energy drinks, heavily processed foods
-- null: Non-food items (household, personal care, pet supplies)
 
 ## OUTPUT FORMAT
 Return a JSON object with this structure:
@@ -332,7 +323,6 @@ Return a JSON object with this structure:
   - "is_discount": boolean
   - "is_deposit": boolean
   - "granular_category": string (from list above)
-  - "health_score": integer 0-5 or null
   - "unit_of_measure": string or null (kg/g/l/ml/piece)
   - "weight_or_volume": number or null
   - "price_per_unit_measure": number or null
@@ -476,13 +466,6 @@ Return a JSON object with this structure:
                 granular = "Other"
             parent = get_parent_category(granular)
 
-            # Parse health score
-            health_score_raw = item.get("health_score")
-            if health_score_raw is not None:
-                health_score = max(0, min(5, int(health_score_raw)))
-            else:
-                health_score = None
-
             # Parse prices
             total_price = item.get("total_price")
             if total_price is None:
@@ -578,7 +561,6 @@ Return a JSON object with this structure:
                     is_deposit=bool(item.get("is_deposit", False)),
                     granular_category=granular,
                     parent_category=parent,
-                    health_score=health_score,
                     unit_of_measure=unit_of_measure,
                     weight_or_volume=weight_or_volume,
                     price_per_unit_measure=price_per_unit_measure,
