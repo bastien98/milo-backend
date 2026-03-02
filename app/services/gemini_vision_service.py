@@ -8,6 +8,7 @@ Replaces Veryfi for OCR extraction and handles:
 - Granular categorization (~200 categories)
 """
 
+import asyncio
 import io
 import json
 import logging
@@ -26,6 +27,17 @@ from app.core.stores import STORES_PROMPT_LIST
 
 settings = get_settings()
 logger = logging.getLogger(__name__)
+
+# Per-user semaphore: limits each user to 2 concurrent Gemini generate_content calls.
+# Without this, concurrent uploads from the same user hit the API simultaneously and
+# get queued server-side, escalating latency from ~60s to 180s+ for later requests.
+_user_semaphores: dict[str, asyncio.Semaphore] = {}
+
+
+def _get_user_semaphore(user_id: str) -> asyncio.Semaphore:
+    if user_id not in _user_semaphores:
+        _user_semaphores[user_id] = asyncio.Semaphore(2)
+    return _user_semaphores[user_id]
 
 
 @dataclass
@@ -74,7 +86,7 @@ class GeminiVisionService:
     """Gemini Vision integration for receipt OCR and extraction."""
 
     MODEL = "gemini-3.1-pro-preview"
-    MAX_TOKENS = 32000  # Actual output ~6k tokens + high thinking budget; pro model supports 64k output
+    MAX_TOKENS = 32000  # Actual output ~6k tokens + capped thinking budget; pro model supports 64k output
 
     SYSTEM_PROMPT = '''You are a Belgian grocery receipt analyzer. Extract and normalize line items from receipt images.
 
@@ -264,10 +276,12 @@ Return a JSON object with this structure:
             raise ValueError("Gemini API key not configured")
         self.client = genai.Client(api_key=self.api_key)
 
-    async def extract_receipt(self, file_content: bytes) -> GeminiExtractionResult:
+    async def extract_receipt(self, file_content: bytes, user_id: str) -> GeminiExtractionResult:
         """Extract and normalize receipt data using Gemini Vision.
 
-        Uploads PDF via Files API, runs extraction with low thinking level, then cleans up.
+        Uploads PDF via Files API, runs extraction, then cleans up.
+        A per-user semaphore limits concurrent generate_content calls to prevent
+        API-side queuing that compounds latency under concurrent uploads.
         """
         system_prompt = (
             self.SYSTEM_PROMPT
@@ -293,16 +307,18 @@ Return a JSON object with this structure:
         response_text = None
         try:
             t0 = time.monotonic()
-            response = await self.client.aio.models.generate_content(
-                model=self.MODEL,
-                contents=[uploaded_file, extract_prompt],
-                config=types.GenerateContentConfig(
-                    system_instruction=system_prompt,
-                    max_output_tokens=self.MAX_TOKENS,
-                    temperature=1.0,
-                    response_mime_type="application/json",
-                ),
-            )
+            async with _get_user_semaphore(user_id):
+                response = await self.client.aio.models.generate_content(
+                    model=self.MODEL,
+                    contents=[uploaded_file, extract_prompt],
+                    config=types.GenerateContentConfig(
+                        system_instruction=system_prompt,
+                        max_output_tokens=self.MAX_TOKENS,
+                        temperature=1.0,
+                        response_mime_type="application/json",
+                        media_resolution=types.MediaResolution.MEDIA_RESOLUTION_MEDIUM,
+                    ),
+                )
             logger.info(f"⏱ gemini_generate_content: {time.monotonic() - t0:.3f}s")
 
             # Log token usage

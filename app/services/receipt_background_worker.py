@@ -61,7 +61,7 @@ async def process_receipt_background(
             # Step 2: Upload PDF to Gemini Files API and extract
             t0 = time.monotonic()
             gemini_service = GeminiVisionService()
-            extraction_result = await gemini_service.extract_receipt(file_content)
+            extraction_result = await gemini_service.extract_receipt(file_content, user_id=user_id)
             logger.info(
                 f"⏱ bg_gemini_extraction: {time.monotonic() - t0:.3f}s - "
                 f"vendor={extraction_result.vendor_name}, "
