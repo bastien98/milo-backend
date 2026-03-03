@@ -43,6 +43,7 @@ class Transaction(Base):
     is_premium: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     is_discount: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     is_deposit: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    is_deposit_refund: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     granular_category: Mapped[Optional[str]] = mapped_column(
         String(100), nullable=True, index=True
     )

@@ -126,12 +126,14 @@ def _build_shopping_habits(
             "payment_insights": None,
         }
 
-    total_spend = sum(t.item_price for t in transactions)
+    total_spend = sum(t.item_price for t in transactions if not t.is_discount and not t.is_deposit)
     weeks_in_period = max((date.today() - cutoff).days / 7, 1)
 
     # Store aggregation
     store_data: dict[str, dict] = defaultdict(lambda: {"spend": 0.0, "visits": set(), "items": 0})
     for t in transactions:
+        if t.is_discount or t.is_deposit:
+            continue
         store_data[t.store_name]["spend"] += t.item_price
         store_data[t.store_name]["visits"].add((t.receipt_id, t.date))
         store_data[t.store_name]["items"] += 1
@@ -153,6 +155,8 @@ def _build_shopping_habits(
     # Category aggregation
     cat_data: dict[str, dict] = defaultdict(lambda: {"spend": 0.0, "count": 0})
     for t in transactions:
+        if t.is_discount or t.is_deposit:
+            continue
         cat_val = t.category if t.category else "Other"
         cat_data[cat_val]["spend"] += t.item_price
         cat_data[cat_val]["count"] += 1
@@ -234,7 +238,7 @@ def _build_shopping_habits(
     discount_txns = [t for t in transactions if t.is_discount]
     savings_summary = None
     if discount_txns:
-        total_saved = abs(sum(t.item_price for t in discount_txns))
+        total_saved = sum(t.item_price for t in discount_txns)
         total_spend_gross = total_spend + total_saved
         savings_rate_pct = round(total_saved / total_spend_gross * 100, 1) if total_spend_gross > 0 else 0
 
@@ -243,8 +247,9 @@ def _build_shopping_habits(
         store_net: dict[str, float] = defaultdict(float)
         for t in transactions:
             if t.is_discount:
-                store_savings[t.store_name] += abs(t.item_price)
-            store_net[t.store_name] += t.item_price
+                store_savings[t.store_name] += t.item_price
+            elif not t.is_deposit:
+                store_net[t.store_name] += t.item_price
 
         per_store_savings = []
         for s_name in store_savings:
@@ -277,7 +282,7 @@ def _build_shopping_habits(
         weekend_totals = []
         for rid, r_txns in receipt_groups.items():
             non_discount_deposit_count = sum(1 for t in r_txns if not t.is_discount and not t.is_deposit)
-            receipt_total = sum(t.item_price for t in r_txns)
+            receipt_total = sum(t.item_price for t in r_txns if not t.is_discount and not t.is_deposit)
             receipt_date_val = r_txns[0].date
 
             if non_discount_deposit_count < 5:

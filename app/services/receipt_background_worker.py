@@ -108,6 +108,7 @@ async def process_receipt_background(
                     is_premium=item.is_premium,
                     is_discount=item.is_discount,
                     is_deposit=item.is_deposit,
+                    is_deposit_refund=item.is_deposit_refund,
                     granular_category=item.granular_category,
                     unit_of_measure=item.unit_of_measure,
                     weight_or_volume=item.weight_or_volume,
@@ -157,7 +158,6 @@ async def process_receipt_background(
                 processed_at=datetime.now(timezone.utc),
                 receipt_time=parsed_receipt_time,
                 payment_method=extraction_result.payment_method,
-                total_savings=extraction_result.total_savings,
                 store_branch=extraction_result.store_branch,
             )
             await session.commit()

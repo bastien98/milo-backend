@@ -63,9 +63,10 @@ class ExtractedLineItem:
     is_premium: bool  # True if premium/expensive brand, False if store/house brand
     quantity: int
     unit_price: Optional[float]
-    total_price: float  # Can be negative for discount lines
-    is_discount: bool  # True for discount/bonus lines (negative amounts)
-    is_deposit: bool
+    total_price: float  # Always positive
+    is_discount: bool  # True for discount/bonus lines
+    is_deposit: bool  # True for any deposit line (charge or refund)
+    is_deposit_refund: bool  # True only for deposit refund lines (returning containers)
     granular_category: str  # Detailed category
     parent_category: str  # Broad category
     unit_of_measure: Optional[str]  # kg/g/l/ml/piece
@@ -99,7 +100,6 @@ class GeminiExtractionResult:
     line_items: list[ExtractedLineItem]
     receipt_time: Optional[str]  # HH:MM format
     payment_method: Optional[str]  # bancontact/visa/mastercard/cash/payconiq/meal_vouchers/mixed
-    total_savings: Optional[float]  # total discount amount (positive number)
     store_branch: Optional[str]  # store location/branch
 
 
@@ -107,14 +107,35 @@ class GeminiExtractionResult:
 # so the model cannot return a bare array instead of the expected object.
 class _LineItemSchema(PydanticBaseModel):
     item_name: str = Field(
-        description="Product description text from the receipt line in original casing. Include brand, product name, variant, and size/packaging info. Exclude article codes, PLU numbers, quantity counts, and prices."
+        description=(
+            "Product text from the receipt line in ORIGINAL casing. "
+            "Keep brand, name, variant, size/packaging info. "
+            "Remove article codes, PLU numbers, quantity counts, unit prices, and total prices. "
+            "Examples: 'A 14515 BONI BIO volkorenspaghetti 500g 1 0,99 0,99' → 'BONI BIO volkorenspaghetti 500g', "
+            "'123456 COCA COLA ZERO 1,5L PET 2 3,58' → 'COCA COLA ZERO 1,5L PET'"
+        )
     )
     normalized_name: str = Field(
-        description="Clean, full product name in lowercase. Keep brand name. Remove quantities (450ml, 1L, 500g), packaging types (PET, Blik, Fles), and receipt codes. Maintain original language (Dutch/French)"
+        description=(
+            "Clean product name for EAN matching, ALWAYS lowercase. "
+            "ALWAYS keep brand name (it is part of product identity). "
+            "Remove quantities (450ml, 1L, 500g, 6x33cl), packaging types (PET, Blik, Fles), and receipt codes. "
+            "Keep original language (Dutch/French). "
+            "CRITICAL: the SAME product must ALWAYS produce the SAME normalized_name. "
+            "Examples: 'JUPILER PILS 6X33CL PET' → 'jupiler pils', "
+            "'BONI VOLLE MELK 1L' → 'boni volle melk', "
+            "'COCA COLA ZERO 1,5L PET' → 'coca-cola zero'"
+        )
     )
     normalized_brand: Optional[str] = Field(
         default=None,
-        description="Brand/manufacturer name only, lowercase. For store/house brands (Boni, 365, Everyday, Cara), use the house brand name. For fresh/ready-made items (traiteur, deli, bakery, prepared meals) without a visible brand, use 'in-house'. null only for truly generic items (loose fruit, vegetables by weight)"
+        description=(
+            "Brand/manufacturer name only, lowercase. NOT the store chain name. "
+            "For store/house brands (Boni, 365, Everyday, Cara), use the house brand name. "
+            "For fresh/deli/bakery items without a visible brand, use 'in-house'. "
+            "null only for truly generic items (loose fruit, vegetables by weight). "
+            "Examples: 'JUPILER PILS' → 'jupiler', 'KIP KYOTO MET RIJST' → 'in-house', 'BANANEN 1KG' → null"
+        )
     )
     is_premium: bool = Field(
         description="true for premium/name brands (Coca-Cola, Jupiler, Danone, Lay's), false for store/house brands (Boni, 365, Everyday, Cara) and unbranded items"
@@ -127,20 +148,44 @@ class _LineItemSchema(PydanticBaseModel):
         description="Price per single item if shown separately on receipt"
     )
     total_price: float = Field(
-        description="Total line price. Convert Belgian comma decimals to dots (2,99 → 2.99). Use NEGATIVE values for discount/bonus lines"
+        description=(
+            "Total line price as a POSITIVE number. Convert Belgian comma decimals to dots (2,99 → 2.99). "
+            "ALWAYS positive — even for discount and deposit lines. "
+            "For 'Actieprijs' (promotional price), use that price"
+        )
     )
     is_discount: bool = Field(
-        description="true for discount/bonus lines: Hoeveelheidsvoordeel, Korting, Bon korting, Promotie, Actie, Reductie — any line that reduces the total"
+        description=(
+            "true for discount/bonus lines: Hoeveelheidsvoordeel, Korting, Bon korting, Promotie, Actie, Reductie, "
+            "2+1 gratis, 1+1 gratis, Xtra korting, SuperPlus korting, Lidl Plus korting, DLC court, "
+            "Leveranciersbon, E-coupon — any line that represents a price reduction. "
+            "Set normalized_name to describe the discount (e.g. 'korting hoeveelheidsvoordeel')"
+        )
     )
     is_deposit: bool = Field(
-        description="true ONLY for bottle/can deposit items: Leeggoed, Vidange, Statiegeld"
+        description=(
+            "true for ANY deposit-related line — both deposit charges (buying containers) and deposit refunds (returning containers). "
+            "Dutch: Leeggoed, Statiegeld. French: Vidange, Consigne, Emballage. "
+            "These are NOT actual product purchases"
+        )
+    )
+    is_deposit_refund: bool = Field(
+        description=(
+            "true ONLY when the customer is receiving money back for returning containers. "
+            "Receipt text: 'Retour leeggoed', 'Retour vidange', 'Retour consigne', 'Leeggoed retour'. "
+            "false for deposit charges (buying new containers) and all non-deposit lines"
+        )
     )
     granular_category: str = Field(
         description="One category from the provided category list"
     )
     unit_of_measure: Optional[str] = Field(
         default=None,
-        description="Unit for weighed/measured items: kg, g, l, ml, or piece. null for standard packaged items"
+        description=(
+            "Unit for weighed/measured items: kg, g, l, ml, or piece. "
+            "Look for per-kg/per-liter pricing lines (e.g. '1.234 kg x 5.99/kg'). "
+            "null for standard packaged items"
+        )
     )
     weight_or_volume: Optional[float] = Field(
         default=None,
@@ -195,20 +240,16 @@ class _ReceiptSchema(PydanticBaseModel):
         default=None,
         description="One of: bancontact, visa, mastercard, cash, payconiq, meal_vouchers, mixed. null if not found"
     )
-    total_savings: Optional[float] = Field(
-        default=None,
-        description="Total discount amount as a POSITIVE number (absolute sum of all discount lines). null if no discounts"
-    )
     store_branch: Optional[str] = Field(
         default=None,
         description="Store location/branch (city or street), NOT the chain name. e.g., 'Colruyt Leuven' → 'Leuven'"
     )
     total: Optional[float] = Field(
         default=None,
-        description="Receipt total amount"
+        description="Total amount printed on the receipt — the net amount the customer paid"
     )
     line_items: list[_LineItemSchema] = Field(
-        description="All extracted line items. Include discount lines with negative total_price. Skip subtotals and payment lines"
+        description="All extracted line items. Include discount and deposit lines (all prices positive). Skip subtotals, totals, and payment lines"
     )
 
 
@@ -244,173 +285,20 @@ class GeminiVisionService:
 - If multiple payment methods are used, use "mixed"
 - Return null if no payment method is found
 
-### Total Savings
-- Calculate the total discount amount as a POSITIVE number
-- Sum up all discount lines (lines where is_discount=true) and return the absolute value
-- Return null if there are no discounts
-
 ### Store Branch
 - Extract the store location/branch (the city, street, or branch identifier)
 - This is the location part of the store name, NOT the store chain name
 - Examples: "Colruyt Leuven" → "Leuven", "Delhaize Etterbeek" → "Etterbeek"
 - Return null if no branch/location is found
 
-### Line Items - Extract these fields:
-
-1. **item_name**: Product description text from the receipt line, in original casing (NOT lowercase).
-   - KEEP: brand name, product name, variant/flavor, size/weight info (500g, 1L, 6X33CL), packaging type (PET, Blik)
-   - REMOVE: article codes (A 14515), PLU numbers, quantity counts (the "1" or "2x" at the end), unit prices and total prices
-   - Preserve the original casing and language from the receipt
-   - Examples:
-     - "A 14515 BONI BIO volkorenspaghetti 500g 1 0,99 0,99" → "BONI BIO volkorenspaghetti 500g"
-     - "JUPILER PILS 6X33CL PET" → "JUPILER PILS 6X33CL PET"
-     - "123456 COCA COLA ZERO 1,5L PET 2 3,58" → "COCA COLA ZERO 1,5L PET"
-     - "LAY'S CHIPS PAPRIKA 250G" → "LAY'S CHIPS PAPRIKA 250G"
-     - "BANANEN 1KG" → "BANANEN 1KG"
-
-2. **normalized_name**: Clean, full product name used for product matching. This is the primary field for matching receipt items to product databases (EAN lookup).
-   - ALWAYS output in **lowercase**
-   - ALWAYS KEEP the brand/manufacturer name — it is part of the product identity
-   - REMOVE quantities (450ml, 1L, 500g, 10st, 6x33cl, etc.)
-   - REMOVE packaging types (PET, Blik, Fles, Doos, Brik, etc.)
-   - REMOVE receipt codes, article numbers, and barcodes
-   - Keep the product's natural word order as on the receipt (after removing quantities/packaging)
-   - Maintain original language (Dutch/French)
-   - **CRITICAL**: The SAME product must ALWAYS produce the SAME normalized_name, regardless of receipt format or OCR variations
-   - Examples:
-     - "JUPILER PILS 6X33CL PET" → "jupiler pils"
-     - "BONI VOLLE MELK 1L" → "boni volle melk"
-     - "COCA COLA ZERO 1,5L PET" → "coca-cola zero"
-     - "VANDEMOORTELE VINAIGRETTE CAESAR 450ML" → "vandemoortele vinaigrette caesar"
-     - "LEFFE BRUIN 6X33CL" → "leffe bruin"
-     - "DR. OETKER CASA DI MAMA SALAME 390G" → "dr. oetker casa di mama salame"
-     - "LAY'S CHIPS PAPRIKA 250G" → "lay's chips paprika"
-     - "DEVOS LEMMENS MAYONAISE 300ML" → "devos lemmens mayonaise"
-     - "DUYVIS BORRELNOOTJES HOT 275G" → "duyvis borrelnootjes hot"
-     - "BANANEN 1KG" → "bananen"
-     - "CARA PILS 6X33CL" → "cara pils"
-     - "365 PILS 6X33CL" → "365 pils"
-     - "ABSOLUT VODKA 35CL" → "absolut vodka"
-
-3. **normalized_brand**: The brand/manufacturer name ONLY, in **lowercase**. Used as a pre-filter for product matching.
-   - Extract the product's brand/manufacturer, NOT the store name
-   - For store/house brands (Boni, 365, Everyday, Cara, Delhaize brand), use the house brand name
-   - If a fresh/ready-made food item (traiteur, deli, bakery, prepared meals) has no visible brand, default to "in-house"
-   - Only use null for truly generic unbranded items (loose fruit, vegetables by weight)
-   - Examples:
-     - "JUPILER PILS 6X33CL PET" → "jupiler"
-     - "BONI VOLLE MELK 1L" → "boni"
-     - "COCA COLA ZERO 1,5L PET" → "coca-cola"
-     - "VANDEMOORTELE VINAIGRETTE CAESAR 450ML" → "vandemoortele"
-     - "LEFFE BRUIN 6X33CL" → "leffe"
-     - "LAY'S CHIPS PAPRIKA 250G" → "lay's"
-     - "CARA PILS 6X33CL" → "cara"
-     - "365 PILS 6X33CL" → "365"
-     - "ABSOLUT VODKA 35CL" → "absolut"
-     - "KIP KYOTO MET RIJST" → "in-house"
-     - "BAMI OMELET KIP GROENTEN" → "in-house"
-     - "BANANEN 1KG" → null
-
-4. **is_premium**: Boolean flag for brand tier classification:
-   - `true` = Premium/name brand (well-known, nationally/internationally advertised brands)
-     - Examples: Coca-Cola, Jupiler, Leffe, Danone, Lay's, Nutella, Vandemoortele, Devos Lemmens
-   - `false` = Store/house brand or budget brand (private label, supermarket own brand)
-     - Examples: Boni (Colruyt), 365 (Delhaize), Everyday (Colruyt), Cara (Lidl house brand for beer), Nixe (Lidl)
-   - `false` also for unbranded/generic items (loose fruit, vegetables, bakery items without brand)
-
-5. **quantity**: Number of items (parse from "2x", "x3", "2 ST", etc.). Default to 1.
-
-6. **unit_price**: Price per single item (if shown separately on receipt)
-
-7. **total_price**: Total line price
-   - Convert Belgian comma decimals to dots: "2,99" → 2.99
-   - For discount/bonus lines, use NEGATIVE values (e.g., -1.50 for a 1.50€ discount)
-   - Handle "Actieprijs" (promotional price): use that price for the item
-
-8. **is_discount**: True for discount/bonus line items:
-   - "Hoeveelheidsvoordeel" (quantity discount)
-   - "Korting", "Bon korting", "Promotie"
-   - "Actie", "Reductie"
-   - Any line that reduces the total (negative amount)
-   - These lines should have NEGATIVE total_price values
-   - The normalized_name should describe the discount (e.g., "korting hoeveelheidsvoordeel")
-
-9. **is_deposit**: True ONLY for deposit items:
-   - "Leeggoed" (Dutch)
-   - "Vidange" (French)
-   - "Statiegeld"
-   - These are bottle/can deposits, NOT the actual products
-
-10. **unit_of_measure**: The unit shown on the receipt for weighed/measured items:
-    - Use: "kg", "g", "l", "ml", or "piece"
-    - Look for per-kg/per-liter pricing lines (e.g., "1.234 kg x 5.99/kg")
-    - Return null for standard packaged items without weight/volume info
-
-11. **weight_or_volume**: The actual weight or volume purchased:
-    - Parse from lines like "0.547 kg", "1.5 l", "250 g"
-    - Return the numeric value only (use unit_of_measure for the unit)
-    - Return null if not shown on receipt
-
-12. **price_per_unit_measure**: The per-unit price (price per kg, per liter, etc.):
-    - Parse from lines like "5.99/kg", "1.29/l"
-    - Return null if not shown on receipt
-
-### Data Platform Fields (dp_ prefix) — for EAN matching
-
-13. **dp_expanded_description**: Full product text (lowercase, original language). Include brand, name, variant, pack info, packaging type. Keep ALL product-identifying info unlike normalized_name.
-
-14. **dp_pack_quantity**: Multi-pack count. "6X33CL"→6, "4x125g"→4. Default 1 for singles.
-
-15. **dp_pack_size**: TOTAL pack size in ml (liquids) or g (solids). Multi-packs: multiply qty×per-item. "6X33CL"→1980.0, "1,5L"→1500.0, "250G"→250.0. null if unknown.
-
-16. **dp_pack_unit**: "ml" for liquids, "g" for solids. null if no size info.
-
-17. **dp_product_variant**: Flavor/style/sub-type (lowercase). "zero","bruin","paprika","pils". null if base product.
-
-18. **dp_article_code**: Article/PLU/barcode from receipt ("ART 123456", "PLU 4011"). null if not visible.
-
-19. **dp_is_bio**: true if BIO/BIOLOGISCH/BIOLOGIQUE/ORGANIC in text, false otherwise.
-
 ### IMPORTANT RULES
-- INCLUDE discount/bonus lines with NEGATIVE total_price values (these reduce the receipt total)
-- Skip subtotals, totals, payment lines
-- Each product should appear ONCE even if the receipt shows quantity
-- For multi-section receipts with overlapping items, deduplicate by product name
+- INCLUDE discount/bonus lines and deposit lines — extract ALL prices as POSITIVE values
+- Skip subtotals, totals, payment lines, VAT summary lines
+- One line item per receipt line — use the quantity field for multiples, do not create duplicate rows
 
 ### Granular Categories
 Assign ONE category from this list for each item:
 {categories}
-
-## OUTPUT FORMAT
-Return a JSON object with this structure:
-- "vendor_name": string (MUST be one of the store names listed above)
-- "receipt_date": "YYYY-MM-DD"
-- "receipt_time": "HH:MM" or null
-- "payment_method": string or null (bancontact/visa/mastercard/cash/payconiq/meal_vouchers/mixed)
-- "total_savings": number or null (positive, sum of all discount amounts)
-- "store_branch": string or null (location/branch name)
-- "total": number (receipt total)
-- "line_items": array of objects, each with:
-  - "item_name": string (raw receipt text, unmodified)
-  - "normalized_name": string (cleaned name, lowercase)
-  - "normalized_brand": string or null
-  - "is_premium": boolean
-  - "quantity": integer
-  - "unit_price": number or null
-  - "total_price": number (negative for discounts)
-  - "is_discount": boolean
-  - "is_deposit": boolean
-  - "granular_category": string (from list above)
-  - "unit_of_measure": string or null (kg/g/l/ml/piece)
-  - "weight_or_volume": number or null
-  - "price_per_unit_measure": number or null
-  - "dp_expanded_description": string or null (full product text for vector search)
-  - "dp_pack_quantity": integer or null (multi-pack count, 1 for singles)
-  - "dp_pack_size": number or null (total pack size in ml or g)
-  - "dp_pack_unit": string or null ("ml" or "g")
-  - "dp_product_variant": string or null (flavor/style/sub-type)
-  - "dp_article_code": string or null (article/PLU code from receipt)
-  - "dp_is_bio": boolean (true if organic)
 
 Extract all line items from this receipt.'''
 
@@ -606,7 +494,7 @@ Extract all line items from this receipt.'''
                 continue  # Skip items without price
 
             try:
-                total_price = float(total_price)
+                total_price = abs(float(total_price))  # Always positive
             except (ValueError, TypeError):
                 logger.warning(f"Invalid total_price: {total_price}, skipping item")
                 continue
@@ -695,6 +583,7 @@ Extract all line items from this receipt.'''
                     total_price=total_price,
                     is_discount=bool(item.get("is_discount", False)),
                     is_deposit=bool(item.get("is_deposit", False)),
+                    is_deposit_refund=bool(item.get("is_deposit_refund", False)),
                     granular_category=granular,
                     parent_category=parent,
                     unit_of_measure=unit_of_measure,
@@ -728,15 +617,6 @@ Extract all line items from this receipt.'''
         elif payment_method:
             payment_method = payment_method.lower()
 
-        total_savings = data.get("total_savings")
-        if total_savings is not None:
-            try:
-                total_savings = abs(float(total_savings))
-                if total_savings == 0:
-                    total_savings = None
-            except (ValueError, TypeError):
-                total_savings = None
-
         store_branch = data.get("store_branch")
         if store_branch:
             store_branch = store_branch.strip()
@@ -750,7 +630,6 @@ Extract all line items from this receipt.'''
             line_items=line_items,
             receipt_time=receipt_time,
             payment_method=payment_method,
-            total_savings=total_savings,
             store_branch=store_branch,
         )
 

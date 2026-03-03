@@ -193,7 +193,7 @@ async def list_receipts(
         store = first_txn.store_name
         txn_date = first_txn.date
 
-        total_amount = sum(t.item_price for t in txns)
+        total_amount = receipt_map[receipt_id].total_amount if receipt_id in receipt_map and receipt_map[receipt_id].total_amount else sum(t.item_price for t in txns if not t.is_discount and not t.is_deposit)
         items_count = len(txns)
 
         # Get receipt-level fields from the receipt object
@@ -211,7 +211,6 @@ async def list_receipts(
                 receipt_time=receipt_obj.receipt_time if receipt_obj else None,
                 total_amount=round(total_amount, 2),
                 payment_method=receipt_obj.payment_method if receipt_obj else None,
-                total_savings=receipt_obj.total_savings if receipt_obj else None,
                 store_branch=receipt_obj.store_branch if receipt_obj else None,
                 items_count=items_count,
                 source=source,
@@ -227,6 +226,7 @@ async def list_receipts(
                         normalized_brand=t.normalized_brand,
                         is_discount=t.is_discount,
                         is_deposit=t.is_deposit,
+                        is_deposit_refund=t.is_deposit_refund,
                         granular_category=t.granular_category,
                         unit_of_measure=t.unit_of_measure,
                         weight_or_volume=t.weight_or_volume,

@@ -100,7 +100,7 @@ class AnalyticsService:
             dates = [t.date for t in transactions]
             unique_receipt_ids = set(t.receipt_id for t in transactions if t.receipt_id)
 
-        tx_amounts = [(t, t.item_price) for t in transactions]
+        tx_amounts = [(t, t.item_price) for t in transactions if not t.is_discount and not t.is_deposit]
 
         # Calculate totals
         total_spend = sum(amount for _, amount in tx_amounts)
@@ -178,7 +178,7 @@ class AnalyticsService:
         result = await self.db.execute(query)
         transactions = list(result.scalars().all())
 
-        tx_amounts = [(t, t.item_price) for t in transactions]
+        tx_amounts = [(t, t.item_price) for t in transactions if not t.is_discount and not t.is_deposit]
 
         # Calculate total spend
         total_spend = sum(amount for _, amount in tx_amounts)
@@ -292,7 +292,7 @@ class AnalyticsService:
             actual_start = start_date
             actual_end = end_date
 
-        tx_amounts = [(t, t.item_price) for t in transactions]
+        tx_amounts = [(t, t.item_price) for t in transactions if not t.is_discount and not t.is_deposit]
 
         # Calculate totals
         total_spend = sum(amount for _, amount in tx_amounts)
@@ -376,7 +376,7 @@ class AnalyticsService:
             actual_start = start_date
             actual_end = end_date
 
-        tx_amounts = [(t, t.item_price) for t in transactions]
+        tx_amounts = [(t, t.item_price) for t in transactions if not t.is_discount and not t.is_deposit]
 
         # Calculate totals
         total_spend = sum(amount for _, amount in tx_amounts)
@@ -384,7 +384,7 @@ class AnalyticsService:
         receipt_ids = set(t.receipt_id for t in transactions if t.receipt_id)
 
         # Calculate average item price
-        total_raw_spend = sum(t.item_price for t in transactions)
+        total_raw_spend = sum(t.item_price for t in transactions if not t.is_discount and not t.is_deposit)
         average_item_price = round(total_raw_spend / total_items, 2) if total_items > 0 else None
 
         # Group by category
@@ -483,7 +483,7 @@ class AnalyticsService:
         if not transactions:
             return TrendsResponse(trends=[], period_type=period_type)
 
-        tx_amounts = [(t, t.item_price) for t in transactions]
+        tx_amounts = [(t, t.item_price) for t in transactions if not t.is_discount and not t.is_deposit]
 
         # Group transactions by period
         period_data = defaultdict(lambda: {
@@ -584,7 +584,7 @@ class AnalyticsService:
         if not transactions:
             return TrendsResponse(trends=[], period_type=period_type)
 
-        tx_amounts = [(t, t.item_price) for t in transactions]
+        tx_amounts = [(t, t.item_price) for t in transactions if not t.is_discount and not t.is_deposit]
 
         # Group transactions by period
         period_data = defaultdict(lambda: {
@@ -684,7 +684,7 @@ class AnalyticsService:
         if not transactions:
             return PeriodsResponse(periods=[], total_periods=0)
 
-        tx_amounts = [(t, t.item_price) for t in transactions]
+        tx_amounts = [(t, t.item_price) for t in transactions if not t.is_discount and not t.is_deposit]
 
         # Group transactions by period
         period_data = defaultdict(lambda: {
@@ -897,7 +897,7 @@ class AnalyticsService:
                 top_stores=[],
             )
 
-        tx_amounts = [(t, t.item_price) for t in transactions]
+        tx_amounts = [(t, t.item_price) for t in transactions if not t.is_discount and not t.is_deposit]
 
         # Calculate totals
         total_spend = sum(amount for _, amount in tx_amounts)
@@ -907,7 +907,7 @@ class AnalyticsService:
         total_receipts = len(receipt_ids)
 
         # Calculate raw total for average item price
-        total_raw_spend = sum(t.item_price for t in transactions)
+        total_raw_spend = sum(t.item_price for t in transactions if not t.is_discount and not t.is_deposit)
 
         # Calculate number of actual periods with data for accurate averages
         periods_with_data = await self._count_periods_with_data(
@@ -1011,6 +1011,8 @@ class AnalyticsService:
                     Transaction.user_id == user_id,
                     Transaction.date >= start_date,
                     Transaction.date <= end_date,
+                    Transaction.is_discount == False,
+                    Transaction.is_deposit == False,
                 )
             )
             .group_by(period_col)
@@ -1159,6 +1161,8 @@ class AnalyticsService:
         category_data = defaultdict(lambda: {"amount": 0.0, "count": 0})
 
         for t in transactions:
+            if t.is_discount or t.is_deposit:
+                continue
             category_data[t.category]["amount"] += t.item_price
             category_data[t.category]["count"] += 1
 
@@ -1189,6 +1193,8 @@ class AnalyticsService:
         store_data = defaultdict(lambda: {"amount": 0.0, "receipt_ids": set()})
 
         for t in transactions:
+            if t.is_discount or t.is_deposit:
+                continue
             store_data[t.store_name]["amount"] += t.item_price
             if t.receipt_id:
                 store_data[t.store_name]["receipt_ids"].add(t.receipt_id)
@@ -1307,7 +1313,7 @@ class AnalyticsService:
                 last_receipt_date=None,
             )
 
-        tx_amounts = [(t, t.item_price) for t in transactions]
+        tx_amounts = [(t, t.item_price) for t in transactions if not t.is_discount and not t.is_deposit]
 
         # Calculate totals
         total_spend = sum(amount for _, amount in tx_amounts)
@@ -1318,7 +1324,7 @@ class AnalyticsService:
 
         # Calculate averages
         # Note: average_item_price uses raw prices - it's the actual item cost
-        total_raw_spend = sum(t.item_price for t in transactions)
+        total_raw_spend = sum(t.item_price for t in transactions if not t.is_discount and not t.is_deposit)
         average_item_price = round(total_raw_spend / total_items, 2) if total_items > 0 else None
 
         # Calculate first and last receipt dates
@@ -1456,7 +1462,7 @@ class AnalyticsService:
                 top_categories=[],
             )
 
-        tx_amounts = [(t, t.item_price) for t in transactions]
+        tx_amounts = [(t, t.item_price) for t in transactions if not t.is_discount and not t.is_deposit]
 
         # Calculate totals
         total_spend = sum(amount for _, amount in tx_amounts)

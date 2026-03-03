@@ -121,7 +121,6 @@ class ReceiptRepository:
         processed_at: Optional[datetime] = None,
         receipt_time: Optional[time] = None,
         payment_method: Optional[str] = None,
-        total_savings: Optional[float] = None,
         store_branch: Optional[str] = None,
         storage_key: Optional[str] = None,
         content_hash: Optional[str] = None,
@@ -149,8 +148,6 @@ class ReceiptRepository:
             receipt.receipt_time = receipt_time
         if payment_method is not None:
             receipt.payment_method = payment_method
-        if total_savings is not None:
-            receipt.total_savings = total_savings
         if store_branch is not None:
             receipt.store_branch = store_branch
         if storage_key is not None:

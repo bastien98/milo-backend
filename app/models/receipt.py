@@ -48,7 +48,6 @@ class Receipt(Base):
     # New insights fields
     receipt_time: Mapped[Optional[time]] = mapped_column(Time, nullable=True)
     payment_method: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)
-    total_savings: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
     store_branch: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
 
     # Object storage

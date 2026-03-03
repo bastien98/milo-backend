@@ -96,6 +96,7 @@ class TransactionRepository:
         is_premium: bool = False,
         is_discount: bool = False,
         is_deposit: bool = False,
+        is_deposit_refund: bool = False,
         granular_category: Optional[str] = None,
         # Unit measure fields
         unit_of_measure: Optional[str] = None,
@@ -127,6 +128,7 @@ class TransactionRepository:
             is_premium=is_premium,
             is_discount=is_discount,
             is_deposit=is_deposit,
+            is_deposit_refund=is_deposit_refund,
             granular_category=granular_category,
             # Unit measure fields
             unit_of_measure=unit_of_measure,
