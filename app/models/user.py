@@ -15,7 +15,6 @@ if TYPE_CHECKING:
     from app.models.user_enriched_profile import UserEnrichedProfile
     from app.models.budget import Budget
     from app.models.budget_history import BudgetHistory
-    from app.models.expense_split import ExpenseSplit
 
 
 class User(Base):
@@ -52,9 +51,6 @@ class User(Base):
     )
     budget_history: Mapped[List["BudgetHistory"]] = relationship(
         "BudgetHistory", back_populates="user", cascade="all, delete-orphan"
-    )
-    expense_splits: Mapped[List["ExpenseSplit"]] = relationship(
-        "ExpenseSplit", back_populates="user", cascade="all, delete-orphan"
     )
     enriched_profile: Mapped[Optional["UserEnrichedProfile"]] = relationship(
         "UserEnrichedProfile", back_populates="user", cascade="all, delete-orphan", uselist=False

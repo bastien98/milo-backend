@@ -14,18 +14,16 @@ from app.schemas.budget import (
     CategoryProgress,
     CategoryAllocation,
 )
-from app.services.split_aware_calculation import SplitAwareCalculation
 from app.core.categories import get_category_id
 
 
 class BudgetService:
     def __init__(self, db: AsyncSession):
         self.db = db
-        self.split_calc = SplitAwareCalculation(db)
 
     @cached(include_month=True)
     async def get_current_month_spend(self, user_id: str) -> float:
-        """Get total spending for the current month (split-adjusted)."""
+        """Get total spending for the current month."""
         today = date.today()
         first_day = today.replace(day=1)
 
@@ -43,13 +41,13 @@ class BudgetService:
         if not transactions:
             return 0.0
 
-        return await self.split_calc.calculate_split_adjusted_spend(user_id, transactions)
+        return round(sum(t.item_price for t in transactions), 2)
 
     @cached(include_month=True)
     async def get_current_month_spend_by_category(
         self, user_id: str
     ) -> dict[str, float]:
-        """Get spending by category for the current month (split-adjusted)."""
+        """Get spending by category for the current month."""
         today = date.today()
         first_day = today.replace(day=1)
 
@@ -67,7 +65,11 @@ class BudgetService:
         if not transactions:
             return {}
 
-        return await self.split_calc.calculate_split_adjusted_spend_by_category(user_id, transactions)
+        from collections import defaultdict
+        category_spend: dict[str, float] = defaultdict(float)
+        for t in transactions:
+            category_spend[t.category] += t.item_price
+        return {cat: round(spend, 2) for cat, spend in category_spend.items()}
 
     async def get_budget_progress(
         self, user_id: str, budget: Budget

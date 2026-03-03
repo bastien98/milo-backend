@@ -18,7 +18,7 @@ from datetime import date
 from typing import Optional
 
 from google import genai
-from pydantic import BaseModel as PydanticBaseModel
+from pydantic import BaseModel as PydanticBaseModel, Field
 from google.genai import types
 
 from app.core.exceptions import GeminiAPIError
@@ -98,37 +98,110 @@ class GeminiExtractionResult:
 # Pydantic schemas passed as response_schema to Gemini — structurally constrains the JSON output
 # so the model cannot return a bare array instead of the expected object.
 class _LineItemSchema(PydanticBaseModel):
-    item_name: str
-    normalized_name: str
-    normalized_brand: Optional[str] = None
-    is_premium: bool
-    quantity: int
-    unit_price: Optional[float] = None
-    total_price: float
-    is_discount: bool
-    is_deposit: bool
-    granular_category: str
-    unit_of_measure: Optional[str] = None
-    weight_or_volume: Optional[float] = None
-    price_per_unit_measure: Optional[float] = None
-    dp_expanded_description: Optional[str] = None
-    dp_pack_quantity: Optional[int] = None
-    dp_pack_size: Optional[float] = None
-    dp_pack_unit: Optional[str] = None
-    dp_product_variant: Optional[str] = None
-    dp_article_code: Optional[str] = None
-    dp_is_bio: bool
+    item_name: str = Field(
+        description="Raw text exactly as it appears on the receipt — no cleaning, no normalization"
+    )
+    normalized_name: str = Field(
+        description="Clean, full product name in lowercase. Keep brand name. Remove quantities (450ml, 1L, 500g), packaging types (PET, Blik, Fles), and receipt codes. Maintain original language (Dutch/French)"
+    )
+    normalized_brand: Optional[str] = Field(
+        default=None,
+        description="Brand/manufacturer name only, lowercase. For store/house brands (Boni, 365, Everyday, Cara), use the house brand name. null if no brand identifiable"
+    )
+    is_premium: bool = Field(
+        description="true for premium/name brands (Coca-Cola, Jupiler, Danone, Lay's), false for store/house brands (Boni, 365, Everyday, Cara) and unbranded items"
+    )
+    quantity: int = Field(
+        description="Number of items — parse from '2x', 'x3', '2 ST', etc. Default 1"
+    )
+    unit_price: Optional[float] = Field(
+        default=None,
+        description="Price per single item if shown separately on receipt"
+    )
+    total_price: float = Field(
+        description="Total line price. Convert Belgian comma decimals to dots (2,99 → 2.99). Use NEGATIVE values for discount/bonus lines"
+    )
+    is_discount: bool = Field(
+        description="true for discount/bonus lines: Hoeveelheidsvoordeel, Korting, Bon korting, Promotie, Actie, Reductie — any line that reduces the total"
+    )
+    is_deposit: bool = Field(
+        description="true ONLY for bottle/can deposit items: Leeggoed, Vidange, Statiegeld"
+    )
+    granular_category: str = Field(
+        description="One category from the provided category list"
+    )
+    unit_of_measure: Optional[str] = Field(
+        default=None,
+        description="Unit for weighed/measured items: kg, g, l, ml, or piece. null for standard packaged items"
+    )
+    weight_or_volume: Optional[float] = Field(
+        default=None,
+        description="Actual weight or volume purchased (numeric only). Parse from '0.547 kg', '1.5 l'. null if not shown"
+    )
+    price_per_unit_measure: Optional[float] = Field(
+        default=None,
+        description="Per-unit price (per kg, per liter). Parse from '5.99/kg', '1.29/l'. null if not shown"
+    )
+    dp_expanded_description: Optional[str] = Field(
+        default=None,
+        description="Full product text in lowercase, original language. Include brand, name, variant, pack info, packaging type — keep ALL product-identifying info"
+    )
+    dp_pack_quantity: Optional[int] = Field(
+        default=None,
+        description="Multi-pack count: '6X33CL'→6, '4x125g'→4. Default 1 for singles"
+    )
+    dp_pack_size: Optional[float] = Field(
+        default=None,
+        description="TOTAL pack size in ml (liquids) or g (solids). Multi-packs: multiply qty×per-item. '6X33CL'→1980.0, '1,5L'→1500.0"
+    )
+    dp_pack_unit: Optional[str] = Field(
+        default=None,
+        description="'ml' for liquids, 'g' for solids. null if no size info"
+    )
+    dp_product_variant: Optional[str] = Field(
+        default=None,
+        description="Flavor/style/sub-type in lowercase: 'zero', 'bruin', 'paprika', 'pils'. null if base product"
+    )
+    dp_article_code: Optional[str] = Field(
+        default=None,
+        description="Article/PLU/barcode from receipt ('ART 123456', 'PLU 4011'). null if not visible"
+    )
+    dp_is_bio: bool = Field(
+        description="true if BIO/BIOLOGISCH/BIOLOGIQUE/ORGANIC in text, false otherwise"
+    )
 
 
 class _ReceiptSchema(PydanticBaseModel):
-    vendor_name: str
-    receipt_date: Optional[str] = None
-    receipt_time: Optional[str] = None
-    payment_method: Optional[str] = None
-    total_savings: Optional[float] = None
-    store_branch: Optional[str] = None
-    total: Optional[float] = None
-    line_items: list[_LineItemSchema]
+    vendor_name: str = Field(
+        description="Store/retailer name — must be one of the exact store names from the provided list, or 'Other'"
+    )
+    receipt_date: Optional[str] = Field(
+        default=None,
+        description="Receipt date in YYYY-MM-DD format. Convert DD/MM/YYYY to YYYY-MM-DD"
+    )
+    receipt_time: Optional[str] = Field(
+        default=None,
+        description="Time of purchase in HH:MM 24-hour format. null if not found"
+    )
+    payment_method: Optional[str] = Field(
+        default=None,
+        description="One of: bancontact, visa, mastercard, cash, payconiq, meal_vouchers, mixed. null if not found"
+    )
+    total_savings: Optional[float] = Field(
+        default=None,
+        description="Total discount amount as a POSITIVE number (absolute sum of all discount lines). null if no discounts"
+    )
+    store_branch: Optional[str] = Field(
+        default=None,
+        description="Store location/branch (city or street), NOT the chain name. e.g., 'Colruyt Leuven' → 'Leuven'"
+    )
+    total: Optional[float] = Field(
+        default=None,
+        description="Receipt total amount"
+    )
+    line_items: list[_LineItemSchema] = Field(
+        description="All extracted line items. Include discount lines with negative total_price. Skip subtotals and payment lines"
+    )
 
 
 class GeminiVisionService:
@@ -337,36 +410,80 @@ Extract all line items from this receipt.'''
             .replace("{stores}", STORES_PROMPT_LIST)
         )
 
-        logger.info(f"Gemini extraction: content_size={len(file_content)} bytes")
+        logger.info(
+            f"Gemini extraction starting: content_size={len(file_content)} bytes, "
+            f"model={self.MODEL}, max_tokens={self.MAX_TOKENS}, user_id={user_id}"
+        )
+
+        # Verify API key is set
+        api_key = settings.GEMINI_API_KEY
+        if not api_key:
+            logger.error("GEMINI_API_KEY is not set!")
+            raise GeminiAPIError("GEMINI_API_KEY not configured", details={"error_type": "config"})
+        logger.info(f"API key present: {api_key[:8]}...{api_key[-4:]} (length={len(api_key)})")
 
         # Upload PDF to Gemini Files API
         t0 = time.monotonic()
-        uploaded_file = await self.client.aio.files.upload(
-            file=io.BytesIO(file_content),
-            config=types.UploadFileConfig(
-                mime_type="application/pdf",
-                display_name="receipt.pdf",
-            ),
-        )
-        logger.info(f"⏱ gemini_file_upload: {time.monotonic() - t0:.3f}s")
+        try:
+            uploaded_file = await self.client.aio.files.upload(
+                file=io.BytesIO(file_content),
+                config=types.UploadFileConfig(
+                    mime_type="application/pdf",
+                    display_name="receipt.pdf",
+                ),
+            )
+            upload_elapsed = time.monotonic() - t0
+            logger.info(
+                f"⏱ gemini_file_upload: {upload_elapsed:.3f}s — "
+                f"file_name={uploaded_file.name}, "
+                f"state={getattr(uploaded_file, 'state', 'unknown')}, "
+                f"uri={getattr(uploaded_file, 'uri', 'N/A')}"
+            )
+        except Exception as e:
+            logger.error(f"Gemini file upload failed after {time.monotonic() - t0:.3f}s: {type(e).__name__}: {e}")
+            raise GeminiAPIError(
+                f"File upload failed: {e}",
+                details={"error_type": "upload_failed", "error": str(e)},
+            )
 
         response_text = None
         try:
+            logger.info(
+                f"Calling generate_content: model={self.MODEL}, "
+                f"file={uploaded_file.name}, timeout=300s, AFC=disabled"
+            )
             t0 = time.monotonic()
             async with _get_user_semaphore(user_id):
-                response = await self.client.aio.models.generate_content(
-                    model=self.MODEL,
-                    contents=[uploaded_file],
-                    config=types.GenerateContentConfig(
-                        system_instruction=system_prompt,
-                        max_output_tokens=self.MAX_TOKENS,
-                        temperature=1.0,
-                        response_mime_type="application/json",
-                        response_schema=_ReceiptSchema,
-                        media_resolution=types.MediaResolution.MEDIA_RESOLUTION_MEDIUM,
+                semaphore_wait = time.monotonic() - t0
+                if semaphore_wait > 0.1:
+                    logger.info(f"⏱ semaphore_wait: {semaphore_wait:.3f}s (another request was in progress)")
+                t1 = time.monotonic()
+                response = await asyncio.wait_for(
+                    self.client.aio.models.generate_content(
+                        model=self.MODEL,
+                        contents=[uploaded_file],
+                        config=types.GenerateContentConfig(
+                            system_instruction=system_prompt,
+                            max_output_tokens=self.MAX_TOKENS,
+                            temperature=1.0,
+                            response_mime_type="application/json",
+                            response_schema=_ReceiptSchema,
+                            media_resolution=types.MediaResolution.MEDIA_RESOLUTION_MEDIUM,
+                        ),
                     ),
+                    timeout=300,  # 5 minutes — thinking models can be slow
                 )
-            logger.info(f"⏱ gemini_generate_content: {time.monotonic() - t0:.3f}s")
+            generate_elapsed = time.monotonic() - t1
+            total_elapsed = time.monotonic() - t0
+            logger.info(f"⏱ gemini_generate_content: {generate_elapsed:.3f}s (total incl. semaphore: {total_elapsed:.3f}s)")
+
+            # Log full response metadata
+            logger.info(
+                f"Response metadata: "
+                f"candidates={len(response.candidates) if response.candidates else 0}, "
+                f"finish_reason={response.candidates[0].finish_reason if response.candidates else 'N/A'}, "
+                f"has_text={bool(response.text) if hasattr(response, 'text') else 'N/A'}"
+            )
 
             # Log token usage
             if hasattr(response, 'usage_metadata') and response.usage_metadata:
@@ -377,6 +494,8 @@ Extract all line items from this receipt.'''
                     f"output={getattr(um, 'candidates_token_count', '?')}, "
                     f"total={getattr(um, 'total_token_count', '?')}"
                 )
+            else:
+                logger.warning("No usage_metadata in response")
 
             # Check for truncation
             if response.candidates and response.candidates[0].finish_reason:
@@ -389,22 +508,37 @@ Extract all line items from this receipt.'''
 
             response_text = response.text
             if not response_text:
-                logger.error(f"Gemini returned empty response. Candidates: {getattr(response, 'candidates', 'N/A')}")
-                if hasattr(response, 'prompt_feedback'):
-                    logger.error(f"Prompt feedback: {response.prompt_feedback}")
+                # Log everything we can about the response for debugging
+                logger.error(
+                    f"Gemini returned empty response. "
+                    f"Candidates: {response.candidates}, "
+                    f"prompt_feedback: {getattr(response, 'prompt_feedback', 'N/A')}"
+                )
                 raise GeminiAPIError(
                     "Gemini returned empty response",
                     details={"error_type": "empty_response"},
                 )
 
+            logger.info(f"Response text length: {len(response_text)} chars")
             data = json.loads(response_text)
-            logger.info(f"Gemini response parsed: vendor={data.get('vendor_name')}, items={len(data.get('line_items', []))}")
+            logger.info(
+                f"Gemini response parsed: vendor={data.get('vendor_name')}, "
+                f"items={len(data.get('line_items', []))}, "
+                f"date={data.get('receipt_date')}, total={data.get('total')}"
+            )
 
             return self._build_result(data)
 
+        except asyncio.TimeoutError:
+            elapsed = time.monotonic() - t0
+            logger.error(f"Gemini generate_content timed out after {elapsed:.1f}s (limit=300s)")
+            raise GeminiAPIError(
+                "Receipt extraction timed out",
+                details={"error_type": "timeout", "elapsed_seconds": elapsed},
+            )
         except json.JSONDecodeError as e:
-            logger.error(f"Failed to parse Gemini response: {e}")
-            logger.error(f"Raw response: {response_text[:500] if response_text else 'empty'}")
+            logger.error(f"Failed to parse Gemini response as JSON: {e}")
+            logger.error(f"Raw response (first 1000 chars): {response_text[:1000] if response_text else 'empty'}")
             raise GeminiAPIError(
                 "Failed to parse extraction response",
                 details={"error_type": "parse_error", "parse_error": str(e)},
@@ -412,17 +546,19 @@ Extract all line items from this receipt.'''
         except GeminiAPIError:
             raise
         except Exception as e:
-            logger.exception(f"Extraction failed: {e}")
+            elapsed = time.monotonic() - t0
+            logger.exception(f"Extraction failed after {elapsed:.1f}s: {type(e).__name__}: {e}")
             raise GeminiAPIError(
                 f"Extraction failed: {str(e)}",
-                details={"error_type": "unexpected", "error": str(e)},
+                details={"error_type": "unexpected", "error_class": type(e).__name__, "error": str(e)},
             )
         finally:
             # Best-effort cleanup — files auto-expire after 48h anyway
             try:
                 await self.client.aio.files.delete(name=uploaded_file.name)
-            except Exception:
-                pass
+                logger.info(f"Cleaned up uploaded file: {uploaded_file.name}")
+            except Exception as cleanup_err:
+                logger.warning(f"File cleanup failed (non-critical): {cleanup_err}")
 
     def _build_result(self, data: dict) -> GeminiExtractionResult:
         """Build extraction result from parsed JSON."""

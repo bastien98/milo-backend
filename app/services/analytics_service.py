@@ -45,13 +45,11 @@ from app.core.categories import (
     GROUP_ICONS,
     EXCLUDED_CATEGORIES,
 )
-from app.services.split_aware_calculation import SplitAwareCalculation
 
 
 class AnalyticsService:
     def __init__(self, db: AsyncSession):
         self.db = db
-        self.split_calc = SplitAwareCalculation(db)
 
     @cached()
     async def get_period_summary(
@@ -61,10 +59,7 @@ class AnalyticsService:
         end_date: Optional[date] = None,
         all_time: bool = False,
     ) -> PeriodSummary:
-        """Get spending summary for a period with store breakdown (split-adjusted).
-
-        For transactions that are part of expense splits, only the user's
-        portion is counted. For non-split transactions, the full amount is used.
+        """Get spending summary for a period with store breakdown.
 
         Args:
             user_id: The user's ID
@@ -105,10 +100,9 @@ class AnalyticsService:
             dates = [t.date for t in transactions]
             unique_receipt_ids = set(t.receipt_id for t in transactions if t.receipt_id)
 
-        # Get split-adjusted amounts for all transactions
-        tx_amounts = await self.split_calc.get_transaction_user_amounts(user_id, transactions)
+        tx_amounts = [(t, t.item_price) for t in transactions]
 
-        # Calculate totals (split-adjusted)
+        # Calculate totals
         total_spend = sum(amount for _, amount in tx_amounts)
         transaction_count = len(transactions)
 
@@ -155,10 +149,7 @@ class AnalyticsService:
         month: int,
         year: int,
     ) -> PieChartSummaryResponse:
-        """Get spending by category for a specific month/year (for Pie Chart, split-adjusted).
-
-        For transactions that are part of expense splits, only the user's
-        portion is counted. For non-split transactions, the full amount is used.
+        """Get spending by category for a specific month/year (for Pie Chart).
 
         Args:
             user_id: The user's ID
@@ -187,13 +178,12 @@ class AnalyticsService:
         result = await self.db.execute(query)
         transactions = list(result.scalars().all())
 
-        # Get split-adjusted amounts for all transactions
-        tx_amounts = await self.split_calc.get_transaction_user_amounts(user_id, transactions)
+        tx_amounts = [(t, t.item_price) for t in transactions]
 
-        # Calculate total spend (split-adjusted)
+        # Calculate total spend
         total_spend = sum(amount for _, amount in tx_amounts)
 
-        # Group by category (split-adjusted), excluding non-product categories
+        # Group by category, excluding non-product categories
         category_data = defaultdict(lambda: {"amount": 0.0, "count": 0})
         for t, amount in tx_amounts:
             if t.category in EXCLUDED_CATEGORIES:
@@ -225,7 +215,7 @@ class AnalyticsService:
         # Sort by total_spent descending
         categories.sort(key=lambda x: x.total_spent, reverse=True)
 
-        # Group by store (split-adjusted)
+        # Group by store
         store_data = defaultdict(lambda: {"amount": 0.0, "receipts": set()})
         for t, amount in tx_amounts:
             store_data[t.store_name]["amount"] += amount
@@ -265,10 +255,7 @@ class AnalyticsService:
         store_name: Optional[str] = None,
         all_time: bool = False,
     ) -> CategoryBreakdown:
-        """Get spending breakdown by category for a period (split-adjusted).
-
-        For transactions that are part of expense splits, only the user's
-        portion is counted. For non-split transactions, the full amount is used.
+        """Get spending breakdown by category for a period.
 
         Args:
             user_id: The user's ID
@@ -305,13 +292,12 @@ class AnalyticsService:
             actual_start = start_date
             actual_end = end_date
 
-        # Get split-adjusted amounts for all transactions
-        tx_amounts = await self.split_calc.get_transaction_user_amounts(user_id, transactions)
+        tx_amounts = [(t, t.item_price) for t in transactions]
 
-        # Calculate totals (split-adjusted)
+        # Calculate totals
         total_spend = sum(amount for _, amount in tx_amounts)
 
-        # Group by category (split-adjusted)
+        # Group by category
         category_data = defaultdict(lambda: {"amount": 0.0, "count": 0})
         for t, amount in tx_amounts:
             category_data[t.category]["amount"] += amount
@@ -353,10 +339,7 @@ class AnalyticsService:
         end_date: Optional[date] = None,
         all_time: bool = False,
     ) -> StoreBreakdown:
-        """Get detailed breakdown for a specific store (split-adjusted).
-
-        For transactions that are part of expense splits, only the user's
-        portion is counted. For non-split transactions, the full amount is used.
+        """Get detailed breakdown for a specific store.
 
         Args:
             user_id: The user's ID
@@ -393,19 +376,18 @@ class AnalyticsService:
             actual_start = start_date
             actual_end = end_date
 
-        # Get split-adjusted amounts for all transactions
-        tx_amounts = await self.split_calc.get_transaction_user_amounts(user_id, transactions)
+        tx_amounts = [(t, t.item_price) for t in transactions]
 
-        # Calculate totals (split-adjusted)
+        # Calculate totals
         total_spend = sum(amount for _, amount in tx_amounts)
         total_items = sum(t.quantity for t in transactions)
         receipt_ids = set(t.receipt_id for t in transactions if t.receipt_id)
 
-        # Calculate average item price (NOT split-adjusted - this is the actual item price)
+        # Calculate average item price
         total_raw_spend = sum(t.item_price for t in transactions)
         average_item_price = round(total_raw_spend / total_items, 2) if total_items > 0 else None
 
-        # Group by category (split-adjusted)
+        # Group by category
         category_data = defaultdict(lambda: {"amount": 0.0, "count": 0})
         for t, amount in tx_amounts:
             category_data[t.category]["amount"] += amount
@@ -469,10 +451,7 @@ class AnalyticsService:
         num_periods: int = 12,
     ) -> TrendsResponse:
         """
-        Get spending trends over time (split-adjusted).
-
-        For transactions that are part of expense splits, only the user's
-        portion is counted. For non-split transactions, the full amount is used.
+        Get spending trends over time.
 
         Only returns periods that have actual transactions (no empty periods).
         """
@@ -504,8 +483,7 @@ class AnalyticsService:
         if not transactions:
             return TrendsResponse(trends=[], period_type=period_type)
 
-        # Get split-adjusted amounts for all transactions
-        tx_amounts = await self.split_calc.get_transaction_user_amounts(user_id, transactions)
+        tx_amounts = [(t, t.item_price) for t in transactions]
 
         # Group transactions by period
         period_data = defaultdict(lambda: {
@@ -573,10 +551,7 @@ class AnalyticsService:
         num_periods: int = 6,
     ) -> TrendsResponse:
         """
-        Get spending trends over time for a specific store (split-adjusted).
-
-        For transactions that are part of expense splits, only the user's
-        portion is counted. For non-split transactions, the full amount is used.
+        Get spending trends over time for a specific store.
 
         Only returns periods that have actual transactions (no empty periods).
         """
@@ -609,8 +584,7 @@ class AnalyticsService:
         if not transactions:
             return TrendsResponse(trends=[], period_type=period_type)
 
-        # Get split-adjusted amounts for all transactions
-        tx_amounts = await self.split_calc.get_transaction_user_amounts(user_id, transactions)
+        tx_amounts = [(t, t.item_price) for t in transactions]
 
         # Group transactions by period
         period_data = defaultdict(lambda: {
@@ -677,10 +651,7 @@ class AnalyticsService:
         num_periods: int = 52,
     ) -> PeriodsResponse:
         """
-        Get lightweight metadata for all periods with data (split-adjusted).
-
-        For transactions that are part of expense splits, only the user's
-        portion is counted. For non-split transactions, the full amount is used.
+        Get lightweight metadata for all periods with data.
 
         Returns periods sorted by most recent first.
         """
@@ -713,8 +684,7 @@ class AnalyticsService:
         if not transactions:
             return PeriodsResponse(periods=[], total_periods=0)
 
-        # Get split-adjusted amounts for all transactions
-        tx_amounts = await self.split_calc.get_transaction_user_amounts(user_id, transactions)
+        tx_amounts = [(t, t.item_price) for t in transactions]
 
         # Group transactions by period
         period_data = defaultdict(lambda: {
@@ -927,17 +897,16 @@ class AnalyticsService:
                 top_stores=[],
             )
 
-        # Get split-adjusted amounts for all transactions
-        tx_amounts = await self.split_calc.get_transaction_user_amounts(user_id, transactions)
+        tx_amounts = [(t, t.item_price) for t in transactions]
 
-        # Calculate totals (split-adjusted)
+        # Calculate totals
         total_spend = sum(amount for _, amount in tx_amounts)
         total_transactions = len(transactions)
         total_items = sum(t.quantity for t in transactions)
         receipt_ids = set(t.receipt_id for t in transactions if t.receipt_id)
         total_receipts = len(receipt_ids)
 
-        # Calculate raw total (not split-adjusted) for average item price
+        # Calculate raw total for average item price
         total_raw_spend = sum(t.item_price for t in transactions)
 
         # Calculate number of actual periods with data for accurate averages
@@ -962,16 +931,16 @@ class AnalyticsService:
             average_items_per_receipt=round(total_items / total_receipts, 2) if total_receipts > 0 else 0,
         )
 
-        # Calculate extremes (max/min spending periods) - using split-adjusted amounts
-        extremes = self._get_period_extremes_split_adjusted(tx_amounts, period_type)
+        # Calculate extremes (max/min spending periods)
+        extremes = self._get_period_extremes(tx_amounts, period_type)
 
-        # Calculate top categories (split-adjusted)
-        top_categories = await self._calculate_top_categories_split_adjusted(
+        # Calculate top categories
+        top_categories = await self._calculate_top_categories(
             user_id, tx_amounts, total_spend, top_categories_limit, min_category_percentage
         )
 
-        # Calculate top stores (split-adjusted)
-        top_stores = await self._calculate_top_stores_split_adjusted(user_id, tx_amounts, total_spend, top_stores_limit)
+        # Calculate top stores
+        top_stores = await self._calculate_top_stores(user_id, tx_amounts, total_spend, top_stores_limit)
 
         return AggregateResponse(
             period_type=period_type,
@@ -1100,12 +1069,12 @@ class AnalyticsService:
             min_spending_period=min_spending_period,
         )
 
-    def _get_period_extremes_split_adjusted(
+    def _get_period_extremes(
         self,
         tx_amounts: List[tuple],
         period_type: str,
     ) -> AggregateExtremes:
-        """Calculate extreme values (max/min spend) per period using split-adjusted amounts."""
+        """Calculate extreme values (max/min spend) per period."""
         if not tx_amounts:
             return AggregateExtremes()
 
@@ -1239,7 +1208,7 @@ class AnalyticsService:
         stores.sort(key=lambda x: x.amount_spent, reverse=True)
         return stores[:limit]
 
-    async def _calculate_top_categories_split_adjusted(
+    async def _calculate_top_categories(
         self,
         user_id: str,
         tx_amounts: List[tuple],
@@ -1247,7 +1216,7 @@ class AnalyticsService:
         limit: int,
         min_percentage: float,
     ) -> list[CategorySpending]:
-        """Calculate top categories from transactions with split-adjusted amounts."""
+        """Calculate top categories from transactions."""
         category_data = defaultdict(lambda: {"amount": 0.0, "count": 0})
 
         for t, amount in tx_amounts:
@@ -1271,14 +1240,14 @@ class AnalyticsService:
         categories.sort(key=lambda x: x.spent, reverse=True)
         return categories[:limit]
 
-    async def _calculate_top_stores_split_adjusted(
+    async def _calculate_top_stores(
         self,
         user_id: str,
         tx_amounts: List[tuple],
         total_spend: float,
         limit: int,
     ) -> list[StoreSpending]:
-        """Calculate top stores from transactions with split-adjusted amounts."""
+        """Calculate top stores from transactions."""
         store_data = defaultdict(lambda: {"amount": 0.0, "receipt_ids": set()})
 
         for t, amount in tx_amounts:
@@ -1309,10 +1278,7 @@ class AnalyticsService:
         top_categories_limit: int = 5,
     ) -> AllTimeResponse:
         """
-        Get all-time statistics for a user (split-adjusted).
-
-        For transactions that are part of expense splits, only the user's
-        portion is counted. For non-split transactions, the full amount is used.
+        Get all-time statistics for a user.
 
         Returns aggregate stats across all user transactions, including:
         - Total receipts, items, spend, transactions
@@ -1341,10 +1307,9 @@ class AnalyticsService:
                 last_receipt_date=None,
             )
 
-        # Get split-adjusted amounts for all transactions
-        tx_amounts = await self.split_calc.get_transaction_user_amounts(user_id, transactions)
+        tx_amounts = [(t, t.item_price) for t in transactions]
 
-        # Calculate totals (split-adjusted)
+        # Calculate totals
         total_spend = sum(amount for _, amount in tx_amounts)
         total_transactions = len(transactions)
         total_items = sum(t.quantity for t in transactions)
@@ -1352,7 +1317,7 @@ class AnalyticsService:
         total_receipts = len(receipt_ids)
 
         # Calculate averages
-        # Note: average_item_price uses raw prices (NOT split-adjusted) - it's the actual item cost
+        # Note: average_item_price uses raw prices - it's the actual item cost
         total_raw_spend = sum(t.item_price for t in transactions)
         average_item_price = round(total_raw_spend / total_items, 2) if total_items > 0 else None
 
@@ -1361,7 +1326,7 @@ class AnalyticsService:
         first_receipt_date = min(dates)
         last_receipt_date = max(dates)
 
-        # Calculate top stores by visits (visits not affected by splits)
+        # Calculate top stores by visits
         store_visits = defaultdict(set)
         store_spend = defaultdict(float)
         for t, amount in tx_amounts:
@@ -1384,7 +1349,7 @@ class AnalyticsService:
             for i, s in enumerate(stores_by_visits[:top_stores_limit])
         ]
 
-        # Top by spend (split-adjusted)
+        # Top by spend
         stores_by_spend_list = [
             {"store_name": name, "total_spent": spend}
             for name, spend in store_spend.items()
@@ -1399,7 +1364,7 @@ class AnalyticsService:
             for i, s in enumerate(stores_by_spend_list[:top_stores_limit])
         ]
 
-        # Calculate top categories (split-adjusted)
+        # Calculate top categories
         category_data = defaultdict(lambda: {"amount": 0.0, "count": 0})
         for t, amount in tx_amounts:
             category_data[t.category]["amount"] += amount
@@ -1491,17 +1456,16 @@ class AnalyticsService:
                 top_categories=[],
             )
 
-        # Get split-adjusted amounts for all transactions
-        tx_amounts = await self.split_calc.get_transaction_user_amounts(user_id, transactions)
+        tx_amounts = [(t, t.item_price) for t in transactions]
 
-        # Calculate totals (split-adjusted)
+        # Calculate totals
         total_spend = sum(amount for _, amount in tx_amounts)
         transaction_count = len(transactions)
         total_items = sum(t.quantity for t in transactions)
         receipt_ids = set(t.receipt_id for t in transactions if t.receipt_id)
         receipt_count = len(receipt_ids)
 
-        # Aggregate store data (split-adjusted)
+        # Aggregate store data
         store_data = defaultdict(lambda: {"amount": 0.0, "receipt_ids": set()})
         for t, amount in tx_amounts:
             store_data[t.store_name]["amount"] += amount
@@ -1522,7 +1486,7 @@ class AnalyticsService:
             )
         stores.sort(key=lambda x: x.amount_spent, reverse=True)
 
-        # Calculate monthly breakdown if requested (split-adjusted)
+        # Calculate monthly breakdown if requested
         monthly_breakdown = None
         if include_monthly_breakdown:
             month_data = defaultdict(lambda: {"amount": 0.0, "receipt_ids": set()})
@@ -1549,7 +1513,7 @@ class AnalyticsService:
                     )
                 )
 
-        # Calculate top categories (split-adjusted)
+        # Calculate top categories
         category_data = defaultdict(lambda: {"amount": 0.0, "count": 0})
         for t, amount in tx_amounts:
             category_data[t.category]["amount"] += amount

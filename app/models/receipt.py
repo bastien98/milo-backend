@@ -11,7 +11,6 @@ from app.models.enums import ReceiptStatus, ReceiptSource
 if TYPE_CHECKING:
     from app.models.user import User
     from app.models.transaction import Transaction
-    from app.models.expense_split import ExpenseSplit
 
 
 class Receipt(Base):
@@ -68,7 +67,4 @@ class Receipt(Base):
     user: Mapped["User"] = relationship("User", back_populates="receipts")
     transactions: Mapped[List["Transaction"]] = relationship(
         "Transaction", back_populates="receipt", cascade="all, delete-orphan"
-    )
-    expense_split: Mapped[Optional["ExpenseSplit"]] = relationship(
-        "ExpenseSplit", back_populates="receipt", cascade="all, delete-orphan", uselist=False
     )
