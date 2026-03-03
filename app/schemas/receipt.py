@@ -8,7 +8,7 @@ from app.models.enums import ReceiptStatus, ReceiptSource
 
 class ExtractedItem(BaseModel):
     item_id: str  # UUID from the transactions table
-    item_name: str  # Raw receipt text (unmodified line item)
+    item_name: str  # Product description text from receipt (original casing)
     item_price: float
     quantity: int = 1
     unit_price: Optional[float] = None
@@ -31,6 +31,7 @@ class ExtractedItem(BaseModel):
     dp_product_variant: Optional[str] = None
     dp_article_code: Optional[str] = None
     dp_is_bio: bool = False
+    lookup_key: Optional[str] = None
 
 
 class ReceiptUploadResponse(BaseModel):
@@ -98,7 +99,7 @@ class GroupedReceiptTransaction(BaseModel):
     """A single transaction within a grouped receipt."""
 
     item_id: str  # UUID from the transactions table
-    item_name: str  # Raw receipt text (unmodified line item)
+    item_name: str  # Product description text from receipt (original casing)
     item_price: float
     quantity: int
     unit_price: Optional[float]
@@ -121,6 +122,7 @@ class GroupedReceiptTransaction(BaseModel):
     dp_product_variant: Optional[str] = None
     dp_article_code: Optional[str] = None
     dp_is_bio: bool = False
+    lookup_key: Optional[str] = None
 
 
 class GroupedReceipt(BaseModel):

@@ -57,7 +57,7 @@ def _get_user_semaphore(user_id: str) -> asyncio.Semaphore:
 class ExtractedLineItem:
     """Represents a line item extracted and normalized by Gemini Vision."""
 
-    item_name: str  # Raw text exactly as on receipt (no modifications)
+    item_name: str  # Product description text from receipt (original casing, no codes/prices)
     normalized_name: str  # Cleaned, semantic name (always lowercase)
     normalized_brand: Optional[str]  # Brand name only (lowercase, for semantic search)
     is_premium: bool  # True if premium/expensive brand, False if store/house brand
@@ -80,6 +80,14 @@ class ExtractedLineItem:
     dp_article_code: Optional[str]  # Article/PLU/barcode code from receipt
     dp_is_bio: bool  # True if organic (bio/biologisch/biologique)
 
+    @property
+    def lookup_key(self) -> str:
+        """Deterministic composite key for receipt-item → SKU mapping."""
+        pack_qty = self.dp_pack_quantity or 1
+        pack_size = self.dp_pack_size if self.dp_pack_size is not None else ""
+        pack_unit = self.dp_pack_unit or ""
+        return f"{self.normalized_name}|{pack_qty}|{pack_size}|{pack_unit}"
+
 
 @dataclass
 class GeminiExtractionResult:
@@ -99,14 +107,14 @@ class GeminiExtractionResult:
 # so the model cannot return a bare array instead of the expected object.
 class _LineItemSchema(PydanticBaseModel):
     item_name: str = Field(
-        description="Raw text exactly as it appears on the receipt — no cleaning, no normalization"
+        description="Product description text from the receipt line in original casing. Include brand, product name, variant, and size/packaging info. Exclude article codes, PLU numbers, quantity counts, and prices."
     )
     normalized_name: str = Field(
         description="Clean, full product name in lowercase. Keep brand name. Remove quantities (450ml, 1L, 500g), packaging types (PET, Blik, Fles), and receipt codes. Maintain original language (Dutch/French)"
     )
     normalized_brand: Optional[str] = Field(
         default=None,
-        description="Brand/manufacturer name only, lowercase. For store/house brands (Boni, 365, Everyday, Cara), use the house brand name. null if no brand identifiable"
+        description="Brand/manufacturer name only, lowercase. For store/house brands (Boni, 365, Everyday, Cara), use the house brand name. For fresh/ready-made items (traiteur, deli, bakery, prepared meals) without a visible brand, use 'in-house'. null only for truly generic items (loose fruit, vegetables by weight)"
     )
     is_premium: bool = Field(
         description="true for premium/name brands (Coca-Cola, Jupiler, Danone, Lay's), false for store/house brands (Boni, 365, Everyday, Cara) and unbranded items"
@@ -249,7 +257,16 @@ class GeminiVisionService:
 
 ### Line Items - Extract these fields:
 
-1. **item_name**: Raw text exactly as appears on receipt (including codes, quantities, etc.). This is the unmodified line item text from the receipt — no cleaning, no normalization.
+1. **item_name**: Product description text from the receipt line, in original casing (NOT lowercase).
+   - KEEP: brand name, product name, variant/flavor, size/weight info (500g, 1L, 6X33CL), packaging type (PET, Blik)
+   - REMOVE: article codes (A 14515), PLU numbers, quantity counts (the "1" or "2x" at the end), unit prices and total prices
+   - Preserve the original casing and language from the receipt
+   - Examples:
+     - "A 14515 BONI BIO volkorenspaghetti 500g 1 0,99 0,99" → "BONI BIO volkorenspaghetti 500g"
+     - "JUPILER PILS 6X33CL PET" → "JUPILER PILS 6X33CL PET"
+     - "123456 COCA COLA ZERO 1,5L PET 2 3,58" → "COCA COLA ZERO 1,5L PET"
+     - "LAY'S CHIPS PAPRIKA 250G" → "LAY'S CHIPS PAPRIKA 250G"
+     - "BANANEN 1KG" → "BANANEN 1KG"
 
 2. **normalized_name**: Clean, full product name used for product matching. This is the primary field for matching receipt items to product databases (EAN lookup).
    - ALWAYS output in **lowercase**
@@ -278,7 +295,8 @@ class GeminiVisionService:
 3. **normalized_brand**: The brand/manufacturer name ONLY, in **lowercase**. Used as a pre-filter for product matching.
    - Extract the product's brand/manufacturer, NOT the store name
    - For store/house brands (Boni, 365, Everyday, Cara, Delhaize brand), use the house brand name
-   - If no brand is identifiable, use null
+   - If a fresh/ready-made food item (traiteur, deli, bakery, prepared meals) has no visible brand, default to "in-house"
+   - Only use null for truly generic unbranded items (loose fruit, vegetables by weight)
    - Examples:
      - "JUPILER PILS 6X33CL PET" → "jupiler"
      - "BONI VOLLE MELK 1L" → "boni"
@@ -289,6 +307,8 @@ class GeminiVisionService:
      - "CARA PILS 6X33CL" → "cara"
      - "365 PILS 6X33CL" → "365"
      - "ABSOLUT VODKA 35CL" → "absolut"
+     - "KIP KYOTO MET RIJST" → "in-house"
+     - "BAMI OMELET KIP GROENTEN" → "in-house"
      - "BANANEN 1KG" → null
 
 4. **is_premium**: Boolean flag for brand tier classification:
@@ -450,7 +470,7 @@ Extract all line items from this receipt.'''
         try:
             logger.info(
                 f"Calling generate_content: model={self.MODEL}, "
-                f"file={uploaded_file.name}, timeout=300s, AFC=disabled"
+                f"file={uploaded_file.name}, timeout=900s, AFC=disabled"
             )
             t0 = time.monotonic()
             async with _get_user_semaphore(user_id):
@@ -471,7 +491,7 @@ Extract all line items from this receipt.'''
                             media_resolution=types.MediaResolution.MEDIA_RESOLUTION_MEDIUM,
                         ),
                     ),
-                    timeout=300,  # 5 minutes — thinking models can be slow
+                    timeout=900,  # 15 minutes — thinking models can be slow
                 )
             generate_elapsed = time.monotonic() - t1
             total_elapsed = time.monotonic() - t0
@@ -531,7 +551,7 @@ Extract all line items from this receipt.'''
 
         except asyncio.TimeoutError:
             elapsed = time.monotonic() - t0
-            logger.error(f"Gemini generate_content timed out after {elapsed:.1f}s (limit=300s)")
+            logger.error(f"Gemini generate_content timed out after {elapsed:.1f}s (limit=900s)")
             raise GeminiAPIError(
                 "Receipt extraction timed out",
                 details={"error_type": "timeout", "elapsed_seconds": elapsed},

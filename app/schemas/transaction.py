@@ -36,6 +36,7 @@ class TransactionResponse(TransactionBase):
     created_at: datetime
     normalized_name: Optional[str] = None
     normalized_brand: Optional[str] = None
+    lookup_key: Optional[str] = None
 
     class Config:
         from_attributes = True

@@ -59,16 +59,16 @@ async def process_receipt_background(
             await session.commit()
             logger.info(f"⏱ bg_mark_processing: {time.monotonic() - t0:.3f}s")
 
-            # Step 2: Upload PDF to Gemini Files API and extract (6 min max)
+            # Step 2: Upload PDF to Gemini Files API and extract (15 min max)
             t0 = time.monotonic()
             gemini_service = GeminiVisionService()
             try:
                 extraction_result = await asyncio.wait_for(
                     gemini_service.extract_receipt(file_content, user_id=user_id),
-                    timeout=360,
+                    timeout=900,
                 )
             except asyncio.TimeoutError:
-                raise Exception("Receipt processing timed out after 6 minutes")
+                raise Exception("Receipt processing timed out after 15 minutes")
             logger.info(
                 f"⏱ bg_gemini_extraction: {time.monotonic() - t0:.3f}s - "
                 f"vendor={extraction_result.vendor_name}, "
@@ -119,6 +119,7 @@ async def process_receipt_background(
                     dp_product_variant=item.dp_product_variant,
                     dp_article_code=item.dp_article_code,
                     dp_is_bio=item.dp_is_bio,
+                    lookup_key=item.lookup_key,
                 )
                 for item in extraction_result.line_items
             ]
