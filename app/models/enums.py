@@ -46,3 +46,9 @@ class Language(str, Enum):
     ENGLISH = "en"
     DUTCH = "nl"
     FRENCH = "fr"
+
+
+class CashbackStatus(str, Enum):
+    PENDING = "pending"
+    CONFIRMED = "confirmed"
+    PAID_OUT = "paid_out"

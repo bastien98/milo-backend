@@ -161,8 +161,22 @@ async def process_receipt_background(
                 store_branch=extraction_result.store_branch,
             )
             await session.commit()
-            invalidate_user(user_id)
             logger.info(f"⏱ bg_mark_completed: {time.monotonic() - t0:.3f}s")
+
+            # Step 7: Award cashback
+            if final_total and final_total > 0:
+                t0 = time.monotonic()
+                from app.services.cashback_service import CashbackService
+                cashback_svc = CashbackService(session)
+                await cashback_svc.award_cashback_for_receipt(
+                    user_id=user_id,
+                    receipt_id=receipt_id,
+                    receipt_total=final_total,
+                )
+                await session.commit()
+                logger.info(f"⏱ bg_award_cashback: {time.monotonic() - t0:.3f}s")
+
+            invalidate_user(user_id)
 
             logger.info(
                 f"⏱ bg_total: {time.monotonic() - task_start:.3f}s — "

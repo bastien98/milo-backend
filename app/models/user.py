@@ -15,6 +15,7 @@ if TYPE_CHECKING:
     from app.models.user_enriched_profile import UserEnrichedProfile
     from app.models.budget import Budget
     from app.models.budget_history import BudgetHistory
+    from app.models.cashback import CashbackTransaction, CashbackBalance
 
 
 class User(Base):
@@ -54,4 +55,10 @@ class User(Base):
     )
     enriched_profile: Mapped[Optional["UserEnrichedProfile"]] = relationship(
         "UserEnrichedProfile", back_populates="user", cascade="all, delete-orphan", uselist=False
+    )
+    cashback_transactions: Mapped[List["CashbackTransaction"]] = relationship(
+        "CashbackTransaction", back_populates="user", cascade="all, delete-orphan"
+    )
+    cashback_balance: Mapped[Optional["CashbackBalance"]] = relationship(
+        "CashbackBalance", back_populates="user", cascade="all, delete-orphan", uselist=False
     )

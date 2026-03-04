@@ -1,7 +1,7 @@
 from fastapi import APIRouter
 
 # Import v2-specific endpoints (using Gemini)
-from app.api.v2 import chat, receipts, periods, budgets, wallet_pass, categories, promos
+from app.api.v2 import chat, receipts, periods, budgets, wallet_pass, categories, promos, cashback
 
 # Reuse v1 endpoints that don't interact with LLMs
 from app.api.v1 import health, transactions, analytics, rate_limit, profile
@@ -45,3 +45,6 @@ api_router.include_router(categories.router, prefix="/categories", tags=["v2 - c
 
 # Promos - personalized promo recommendations
 api_router.include_router(promos.router, prefix="/promos", tags=["v2 - promos"])
+
+# Cashback - progressive cashback wallet
+api_router.include_router(cashback.router, prefix="/cashback", tags=["v2 - cashback"])
