@@ -577,23 +577,6 @@ def _build_llm_context(profile: dict, promo_results: dict[str, list[dict]]) -> s
         ]
         parts.append("Stores:\n" + "\n".join(store_lines))
 
-    if habits.get("avg_health_score") is not None:
-        parts.append(
-            f"Health score: {habits['avg_health_score']}/5 | "
-            f"Premium ratio: {habits.get('premium_brand_ratio', 0):.0%}"
-        )
-
-    ht = habits.get("health_trend")
-    if ht and ht.get("trend"):
-        parts.append(
-            f"Health trend: {ht['trend']} "
-            f"(4w avg: {ht.get('current_4w_avg', '?')} vs prev: {ht.get('previous_4w_avg', '?')})"
-        )
-        parts.append(
-            f"Fresh produce: {ht.get('fresh_produce_pct', 0)}% of food | "
-            f"Ready meals: {ht.get('ready_meals_pct', 0)}%"
-        )
-
     ss = habits.get("savings_summary")
     if ss:
         parts.append(

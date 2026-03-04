@@ -47,58 +47,58 @@ OUTPUT_FOLDER = str(SCRIPT_DIR / "data" / "sample_csvs" / USER_ID)
 # ==========================================
 PRODUCTS = {
     "ALCOHOL": [
-        ("JUPILER BAK 24X25CL", 14.99, 0), ("STELLA ARTOIS 24X25CL", 15.49, 0),
-        ("CARA PILS 24X33CL", 9.99, 0), ("DUVEL 4X33CL", 6.99, 0),
-        ("LEFFE BLOND 6X33CL", 7.49, 0), ("VODKA SMIRNOFF 70CL", 18.99, 0),
-        ("WHISKY JACK DANIELS 70CL", 24.99, 0), ("GORDON'S GIN 70CL", 19.99, 0),
-        ("RODE WIJN BORDEAUX", 6.99, 1), ("WITTE WIJN CHARDONNAY", 5.99, 1)
+        ("JUPILER BAK 24X25CL", 14.99), ("STELLA ARTOIS 24X25CL", 15.49),
+        ("CARA PILS 24X33CL", 9.99), ("DUVEL 4X33CL", 6.99),
+        ("LEFFE BLOND 6X33CL", 7.49), ("VODKA SMIRNOFF 70CL", 18.99),
+        ("WHISKY JACK DANIELS 70CL", 24.99), ("GORDON'S GIN 70CL", 19.99),
+        ("RODE WIJN BORDEAUX", 6.99), ("WITTE WIJN CHARDONNAY", 5.99)
     ],
     "TOBACCO": [
-        ("MARLBORO RED", 8.50, 0), ("CAMEL BLUE", 8.20, 0),
-        ("L&M RED", 7.90, 0), ("ROLLING TOBACCO DRUM 50G", 12.50, 0)
+        ("MARLBORO RED", 8.50), ("CAMEL BLUE", 8.20),
+        ("L&M RED", 7.90), ("ROLLING TOBACCO DRUM 50G", 12.50)
     ],
     "SNACKS_SWEETS": [
-        ("CHIPS LAYS PAPRIKA", 1.99, 1), ("PRINGLES ORIGINAL", 2.49, 1),
-        ("CHOCOLATE COTE D'OR", 2.99, 1), ("HARIBO GOLDBEARS", 1.89, 1),
-        ("BEN & JERRYS COOKIE DOUGH", 5.99, 1)
+        ("CHIPS LAYS PAPRIKA", 1.99), ("PRINGLES ORIGINAL", 2.49),
+        ("CHOCOLATE COTE D'OR", 2.99), ("HARIBO GOLDBEARS", 1.89),
+        ("BEN & JERRYS COOKIE DOUGH", 5.99)
     ],
     "READY_MEALS": [
-        ("LASAGNE BOLOGNESE 400G", 3.99, 2), ("PIZZA MARGHERITA", 2.99, 2),
-        ("SOEP TOMATEN", 2.49, 3), ("FRIKANDEL 4ST", 2.19, 1)
+        ("LASAGNE BOLOGNESE 400G", 3.99), ("PIZZA MARGHERITA", 2.99),
+        ("SOEP TOMATEN", 2.49), ("FRIKANDEL 4ST", 2.19)
     ],
     "DRINKS_SOFT_SODA": [
-        ("COCA COLA 1.5L", 2.19, 1), ("FANTA ORANGE 1.5L", 2.19, 1),
-        ("RED BULL 25CL", 1.49, 0)
+        ("COCA COLA 1.5L", 2.19), ("FANTA ORANGE 1.5L", 2.19),
+        ("RED BULL 25CL", 1.49)
     ],
     "DRINKS_WATER": [
-        ("WATER SPA BLAUW 6X1.5L", 4.99, 5), ("WATER SPA ROOD 6X1.5L", 4.99, 5)
+        ("WATER SPA BLAUW 6X1.5L", 4.99), ("WATER SPA ROOD 6X1.5L", 4.99)
     ],
     "MEAT_FISH": [
-        ("GEHAKT 500G", 4.99, 3), ("KIPFILET 1KG", 9.99, 4),
-        ("BURGER 2ST", 3.49, 2), ("ZALMFILET 200G", 5.99, 5)
+        ("GEHAKT 500G", 4.99), ("KIPFILET 1KG", 9.99),
+        ("BURGER 2ST", 3.49), ("ZALMFILET 200G", 5.99)
     ],
     "DAIRY_EGGS": [
-        ("MELK HALFVOL 1L", 0.99, 4), ("EIEREN 12ST", 2.49, 4),
-        ("KAAS GOUDA", 4.99, 3), ("YOGHURT DANONE", 2.99, 3)
+        ("MELK HALFVOL 1L", 0.99), ("EIEREN 12ST", 2.49),
+        ("KAAS GOUDA", 4.99), ("YOGHURT DANONE", 2.99)
     ],
     "FRESH_PRODUCE": [
-        ("BANANEN 1KG", 1.99, 5), ("APPELS JONAGOLD", 2.49, 5),
-        ("TOMATEN", 1.99, 5), ("KOMKOMMER", 0.89, 5),
-        ("WORTELEN 1KG", 1.29, 5), ("SLA MIX", 1.99, 5)
+        ("BANANEN 1KG", 1.99), ("APPELS JONAGOLD", 2.49),
+        ("TOMATEN", 1.99), ("KOMKOMMER", 0.89),
+        ("WORTELEN 1KG", 1.29), ("SLA MIX", 1.99)
     ],
     "HOUSEHOLD": [
-        ("TOILETPAPIER 12ROL", 5.99, 0), ("AFWASMIDDEL DREFT", 2.99, 0),
-        ("VUILNISZAKKEN", 3.49, 0)
+        ("TOILETPAPIER 12ROL", 5.99), ("AFWASMIDDEL DREFT", 2.99),
+        ("VUILNISZAKKEN", 3.49)
     ],
     "BAKERY": [
-        ("BAGUETTE", 1.19, 3), ("CROISSANTS 4ST", 3.49, 2)
+        ("BAGUETTE", 1.19), ("CROISSANTS 4ST", 3.49)
     ],
     "PANTRY": [
-        ("PASTA SPAGHETTI 500G", 1.29, 3), ("OLIJFOLIE 50CL", 6.99, 4),
-        ("RIJST 1KG", 2.49, 4)
+        ("PASTA SPAGHETTI 500G", 1.29), ("OLIJFOLIE 50CL", 6.99),
+        ("RIJST 1KG", 2.49)
     ],
-    "PERSONAL_CARE": [("TANDPASTA", 2.49, 0), ("SHAMPOO", 3.49, 0)],
-    "FROZEN": [("ERWTJES DIEPVRIES", 1.99, 4)],
+    "PERSONAL_CARE": [("TANDPASTA", 2.49), ("SHAMPOO", 3.49)],
+    "FROZEN": [("ERWTJES DIEPVRIES", 1.99)],
     "BABY_KIDS": [],
     "PET_SUPPLIES": [],
     "OTHER": []
@@ -162,7 +162,7 @@ def generate_user_data():
 
             receipt_total = 0.0
 
-            for category, (name, price, base_health) in basket_items:
+            for category, (name, price) in basket_items:
                 quantity = 2 if category == "ALCOHOL" and random.random() < 0.2 else 1
                 line_total = price * quantity
                 receipt_total += line_total
@@ -179,7 +179,6 @@ def generate_user_data():
                     "category": category,
                     "date": current_date.strftime("%Y-%m-%d"),
                     "created_at": shop_time.strftime("%Y-%m-%d %H:%M:%S.%f") + " +00:00",
-                    "health_score": int(base_health)
                 })
 
             receipts_list.append({

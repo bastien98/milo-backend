@@ -20,10 +20,10 @@ class Transaction(Base):
         String, primary_key=True, default=lambda: str(uuid.uuid4())
     )
     user_id: Mapped[str] = mapped_column(
-        String, ForeignKey("users.id"), nullable=False, index=True
+        String, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True
     )
     receipt_id: Mapped[Optional[str]] = mapped_column(
-        String, ForeignKey("receipts.id"), nullable=True, index=True
+        String, ForeignKey("receipts.id", ondelete="CASCADE"), nullable=True, index=True
     )
 
     # Item details
@@ -34,7 +34,6 @@ class Transaction(Base):
     unit_price: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
 
     # Semantic search fields
-    original_description: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     normalized_name: Mapped[Optional[str]] = mapped_column(
         String(255), nullable=True, index=True
     )
@@ -44,6 +43,7 @@ class Transaction(Base):
     is_premium: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     is_discount: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     is_deposit: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    is_deposit_refund: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     granular_category: Mapped[Optional[str]] = mapped_column(
         String(100), nullable=True, index=True
     )
@@ -53,13 +53,22 @@ class Transaction(Base):
     weight_or_volume: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
     price_per_unit_measure: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
 
-    # Categorization - sub-category display name from categories.csv
+    # Data Platform fields (dp_) — for EAN matching & Pinecone vector search
+    dp_expanded_description: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    dp_pack_quantity: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    dp_pack_size: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    dp_pack_unit: Mapped[Optional[str]] = mapped_column(String(5), nullable=True)
+    dp_product_variant: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
+    dp_article_code: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)
+    dp_is_bio: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+
+    # SKU lookup key (composite: normalized_name|pack_qty|pack_size|pack_unit)
+    lookup_key: Mapped[Optional[str]] = mapped_column(String(255), nullable=True, index=True)
+
+    # Categorization - parent category name from app.core.categories
     category: Mapped[str] = mapped_column(
         String, nullable=False, index=True
     )
-
-    # Health score (0-5, where 0 is unhealthy and 5 is very healthy)
-    health_score: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
 
     # Date
     date: Mapped[date_type] = mapped_column(Date, nullable=False, index=True)

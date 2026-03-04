@@ -2,7 +2,7 @@ import uuid
 from datetime import datetime
 from typing import TYPE_CHECKING, Optional, List, Any
 
-from sqlalchemy import String, DateTime, Float, ForeignKey, Boolean, Index, UniqueConstraint
+from sqlalchemy import String, DateTime, Float, ForeignKey, Boolean, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.sql import func
@@ -59,5 +59,4 @@ class BudgetHistory(Base):
 
     __table_args__ = (
         UniqueConstraint("user_id", "month", name="uq_budget_history_user_month"),
-        Index("idx_budget_history_user_month", "user_id", "month"),
     )

@@ -1,31 +1,11 @@
 from datetime import date
 from typing import Optional, List
-import re
 
 from sqlalchemy import select, func, and_, delete, or_
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.transaction import Transaction
-
-
-def normalize_category_for_matching(category: str) -> str:
-    """Normalize a category name to match database enum format.
-
-    Handles conversion from display names like "Meat Fish" or "Meat & Fish"
-    to database enum format like "MEAT_FISH".
-    """
-    # Remove special characters and normalize
-    s = category.upper()
-    # Remove parentheses and their contents
-    s = re.sub(r'\([^)]*\)', '', s)
-    # Replace special chars with underscores
-    for ch in "&/-,. ":
-        s = s.replace(ch, "_")
-    # Collapse multiple underscores
-    s = re.sub(r'_+', '_', s)
-    # Strip leading/trailing underscores
-    s = s.strip('_')
-    return s
+from app.core.categories import get_internal_name
 
 
 class TransactionRepository:
@@ -72,19 +52,13 @@ class TransactionRepository:
         if store_name:
             conditions.append(Transaction.store_name == store_name)
         if category:
-            # Resolve display name to all possible raw category names
-            # (e.g., "Bakery" → ["Bakery (Bread, Pistolets)", "Bakery"])
-            from app.services.category_registry import get_category_registry
-            registry = get_category_registry()
-            raw_names = registry.get_raw_names_for_display(category)
-
-            # Build set of all names to match against
-            all_names = list(set([category] + raw_names))
-
-            if len(all_names) == 1:
-                conditions.append(Transaction.category == all_names[0])
+            # Resolve display name or variant to the internal name stored in the DB
+            internal = get_internal_name(category)
+            if internal:
+                conditions.append(Transaction.category == internal)
             else:
-                conditions.append(Transaction.category.in_(all_names))
+                # Fallback: exact match for unknown categories
+                conditions.append(Transaction.category == category)
 
         # Get total count
         count_result = await self.db.execute(
@@ -116,19 +90,26 @@ class TransactionRepository:
         receipt_id: Optional[str] = None,
         quantity: int = 1,
         unit_price: Optional[float] = None,
-        health_score: Optional[int] = None,
         # New fields for semantic search
-        original_description: Optional[str] = None,
         normalized_name: Optional[str] = None,
         normalized_brand: Optional[str] = None,
         is_premium: bool = False,
         is_discount: bool = False,
         is_deposit: bool = False,
+        is_deposit_refund: bool = False,
         granular_category: Optional[str] = None,
         # Unit measure fields
         unit_of_measure: Optional[str] = None,
         weight_or_volume: Optional[float] = None,
         price_per_unit_measure: Optional[float] = None,
+        # Data Platform fields (dp_)
+        dp_expanded_description: Optional[str] = None,
+        dp_pack_quantity: Optional[int] = None,
+        dp_pack_size: Optional[float] = None,
+        dp_pack_unit: Optional[str] = None,
+        dp_product_variant: Optional[str] = None,
+        dp_article_code: Optional[str] = None,
+        dp_is_bio: bool = False,
     ) -> Transaction:
         """Create a new transaction."""
         transaction = Transaction(
@@ -141,24 +122,38 @@ class TransactionRepository:
             unit_price=unit_price,
             category=category,
             date=date,
-            health_score=health_score,
             # New fields
-            original_description=original_description,
             normalized_name=normalized_name,
             normalized_brand=normalized_brand,
             is_premium=is_premium,
             is_discount=is_discount,
             is_deposit=is_deposit,
+            is_deposit_refund=is_deposit_refund,
             granular_category=granular_category,
             # Unit measure fields
             unit_of_measure=unit_of_measure,
             weight_or_volume=weight_or_volume,
             price_per_unit_measure=price_per_unit_measure,
+            # Data Platform fields
+            dp_expanded_description=dp_expanded_description,
+            dp_pack_quantity=dp_pack_quantity,
+            dp_pack_size=dp_pack_size,
+            dp_pack_unit=dp_pack_unit,
+            dp_product_variant=dp_product_variant,
+            dp_article_code=dp_article_code,
+            dp_is_bio=dp_is_bio,
         )
         self.db.add(transaction)
         await self.db.flush()
         await self.db.refresh(transaction)
         return transaction
+
+    async def create_batch(self, transactions: list[Transaction]) -> list[Transaction]:
+        """Create multiple transactions with a single flush (much faster than N individual creates)."""
+        for txn in transactions:
+            self.db.add(txn)
+        await self.db.flush()
+        return transactions
 
     async def update(
         self,
@@ -170,7 +165,6 @@ class TransactionRepository:
         unit_price: Optional[float] = None,
         category: Optional[str] = None,
         date: Optional[date] = None,
-        health_score: Optional[int] = None,
     ) -> Optional[Transaction]:
         """Update a transaction."""
         transaction = await self.get_by_id(transaction_id)
@@ -191,8 +185,6 @@ class TransactionRepository:
             transaction.category = category
         if date is not None:
             transaction.date = date
-        if health_score is not None:
-            transaction.health_score = health_score
 
         await self.db.flush()
         await self.db.refresh(transaction)

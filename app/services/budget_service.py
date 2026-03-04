@@ -14,18 +14,16 @@ from app.schemas.budget import (
     CategoryProgress,
     CategoryAllocation,
 )
-from app.services.split_aware_calculation import SplitAwareCalculation
-from app.services.category_registry import get_category_registry
+from app.core.categories import get_category_id
 
 
 class BudgetService:
     def __init__(self, db: AsyncSession):
         self.db = db
-        self.split_calc = SplitAwareCalculation(db)
 
     @cached(include_month=True)
     async def get_current_month_spend(self, user_id: str) -> float:
-        """Get total spending for the current month (split-adjusted)."""
+        """Get total spending for the current month."""
         today = date.today()
         first_day = today.replace(day=1)
 
@@ -43,13 +41,13 @@ class BudgetService:
         if not transactions:
             return 0.0
 
-        return await self.split_calc.calculate_split_adjusted_spend(user_id, transactions)
+        return round(sum(t.item_price for t in transactions if not t.is_discount and not t.is_deposit), 2)
 
     @cached(include_month=True)
     async def get_current_month_spend_by_category(
         self, user_id: str
     ) -> dict[str, float]:
-        """Get spending by category for the current month (split-adjusted)."""
+        """Get spending by category for the current month."""
         today = date.today()
         first_day = today.replace(day=1)
 
@@ -67,7 +65,13 @@ class BudgetService:
         if not transactions:
             return {}
 
-        return await self.split_calc.calculate_split_adjusted_spend_by_category(user_id, transactions)
+        from collections import defaultdict
+        category_spend: dict[str, float] = defaultdict(float)
+        for t in transactions:
+            if t.is_discount or t.is_deposit:
+                continue
+            category_spend[t.category] += t.item_price
+        return {cat: round(spend, 2) for cat, spend in category_spend.items()}
 
     async def get_budget_progress(
         self, user_id: str, budget: Budget
@@ -87,7 +91,6 @@ class BudgetService:
         days_in_month = calendar.monthrange(today.year, today.month)[1]
 
         category_progress: List[CategoryProgress] = []
-        registry = get_category_registry()
 
         if budget.category_allocations:
             for alloc in budget.category_allocations:
@@ -99,11 +102,11 @@ class BudgetService:
                 is_over_budget = spent_amount > limit_amount
                 over_budget_amount = round(spent_amount - limit_amount, 2) if is_over_budget else None
 
-                category_id = registry.get_category_id(category_name)
+                cat_id = get_category_id(category_name)
 
                 category_progress.append(
                     CategoryProgress(
-                        category_id=category_id,
+                        category_id=cat_id,
                         name=category_name,
                         limit_amount=limit_amount,
                         spent_amount=spent_amount,

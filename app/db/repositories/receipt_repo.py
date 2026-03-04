@@ -70,6 +70,19 @@ class ReceiptRepository:
 
         return receipts, total
 
+    async def find_by_content_hash(self, content_hash: str) -> Optional[Receipt]:
+        """Find any non-failed receipt with the given content hash (global, cross-user).
+
+        Excludes FAILED receipts so users can retry failed uploads.
+        """
+        result = await self.db.execute(
+            select(Receipt).where(
+                Receipt.content_hash == content_hash,
+                Receipt.status != ReceiptStatus.FAILED,
+            ).limit(1)
+        )
+        return result.scalar_one_or_none()
+
     async def create(
         self,
         user_id: str,
@@ -77,6 +90,8 @@ class ReceiptRepository:
         file_type: str,
         file_size: int,
         status: ReceiptStatus = ReceiptStatus.PENDING,
+        storage_key: Optional[str] = None,
+        content_hash: Optional[str] = None,
     ) -> Receipt:
         """Create a new receipt."""
         receipt = Receipt(
@@ -86,6 +101,8 @@ class ReceiptRepository:
             file_size_bytes=file_size,
             status=status,
             source=ReceiptSource.RECEIPT_UPLOAD,
+            storage_key=storage_key,
+            content_hash=content_hash,
         )
         self.db.add(receipt)
         await self.db.flush()
@@ -100,11 +117,13 @@ class ReceiptRepository:
         receipt_date: Optional[date] = None,
         total_amount: Optional[float] = None,
         error_message: Optional[str] = None,
+        error_code: Optional[str] = None,
         processed_at: Optional[datetime] = None,
         receipt_time: Optional[time] = None,
         payment_method: Optional[str] = None,
-        total_savings: Optional[float] = None,
         store_branch: Optional[str] = None,
+        storage_key: Optional[str] = None,
+        content_hash: Optional[str] = None,
     ) -> Optional[Receipt]:
         """Update a receipt."""
         receipt = await self.get_by_id(receipt_id)
@@ -121,16 +140,20 @@ class ReceiptRepository:
             receipt.total_amount = total_amount
         if error_message is not None:
             receipt.error_message = error_message
+        if error_code is not None:
+            receipt.error_code = error_code
         if processed_at is not None:
             receipt.processed_at = processed_at
         if receipt_time is not None:
             receipt.receipt_time = receipt_time
         if payment_method is not None:
             receipt.payment_method = payment_method
-        if total_savings is not None:
-            receipt.total_savings = total_savings
         if store_branch is not None:
             receipt.store_branch = store_branch
+        if storage_key is not None:
+            receipt.storage_key = storage_key
+        if content_hash is not None:
+            receipt.content_hash = content_hash
 
         await self.db.flush()
         await self.db.refresh(receipt)

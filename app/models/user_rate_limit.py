@@ -1,7 +1,7 @@
 from datetime import datetime
 from typing import Optional
 
-from sqlalchemy import Integer, String, DateTime
+from sqlalchemy import Integer, String, DateTime, ForeignKey
 from sqlalchemy.orm import Mapped, mapped_column
 from sqlalchemy.sql import func
 
@@ -15,7 +15,8 @@ class UserRateLimit(Base):
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     firebase_uid: Mapped[str] = mapped_column(
-        String(128), unique=True, nullable=False, index=True
+        String(128), ForeignKey("users.firebase_uid", ondelete="CASCADE"),
+        unique=True, nullable=False, index=True
     )
     messages_used: Mapped[int] = mapped_column(Integer, default=0)
     receipts_used: Mapped[int] = mapped_column(Integer, default=0)

@@ -52,3 +52,15 @@ class GeminiAPIError(ScandaliciousException):
     pass
 
 
+class UnsupportedStoreError(ScandaliciousException):
+    """Raised when receipt is from an unsupported store."""
+
+    pass
+
+
+class DuplicateReceiptError(ScandaliciousException):
+    """Raised when a duplicate receipt is detected via content hash."""
+
+    pass
+
+

@@ -23,7 +23,7 @@ from app.schemas.promo_chat import (
     PromoResult,
     SearchQuery,
 )
-from app.services.categories import CATEGORIES_PROMPT_LIST
+from app.core.categories import CATEGORIES_PROMPT_LIST
 
 logger = logging.getLogger(__name__)
 settings = get_settings()

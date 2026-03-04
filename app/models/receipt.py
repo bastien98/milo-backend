@@ -11,7 +11,6 @@ from app.models.enums import ReceiptStatus, ReceiptSource
 if TYPE_CHECKING:
     from app.models.user import User
     from app.models.transaction import Transaction
-    from app.models.expense_split import ExpenseSplit
 
 
 class Receipt(Base):
@@ -21,7 +20,7 @@ class Receipt(Base):
         String, primary_key=True, default=lambda: str(uuid.uuid4())
     )
     user_id: Mapped[str] = mapped_column(
-        String, ForeignKey("users.id"), nullable=False, index=True
+        String, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True
     )
 
     # File metadata (nullable for bank imports which have no file)
@@ -39,6 +38,7 @@ class Receipt(Base):
         nullable=False
     )
     error_message: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    error_code: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)
 
     # Extracted metadata
     store_name: Mapped[Optional[str]] = mapped_column(String, nullable=True)
@@ -48,8 +48,11 @@ class Receipt(Base):
     # New insights fields
     receipt_time: Mapped[Optional[time]] = mapped_column(Time, nullable=True)
     payment_method: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)
-    total_savings: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
     store_branch: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+
+    # Object storage
+    storage_key: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+    content_hash: Mapped[Optional[str]] = mapped_column(String(64), nullable=True, index=True)
 
     # Timestamps
     created_at: Mapped[datetime] = mapped_column(
@@ -63,7 +66,4 @@ class Receipt(Base):
     user: Mapped["User"] = relationship("User", back_populates="receipts")
     transactions: Mapped[List["Transaction"]] = relationship(
         "Transaction", back_populates="receipt", cascade="all, delete-orphan"
-    )
-    expense_split: Mapped[Optional["ExpenseSplit"]] = relationship(
-        "ExpenseSplit", back_populates="receipt", cascade="all, delete-orphan", uselist=False
     )

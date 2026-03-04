@@ -34,16 +34,6 @@ help:
 
 .PHONY: deploy
 deploy:
-ifeq ($(ENV),production)
-	@echo "⚠️  WARNING: You are about to deploy to PRODUCTION!"
-	@echo "This action should only be done manually by authorized personnel."
-	@echo ""
-	@read -p "Type 'yes' to confirm production deployment: " confirm; \
-	if [ "$$confirm" != "yes" ]; then \
-		echo "❌ Production deployment cancelled."; \
-		exit 1; \
-	fi
-endif
 	@echo "Deploying to $(RAILWAY_ENV)..."
 	@railway up --service $(SERVICE) --environment $(RAILWAY_ENV)
 

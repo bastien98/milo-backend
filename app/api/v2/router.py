@@ -1,7 +1,7 @@
 from fastapi import APIRouter
 
 # Import v2-specific endpoints (using Gemini)
-from app.api.v2 import chat, receipts, periods, budgets, expense_splits, wallet_pass, categories, promos
+from app.api.v2 import chat, receipts, periods, budgets, wallet_pass, categories, promos
 
 # Reuse v1 endpoints that don't interact with LLMs
 from app.api.v1 import health, transactions, analytics, rate_limit, profile
@@ -36,9 +36,6 @@ api_router.include_router(profile.router, prefix="/profile", tags=["v2 - profile
 
 # Budgets - V2 specific endpoint for budget tracking
 api_router.include_router(budgets.router, prefix="/budgets", tags=["v2 - budgets"])
-
-# Expense Splits - Split expenses among friends
-api_router.include_router(expense_splits.router, prefix="/expense-splits", tags=["v2 - expense-splits"])
 
 # Wallet Pass - Apple Wallet pass creation
 api_router.include_router(wallet_pass.router, tags=["v2 - wallet-pass"])

@@ -3,44 +3,12 @@ from datetime import date
 
 from pydantic import BaseModel
 
-from app.services.category_registry import get_category_registry, GROUP_COLORS
-
-
-# Legacy category color mapping for Pie Chart visualization
-# Kept for backward compatibility with old category names
-CATEGORY_COLORS: Dict[str, str] = {
-    "Meat & Fish": "#FF6B6B",
-    "Alcohol": "#9B59B6",
-    "Drinks (Soft/Soda)": "#3498DB",
-    "Drinks (Water)": "#5DADE2",
-    "Household": "#95A5A6",
-    "Snacks & Sweets": "#F39C12",
-    "Fresh Produce": "#2ECC71",
-    "Dairy & Eggs": "#F5B041",
-    "Ready Meals": "#E74C3C",
-    "Bakery": "#D4AC0D",
-    "Pantry": "#8D6E63",
-    "Personal Care": "#EC407A",
-    "Frozen": "#00BCD4",
-    "Baby & Kids": "#FF8A65",
-    "Pet Supplies": "#A1887F",
-    "Tobacco": "#607D8B",
-    "Other": "#BDC3C7",
-}
+from app.core.categories import get_group_color
 
 
 def get_category_color(sub_category_name: str) -> str:
-    """Get hex color for a sub-category based on its group.
-
-    Falls back to legacy CATEGORY_COLORS if not found in registry,
-    then to default gray.
-    """
-    # Try legacy mapping first for backward compatibility
-    if sub_category_name in CATEGORY_COLORS:
-        return CATEGORY_COLORS[sub_category_name]
-    # Use registry group color
-    registry = get_category_registry()
-    return registry.get_group_color(sub_category_name)
+    """Get hex color for a category based on its group."""
+    return get_group_color(sub_category_name)
 
 
 class PieChartCategory(BaseModel):
@@ -51,7 +19,6 @@ class PieChartCategory(BaseModel):
     color_hex: str
     percentage: float
     transaction_count: int
-    average_health_score: Optional[float] = None
 
 
 class PieChartStore(BaseModel):
@@ -60,7 +27,6 @@ class PieChartStore(BaseModel):
     total_spent: float
     percentage: float
     visit_count: int
-    average_health_score: Optional[float] = None
 
 
 class PieChartSummaryResponse(BaseModel):
@@ -77,7 +43,6 @@ class StoreSpending(BaseModel):
     amount_spent: float
     store_visits: int
     percentage: float
-    average_health_score: Optional[float] = None  # Average health score for this store (0-5)
 
 
 class PeriodSummary(BaseModel):
@@ -87,7 +52,6 @@ class PeriodSummary(BaseModel):
     total_spend: float
     transaction_count: int
     stores: List[StoreSpending]
-    average_health_score: Optional[float] = None  # Average health score for all food items (0-5)
 
 
 class CategorySpending(BaseModel):
@@ -95,7 +59,6 @@ class CategorySpending(BaseModel):
     spent: float
     percentage: float
     transaction_count: int
-    average_health_score: Optional[float] = None  # Average health score for this category (0-5)
     group: Optional[str] = None  # Top-level group name (e.g., "Food & Dining")
     group_color_hex: Optional[str] = None  # Hex color for the group (e.g., "#2ECC71")
     group_icon: Optional[str] = None  # SF Symbol icon for the group (e.g., "fork.knife")
@@ -107,7 +70,6 @@ class CategoryBreakdown(BaseModel):
     end_date: date
     total_spend: float
     categories: List[CategorySpending]
-    average_health_score: Optional[float] = None  # Overall average health score (0-5)
 
 
 class StoreBreakdown(BaseModel):
@@ -118,7 +80,6 @@ class StoreBreakdown(BaseModel):
     total_store_spend: float
     store_visits: int
     categories: List[CategorySpending]
-    average_health_score: Optional[float] = None  # Average health score at this store (0-5)
     total_items: int = 0  # Sum of all item quantities for this store in the period
     average_item_price: Optional[float] = None  # total_store_spend / total_items
 
@@ -129,7 +90,6 @@ class SpendingTrend(BaseModel):
     end_date: date
     total_spend: float
     transaction_count: int
-    average_health_score: Optional[float] = None  # Average health score for this period (0-5)
 
 
 class TrendsResponse(BaseModel):
@@ -147,7 +107,6 @@ class PeriodMetadata(BaseModel):
     store_count: int
     transaction_count: int
     total_items: int
-    average_health_score: Optional[float] = None
 
 
 class PeriodsResponse(BaseModel):
@@ -171,7 +130,6 @@ class AggregateAverages(BaseModel):
     average_spend_per_period: float
     average_transaction_value: float
     average_item_price: float
-    average_health_score: Optional[float] = None
     average_receipts_per_period: float
     average_transactions_per_period: float
     average_items_per_receipt: float
@@ -185,30 +143,10 @@ class PeriodExtreme(BaseModel):
     total_spend: float
 
 
-class HealthScoreExtreme(BaseModel):
-    """Represents an extreme (highest/lowest) health score period."""
-    period: str
-    period_start: date
-    period_end: date
-    average_health_score: float
-
-
 class AggregateExtremes(BaseModel):
     """Extreme values (max/min) across the aggregate period."""
     max_spending_period: Optional[PeriodExtreme] = None
     min_spending_period: Optional[PeriodExtreme] = None
-    highest_health_score_period: Optional[HealthScoreExtreme] = None
-    lowest_health_score_period: Optional[HealthScoreExtreme] = None
-
-
-class HealthScoreDistribution(BaseModel):
-    """Distribution of health scores across transactions."""
-    score_1: int = 0  # Unhealthy
-    score_2: int = 0
-    score_3: int = 0  # Neutral
-    score_4: int = 0
-    score_5: int = 0  # Healthy
-    unscored: int = 0
 
 
 class AggregateResponse(BaseModel):
@@ -224,7 +162,6 @@ class AggregateResponse(BaseModel):
 
     top_categories: List[CategorySpending]
     top_stores: List[StoreSpending]
-    health_score_distribution: HealthScoreDistribution
 
 
 # ============== All-Time Analytics Schemas ==============
@@ -249,7 +186,6 @@ class TopCategory(BaseModel):
     total_spent: float
     percentage: float
     transaction_count: int
-    average_health_score: Optional[float] = None
     rank: int
 
 
@@ -260,7 +196,6 @@ class AllTimeResponse(BaseModel):
     total_spend: float
     total_transactions: int
     average_item_price: Optional[float] = None
-    average_health_score: Optional[float] = None
     top_stores_by_visits: List[StoreByVisits]
     top_stores_by_spend: List[StoreBySpend]
     top_categories: List[TopCategory]
@@ -276,7 +211,6 @@ class YearStoreSpending(BaseModel):
     amount_spent: float
     store_visits: int
     percentage: float
-    average_health_score: Optional[float] = None
 
 
 class YearMonthlyBreakdown(BaseModel):
@@ -285,7 +219,6 @@ class YearMonthlyBreakdown(BaseModel):
     month_number: int  # 1-12
     total_spend: float
     receipt_count: int
-    average_health_score: Optional[float] = None
 
 
 class YearCategorySpending(BaseModel):
@@ -294,7 +227,6 @@ class YearCategorySpending(BaseModel):
     spent: float
     percentage: float
     transaction_count: int
-    average_health_score: Optional[float] = None
 
 
 class YearSummaryResponse(BaseModel):
@@ -306,7 +238,6 @@ class YearSummaryResponse(BaseModel):
     transaction_count: int
     receipt_count: int
     total_items: int
-    average_health_score: Optional[float] = None
     stores: List[YearStoreSpending]
     monthly_breakdown: Optional[List[YearMonthlyBreakdown]] = None
     top_categories: List[YearCategorySpending]

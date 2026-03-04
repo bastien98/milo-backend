@@ -6,7 +6,11 @@ from google import genai
 from google.genai import types
 
 from app.core.exceptions import GeminiAPIError
-from app.services.category_registry import get_category_registry
+from app.core.categories import (
+    is_valid_category,
+    find_closest_match,
+    PARENT_CATEGORIES_PROMPT_LIST,
+)
 from app.config import get_settings
 from app.services.veryfi_service import VeryfiLineItem
 
@@ -15,13 +19,12 @@ settings = get_settings()
 
 @dataclass
 class CategorizedItem:
-    """Represents a categorized item with health score."""
+    """Represents a categorized item."""
     item_name: str
     item_price: float
     quantity: int
     unit_price: Optional[float]
     category: str
-    health_score: Optional[int]  # 0-5, None for non-food items
 
 
 @dataclass
@@ -32,12 +35,12 @@ class CategorizationResult:
 
 
 class CategorizationServiceGemini:
-    """Google Gemini integration for categorizing items and assigning health scores."""
+    """Google Gemini integration for categorizing grocery items."""
 
     MODEL = "gemini-2.0-flash"
     MAX_TOKENS = 4096
 
-    SYSTEM_PROMPT = """You are a grocery receipt categorization assistant. Given a store name and list of items from a grocery receipt, clean up the data, categorize each item into one of the grocery sub-categories below, assign a health score, and DEDUPLICATE items.
+    SYSTEM_PROMPT = """You are a grocery receipt categorization assistant. Given a store name and list of items from a grocery receipt, clean up the data, categorize each item into one of the grocery sub-categories below, and DEDUPLICATE items.
 
 IMPORTANT - MULTI-SECTION RECEIPT HANDLING:
 Receipt images may consist of multiple overlapping sections captured from a long receipt. This means the SAME LINE ITEM may appear multiple times in the input list due to overlap between sections. You MUST identify and merge these duplicates:
@@ -65,56 +68,22 @@ For each UNIQUE item (after deduplication), provide:
    - Keep brand names if recognizable (e.g., "Coca-Cola", "Danone")
    - Use title case for proper formatting
 
-2. category: Classify into EXACTLY one of these grocery sub-categories (use the exact string):
+2. category: Classify into EXACTLY one of these grocery categories (use the exact string):
 
-   FRESH FOOD:
-   - "Fruits" (fresh fruits, berries, citrus, bananas, apples, grapes)
-   - "Vegetables" (fresh vegetables, herbs, salads, mushrooms, onions, potatoes)
-   - "Meat" (beef, pork, chicken, poultry, lamb, charcuterie, sausages)
-   - "Seafood" (fish, shrimp, mussels, salmon, tuna, crab, shellfish)
-   - "Dairy & Eggs" (milk, cheese, yogurt, eggs, butter, cream)
-   - "Bakery" (bread, pastries, croissants, baguettes)
+""" + PARENT_CATEGORIES_PROMPT_LIST + """
 
-   PANTRY & FROZEN:
-   - "Pantry" (pasta, rice, oil, canned goods, spices, sugar, flour, sauces, condiments)
-   - "Frozen" (frozen vegetables, frozen meals, ice cream, frozen pizza)
-   - "Ready Meals" (prepared foods, salads, soups, pizza, lasagna, deli items)
+   IMPORTANT: Use the EXACT category string from the list above, including any text in parentheses.
 
-   SNACKS & BEVERAGES:
-   - "Snacks" (chips, cookies, biscuits, nuts as snacks, crackers, popcorn)
-   - "Candy" (chocolate, candy, sweets, gummy bears, lollipops, confectionery)
-   - "Drinks" (sodas, juices, energy drinks, water, coffee, tea)
-   - "Alcohol" (beer, wine, spirits, vodka, whisky, cider, including deposit/leeggoed)
-
-   HOUSEHOLD & CARE:
-   - "Household" (cleaning products, paper towels, bags, detergent, sponges)
-   - "Personal Care" (shampoo, soap, dental care, deodorant, razors)
-
-   OTHER:
-   - "Baby & Kids" (baby food, formula, baby snacks)
-   - "Pet Supplies" (pet food, pet treats, pet accessories)
-   - "Tobacco" (cigarettes, rolling tobacco, lighters, rolling papers, filters, e-cigarettes, vapes)
-   - "Other" (anything that doesn't fit the above categories)
-
-3. health_score: Rate healthiness from 0 to 5 for ALL food items:
-   - 5: Very healthy (fresh vegetables, fruits, water, plain nuts)
-   - 4: Healthy (whole grains, lean proteins, eggs, plain dairy)
-   - 3: Moderately healthy (bread, pasta, cheese, some ready meals)
-   - 2: Less healthy (processed meats, sweetened drinks, some snacks)
-   - 1: Unhealthy (chips, candy, cookies, sodas, sugary cereals)
-   - 0: Very unhealthy (alcohol, energy drinks, heavily processed foods)
-   For non-food items (household, personal care, tobacco, pet supplies), set health_score: null
-
-4. original_indices: List of indices from the input that correspond to this item.
+3. original_indices: List of indices from the input that correspond to this item.
    - For unique items: single index, e.g., [0]
    - For duplicates found in overlapping sections: all indices, e.g., [2, 7, 12]
 
 IMPORTANT:
 - Belgian receipts may have Dutch/French product names - keep in the original language but clean up the text
-- Deposit items (leeggoed/vidange) should be categorized with the related product (usually "Alcohol" or "Drinks")
+- Deposit items (leeggoed/vidange) should be categorized as "Deposits (Statiegeld/Vidange)"
 - Use the item type hint if provided (e.g., "food", "alcohol", "product")
 - The number of items in output should be LESS than or EQUAL to input if duplicates were found
-- You MUST use the EXACT sub-category string from the list above (e.g., "Fruits" not "Fresh Produce")
+- You MUST use the EXACT category string from the list above (e.g., "Fruits" not "Fresh Produce")
 
 Return ONLY valid JSON with this exact format:
 {
@@ -123,14 +92,12 @@ Return ONLY valid JSON with this exact format:
     {
       "original_indices": [0],
       "item_name": "Clean Product Name",
-      "category": "Fruits",
-      "health_score": 5
+      "category": "Fruits"
     },
     {
       "original_indices": [1, 5, 9],
       "item_name": "Merged Duplicate Product",
-      "category": "Dairy & Eggs",
-      "health_score": 4
+      "category": "Dairy, Eggs & Cheese"
     }
   ]
 }"""
@@ -145,7 +112,7 @@ Return ONLY valid JSON with this exact format:
         self, items: List[VeryfiLineItem], vendor_name: Optional[str] = None
     ) -> CategorizationResult:
         """
-        Categorize items and assign health scores using Gemini.
+        Categorize items using Gemini.
 
         Args:
             items: List of VeryfiLineItem from OCR extraction
@@ -254,20 +221,12 @@ Return ONLY valid JSON with this exact format:
             if primary_item.total is None and primary_item.price is None:
                 continue
 
-            # Parse category with registry validation
+            # Parse category with validation
             category_str = cat_data.get("category", "Unknown Transaction")
-            registry = get_category_registry()
-            if not registry.is_valid(category_str):
+            if not is_valid_category(category_str):
                 # Try fuzzy matching
-                matched = registry.find_closest_match(category_str)
+                matched = find_closest_match(category_str)
                 category_str = matched if matched else "Unknown Transaction"
-
-            # Parse health score
-            health_score_raw = cat_data.get("health_score")
-            if health_score_raw is not None:
-                health_score = max(0, min(5, int(health_score_raw)))
-            else:
-                health_score = None
 
             # Get cleaned item name from Gemini, fallback to raw description
             cleaned_name = cat_data.get("item_name") or primary_item.description
@@ -284,7 +243,6 @@ Return ONLY valid JSON with this exact format:
                     quantity=quantity,
                     unit_price=float(unit_price) if unit_price else None,
                     category=category_str,
-                    health_score=health_score,
                 )
             )
 

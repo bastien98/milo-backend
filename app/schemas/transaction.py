@@ -13,7 +13,6 @@ class TransactionBase(BaseModel):
     unit_price: Optional[float] = None
     category: str
     date: date
-    health_score: Optional[int] = None  # 0-5, None for non-food items
 
 
 class TransactionCreate(TransactionBase):
@@ -28,7 +27,6 @@ class TransactionUpdate(BaseModel):
     unit_price: Optional[float] = None
     category: Optional[str] = None
     date: Optional[date] = None
-    health_score: Optional[int] = None
 
 
 class TransactionResponse(TransactionBase):
@@ -36,9 +34,9 @@ class TransactionResponse(TransactionBase):
     user_id: str
     receipt_id: Optional[str] = None
     created_at: datetime
-    original_description: Optional[str] = None
     normalized_name: Optional[str] = None
     normalized_brand: Optional[str] = None
+    lookup_key: Optional[str] = None
 
     class Config:
         from_attributes = True

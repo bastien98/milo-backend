@@ -8,7 +8,14 @@ import calendar
 from app.api.deps import get_db, get_current_db_user
 from app.models.user import User
 from app.models.transaction import Transaction
-from app.services.category_registry import get_category_registry
+from app.core.categories import (
+    get_hierarchy,
+    get_category_info,
+    get_display_name,
+    get_category_color,
+    get_category_icon,
+    get_category_id,
+)
 
 router = APIRouter()
 
@@ -18,8 +25,7 @@ async def get_category_hierarchy(
     current_user: User = Depends(get_current_db_user),
 ):
     """Get the full category hierarchy (groups, categories, sub-categories)."""
-    registry = get_category_registry()
-    return registry.get_hierarchy()
+    return get_hierarchy()
 
 
 @router.get("/used")
@@ -34,8 +40,6 @@ async def get_used_categories(
     If month/year provided, returns categories used in that month.
     If not provided, returns all categories the user has ever used.
     """
-    registry = get_category_registry()
-
     # Build query
     conditions = [Transaction.user_id == current_user.id]
 
@@ -62,17 +66,17 @@ async def get_used_categories(
     used_categories = []
     for row in rows:
         sub_category = row.category
-        info = registry.get_info(sub_category)
+        info = get_category_info(sub_category)
         used_categories.append({
             "sub_category": sub_category,
-            "display_name": registry.get_display_name(sub_category),
-            "category": info.category if info else "Uncategorized",
+            "display_name": get_display_name(sub_category),
+            "category": info.name if info else "Uncategorized",
             "group": info.group if info else "Miscellaneous",
             "total_spent": float(row.total_spent),
             "transaction_count": row.transaction_count,
-            "color_hex": registry.get_group_color(sub_category),
-            "icon": registry.get_group_icon(sub_category),
-            "category_id": registry.get_category_id(sub_category),
+            "color_hex": get_category_color(sub_category),
+            "icon": get_category_icon(sub_category),
+            "category_id": get_category_id(sub_category),
         })
 
     return {"categories": used_categories}
