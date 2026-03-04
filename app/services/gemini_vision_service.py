@@ -131,14 +131,27 @@ class _LineItemSchema(PydanticBaseModel):
         default=None,
         description=(
             "Brand/manufacturer name only, lowercase. NOT the store chain name. "
-            "For store/house brands (Boni, 365, Everyday, Cara), use the house brand name. "
+            "For store/house brands, use the house brand name: "
+            "Colruyt: Boni, Boni Selection, Boni Bio, Everyday. "
+            "Delhaize: 365, Delhaize, P'tits Lions. "
+            "Carrefour: Simpl, Carrefour Bio, Carrefour Classic. "
+            "ALL Lidl sub-brands are house brands (Milbona, Pikok, Chef Select, Deluxe, Freeway, Vemondo, Solevita, Alesto, Snack Day, Combino, Trattoria Alfredo, Fin Carré, etc.). "
+            "ALL Aldi sub-brands are house brands (Milsani, Moser Roth, Gourmet, Cucina, Lyttos, Barissimo, River, Sun Snacks, Bon Gelati, Choceur, etc.). "
+            "AH: AH, AH Basic, AH Excellent, Perla, Delicata. Jumbo: Jumbo. Intermarché: Top Budget, Pâturages. "
+            "Brands matching the store name (Delhaize, Carrefour, AH, Jumbo) are always house brands. "
             "For fresh/deli/bakery items without a visible brand, use 'in-house'. "
             "null only for truly generic items (loose fruit, vegetables by weight). "
-            "Examples: 'JUPILER PILS' → 'jupiler', 'KIP KYOTO MET RIJST' → 'in-house', 'BANANEN 1KG' → null"
+            "Examples: 'JUPILER PILS' → 'jupiler', 'MILBONA VOLLE MELK' → 'milbona', 'KIP KYOTO MET RIJST' → 'in-house', 'BANANEN 1KG' → null"
         )
     )
     is_premium: bool = Field(
-        description="true for premium/name brands (Coca-Cola, Jupiler, Danone, Lay's), false for store/house brands (Boni, 365, Everyday, Cara) and unbranded items"
+        description=(
+            "true for premium/name brands (Coca-Cola, Jupiler, Danone, Lay's, Nestlé, Heinz). "
+            "false for store/house brands (Boni, 365, Everyday, Simpl, Delhaize, P'tits Lions, "
+            "Milbona, Pikok, Chef Select, Milsani, Moser Roth, AH, AH Basic, Perla, Jumbo, Top Budget, Cara) "
+            "and unbranded items. All Lidl and Aldi sub-brands are house brands. "
+            "Brands named after the store (Delhaize, Carrefour, AH, Jumbo) are house brands."
+        )
     )
     quantity: int = Field(
         description="Number of items — parse from '2x', 'x3', '2 ST', etc. Default 1"
@@ -151,15 +164,19 @@ class _LineItemSchema(PydanticBaseModel):
         description=(
             "Total line price as a POSITIVE number. Convert Belgian comma decimals to dots (2,99 → 2.99). "
             "ALWAYS positive — even for discount and deposit lines. "
-            "For 'Actieprijs' (promotional price), use that price"
+            "For discount lines, total_price is the discount AMOUNT (the reduction), as a positive number"
         )
     )
     is_discount: bool = Field(
         description=(
-            "true for discount/bonus lines: Hoeveelheidsvoordeel, Korting, Bon korting, Promotie, Actie, Reductie, "
-            "2+1 gratis, 1+1 gratis, Xtra korting, SuperPlus korting, Lidl Plus korting, DLC court, "
+            "true for discount/bonus lines: Hoeveelheidsvoordeel, Korting, Bon korting, Promotie, Actie, Actieprijs, Reductie, "
+            "Rode prijs, Prix rouge, Besparing, Voordeel, Promo, Aanbieding, Remise, Stuntprijs, Prix Choc, "
+            "2+1 gratis, 1+1 gratis, 3=2, 2e aan halve prijs, 2ème à -50%, Offert, Gratuit, Kwantiteitkorting, "
+            "Xtra korting, SuperPlus korting, Lidl Plus korting, AH Bonus, Jumbo Extra's, "
+            "Carte Carrefour, Bon de réduction, DLC court, "
             "Leveranciersbon, E-coupon — any line that represents a price reduction. "
-            "Set normalized_name to describe the discount (e.g. 'korting hoeveelheidsvoordeel')"
+            "NEVER mark deposit/leeggoed/vidange lines as discount — use is_deposit instead. "
+            "Set normalized_name to describe the discount (e.g. 'korting hoeveelheidsvoordeel', 'rode prijs', 'lidl plus korting')"
         )
     )
     is_deposit: bool = Field(
@@ -177,7 +194,16 @@ class _LineItemSchema(PydanticBaseModel):
         )
     )
     granular_category: str = Field(
-        description="One category from the provided category list"
+        description=(
+            "One category from the provided category list — must be one of the exact category names, or 'Other'. "
+            "For discount lines (is_discount=true), use: 'Discount' (general/korting/remise), "
+            "'Coupon' (leveranciersbon/bon de réduction/e-coupon), "
+            "'Loyalty Discount' (Lidl Plus/SuperPlus/Xtra/Carte Carrefour/AH Bonuskaart/Jumbo Extra's/Avantage Carte), "
+            "'Promotional Offer' (actieprijs/promo/rode prijs/prix rouge/aanbieding), "
+            "or 'Multi-Buy Deal' (2+1/1+1/3=2/gratis/offert/kwantiteitkorting/réduction de quantité). "
+            "Important Exclusions: Do not classify bottle returns/deposits (leeggoed/statiegeld/vidange) "
+            "or voucher payments (maaltijdcheques/titres-repas/ecocheques) as discounts."
+        )
     )
     unit_of_measure: Optional[str] = Field(
         default=None,
@@ -217,7 +243,7 @@ class _LineItemSchema(PydanticBaseModel):
     )
     dp_article_code: Optional[str] = Field(
         default=None,
-        description="Article/PLU/barcode from receipt ('ART 123456', 'PLU 4011'). null if not visible"
+        description="Article/PLU/EAN/barcode from receipt ('ART 123456', 'PLU 4011'). null if not visible"
     )
     dp_is_bio: bool = Field(
         description="true if BIO/BIOLOGISCH/BIOLOGIQUE/ORGANIC in text, false otherwise"
@@ -295,6 +321,20 @@ class GeminiVisionService:
 - INCLUDE discount/bonus lines and deposit lines — extract ALL prices as POSITIVE values
 - Skip subtotals, totals, payment lines, VAT summary lines
 - One line item per receipt line — use the quantity field for multiples, do not create duplicate rows
+
+### Belgian Receipt Promotion Patterns
+Belgian receipts show discounts on SEPARATE lines below the product, never inline. Always extract each receipt line as its own line item.
+
+Common patterns — extract each line as a SEPARATE item:
+- **Product + discount line**: Product at full price on line 1, discount on line 2 (often indented). Extract both: product (is_discount=false) + discount (is_discount=true, total_price = discount amount).
+  e.g. "COCA COLA 3,58" then "HOEVEELHEIDSVOORDEEL -0,60" → two items (3.58 + 0.60)
+- **Product + Actieprijs line**: Product at original price, then "ACTIEPRIJS" with promo price on next line. Extract both: product at original price (is_discount=false) + discount line with total_price = original minus promo price (is_discount=true).
+  e.g. "PRODUCT 3,58" then "ACTIEPRIJS 2,98" → product at 3.58 + discount at 0.60
+- **Multi-buy discounts**: Multiple products then a combined discount line.
+  e.g. "YOGHURT 2,49" twice then "2+1 GRATIS -2,49" → three items
+- **Loyalty discounts at receipt bottom**: Lidl Plus, SuperPlus, Xtra, Carte Carrefour discounts grouped near the subtotal — extract each as a discount line with granular_category "Loyalty Discount".
+
+For discount lines: set is_discount=true, normalized_name describes the discount type (e.g. "korting hoeveelheidsvoordeel", "actieprijs", "lidl plus korting").
 
 ### Granular Categories
 Assign ONE category from this list for each item:
