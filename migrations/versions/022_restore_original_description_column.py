@@ -14,7 +14,7 @@ from alembic import op
 
 # revision identifiers, used by Alembic.
 revision: str = "022_restore_original_description"
-down_revision: Union[str, None] = "021_drop_original_desc"
+down_revision: Union[str, None] = "021b_noop_placeholder"
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 

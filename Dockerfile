@@ -19,4 +19,4 @@ ENV PORT=8000
 EXPOSE ${PORT}
 
 # Default: start the API server (overridden per-service via railway config)
-CMD sh -c 'alembic upgrade head && uvicorn app.main:app --host 0.0.0.0 --port ${PORT:-8000}'
+CMD sh -c 'python -m scripts.startup && uvicorn app.main:app --host 0.0.0.0 --port ${PORT:-8000}'

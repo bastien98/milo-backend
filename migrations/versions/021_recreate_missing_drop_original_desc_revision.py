@@ -11,7 +11,7 @@ from typing import Sequence, Union
 
 
 # revision identifiers, used by Alembic.
-revision: str = "021_drop_original_desc"
+revision: str = "021b_noop_placeholder"
 down_revision: Union[str, None] = "019_add_preferred_stores"
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
