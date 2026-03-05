@@ -2,6 +2,7 @@ from typing import Optional
 
 from sqlalchemy import select, func, update
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import selectinload
 
 from app.models.cashback import CashbackTransaction, CashbackBalance
 from app.models.enums import CashbackStatus
@@ -51,10 +52,11 @@ class CashbackRepository:
         )
         total = count_result.scalar() or 0
 
-        # Fetch paginated, newest first
+        # Fetch paginated, newest first — eagerly load receipt to avoid N+1
         offset = (page - 1) * page_size
         result = await self.db.execute(
             select(CashbackTransaction)
+            .options(selectinload(CashbackTransaction.receipt))
             .where(CashbackTransaction.user_id == user_id)
             .order_by(CashbackTransaction.created_at.desc())
             .offset(offset)

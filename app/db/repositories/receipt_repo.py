@@ -3,6 +3,7 @@ from typing import Optional, List
 
 from sqlalchemy import select, func, and_
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import selectinload
 
 from app.models.receipt import Receipt
 from app.models.enums import ReceiptStatus, ReceiptSource
@@ -158,6 +159,51 @@ class ReceiptRepository:
         await self.db.flush()
         await self.db.refresh(receipt)
         return receipt
+
+    async def get_by_user_with_transactions(
+        self,
+        user_id: str,
+        start_date: Optional[date] = None,
+        end_date: Optional[date] = None,
+        store_name: Optional[str] = None,
+        page: int = 1,
+        page_size: int = 20,
+    ) -> tuple[List[Receipt], int]:
+        """Get receipts with eagerly loaded transactions, paginated at DB level.
+
+        Much faster than loading all transactions and grouping in Python.
+        """
+        conditions = [
+            Receipt.user_id == user_id,
+            Receipt.status == ReceiptStatus.COMPLETED,
+        ]
+
+        if start_date:
+            conditions.append(Receipt.receipt_date >= start_date)
+        if end_date:
+            conditions.append(Receipt.receipt_date <= end_date)
+        if store_name:
+            conditions.append(Receipt.store_name == store_name)
+
+        # Count total matching receipts
+        count_result = await self.db.execute(
+            select(func.count(Receipt.id)).where(and_(*conditions))
+        )
+        total = count_result.scalar() or 0
+
+        # Fetch paginated receipts with transactions eagerly loaded
+        offset = (page - 1) * page_size
+        result = await self.db.execute(
+            select(Receipt)
+            .options(selectinload(Receipt.transactions))
+            .where(and_(*conditions))
+            .order_by(Receipt.receipt_date.desc(), Receipt.created_at.desc())
+            .offset(offset)
+            .limit(page_size)
+        )
+        receipts = list(result.scalars().unique().all())
+
+        return receipts, total
 
     async def delete(self, receipt_id: str) -> bool:
         """Delete a receipt and its transactions."""

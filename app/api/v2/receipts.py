@@ -1,6 +1,5 @@
 import hashlib
 import logging
-from collections import defaultdict
 from datetime import date
 from math import ceil
 from typing import Optional
@@ -153,67 +152,40 @@ async def list_receipts(
     The source field indicates whether the receipt was from a scanned receipt
     ("receipt_upload") or a bank import ("bank_import").
     """
-    transaction_repo = TransactionRepository(db)
     receipt_repo = ReceiptRepository(db)
 
-    # Fetch all matching transactions (without pagination - we paginate groups)
-    transactions, _ = await transaction_repo.get_by_user(
+    # Paginate at DB level — eagerly loads transactions for only the current page
+    receipts, total = await receipt_repo.get_by_user_with_transactions(
         user_id=current_user.id,
         start_date=start_date,
         end_date=end_date,
         store_name=store_name,
-        page=1,
-        page_size=10000,  # Large enough to get all for grouping
+        page=page,
+        page_size=page_size,
     )
 
-    # Group transactions by receipt_id (the actual database UUID)
-    # Skip transactions without a receipt_id (shouldn't happen for receipt-based transactions)
-    groups: dict[str, list] = defaultdict(list)
-    for txn in transactions:
-        if txn.receipt_id:
-            groups[txn.receipt_id].append(txn)
+    from app.models.enums import ReceiptSource
 
-    # Fetch receipt objects for receipt-level fields
-    receipt_map = {}
-    if groups:
-        receipts, _ = await receipt_repo.get_by_user(
-            user_id=current_user.id,
-            start_date=start_date,
-            end_date=end_date,
-            page=1,
-            page_size=10000,
-        )
-        receipt_map = {r.id: r for r in receipts}
-
-    # Build grouped receipts
     grouped_receipts = []
-    for receipt_id, txns in groups.items():
-        # Get store_name and date from the first transaction (should be consistent within a receipt)
-        first_txn = txns[0]
-        store = first_txn.store_name
-        txn_date = first_txn.date
-
-        total_amount = receipt_map[receipt_id].total_amount if receipt_id in receipt_map and receipt_map[receipt_id].total_amount else sum(t.item_price for t in txns if not t.is_discount and not t.is_deposit)
-        items_count = len(txns)
-
-        # Get receipt-level fields from the receipt object
-        receipt_obj = receipt_map.get(receipt_id)
-
-        # Get source from the receipt (default to receipt_upload for backwards compatibility)
-        from app.models.enums import ReceiptSource
-        source = receipt_obj.source if receipt_obj else ReceiptSource.RECEIPT_UPLOAD
+    for receipt in receipts:
+        txns = receipt.transactions
+        total_amount = (
+            receipt.total_amount
+            if receipt.total_amount
+            else sum(t.item_price for t in txns if not t.is_discount and not t.is_deposit)
+        )
 
         grouped_receipts.append(
             GroupedReceipt(
-                receipt_id=receipt_id,
-                store_name=store,
-                receipt_date=txn_date,
-                receipt_time=receipt_obj.receipt_time if receipt_obj else None,
+                receipt_id=receipt.id,
+                store_name=receipt.store_name,
+                receipt_date=receipt.receipt_date,
+                receipt_time=receipt.receipt_time,
                 total_amount=round(total_amount, 2),
-                payment_method=receipt_obj.payment_method if receipt_obj else None,
-                store_branch=receipt_obj.store_branch if receipt_obj else None,
-                items_count=items_count,
-                source=source,
+                payment_method=receipt.payment_method,
+                store_branch=receipt.store_branch,
+                items_count=len(txns),
+                source=receipt.source or ReceiptSource.RECEIPT_UPLOAD,
                 transactions=[
                     GroupedReceiptTransaction(
                         item_id=t.id,
@@ -237,17 +209,10 @@ async def list_receipts(
             )
         )
 
-    # Sort by date descending (most recent first)
-    grouped_receipts.sort(key=lambda r: r.receipt_date, reverse=True)
-
-    # Apply pagination to grouped receipts
-    total = len(grouped_receipts)
     total_pages = ceil(total / page_size) if total > 0 else 1
-    offset = (page - 1) * page_size
-    paginated_receipts = grouped_receipts[offset : offset + page_size]
 
     return GroupedReceiptListResponse(
-        receipts=paginated_receipts,
+        receipts=grouped_receipts,
         total=total,
         page=page,
         page_size=page_size,
