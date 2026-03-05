@@ -32,7 +32,7 @@ async def create_tables_from_models():
     from app.db.base import Base
     # Import all models to register them
     from app.models import (  # noqa
-        user, receipt, transaction, user_rate_limit,
+        user, receipt, transaction,
         user_profile, budget, budget_history, user_enriched_profile,
     )
 

@@ -19,7 +19,6 @@ from app.core.exceptions import (
     GeminiAPIError,
     ResourceNotFoundError,
     PermissionDeniedError,
-    RateLimitExceededError,
     DuplicateReceiptError,
 )
 from app.api.v2.router import api_router as api_router_v2
@@ -58,9 +57,6 @@ All endpoints require Firebase Authentication. Include the ID token in the Autho
 Authorization: Bearer <firebase_id_token>
 ```
 
-### Rate Limits
-- **Chat messages**: 100 per 30-day period
-- **Receipt uploads**: 15 per 30-day period
 """,
     lifespan=lifespan,
     openapi_tags=[
@@ -68,7 +64,6 @@ Authorization: Bearer <firebase_id_token>
         {"name": "v2 - chat", "description": "💬 AI-powered spending assistant (Gemini AI)"},
         {"name": "v2 - transactions", "description": "💳 View and manage transactions"},
         {"name": "v2 - analytics", "description": "📊 Spending analytics and insights"},
-        {"name": "v2 - rate-limit", "description": "⏱️ Rate limit status"},
         {"name": "v2 - profile", "description": "👤 User profile management"},
         {"name": "v2 - health", "description": "🏥 Health checks"},
     ],
@@ -175,29 +170,6 @@ async def permission_denied_exception_handler(
         content={
             "error": "permission_denied",
             "message": exc.message,
-        },
-    )
-
-
-@app.exception_handler(RateLimitExceededError)
-async def rate_limit_exceeded_exception_handler(
-    request: Request, exc: RateLimitExceededError
-):
-    """Handle rate limit exceeded errors with 429 status."""
-    retry_after = exc.details.get("retry_after_seconds", 86400)
-
-    return JSONResponse(
-        status_code=429,
-        content={
-            "error": "rate_limit_exceeded",
-            "message": exc.message,
-            "messages_used": exc.details.get("messages_used"),
-            "messages_limit": exc.details.get("messages_limit"),
-            "period_end_date": exc.details.get("period_end_date"),
-            "retry_after_seconds": retry_after,
-        },
-        headers={
-            "Retry-After": str(retry_after),
         },
     )
 

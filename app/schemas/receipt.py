@@ -78,19 +78,6 @@ class ReceiptListResponse(BaseModel):
     page_size: int
 
 
-class ReceiptRateLimitInfo(BaseModel):
-    receipts_used: int
-    receipts_limit: int
-    period_end_date: datetime
-
-
-class ReceiptDeleteResponse(BaseModel):
-    success: bool
-    message: str
-    deleted_receipt_id: str
-    rate_limit: ReceiptRateLimitInfo
-
-
 # Grouped receipts (transactions grouped by store + date)
 
 
