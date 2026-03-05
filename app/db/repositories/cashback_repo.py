@@ -1,6 +1,7 @@
 from typing import Optional
 
 from sqlalchemy import select, func, update
+from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -30,7 +31,6 @@ class CashbackRepository:
         )
         self.db.add(txn)
         await self.db.flush()
-        await self.db.refresh(txn)
         return txn
 
     async def get_cashback_transaction_by_receipt(
@@ -79,24 +79,26 @@ class CashbackRepository:
             )
             self.db.add(balance)
             await self.db.flush()
-            await self.db.refresh(balance)
         return balance
 
-    async def update_balance_atomic(
+    async def upsert_balance_increment(
         self, user_id: str, cashback_amount: float
-    ) -> CashbackBalance:
-        """Atomic increment of balance — no read-then-write race condition."""
-        await self.db.execute(
-            update(CashbackBalance)
-            .where(CashbackBalance.user_id == user_id)
-            .values(
-                total_earned=CashbackBalance.total_earned + cashback_amount,
-                current_balance=CashbackBalance.current_balance + cashback_amount,
-            )
+    ) -> None:
+        """Insert or atomically increment balance in a single statement."""
+        import uuid
+        stmt = pg_insert(CashbackBalance).values(
+            id=str(uuid.uuid4()),
+            user_id=user_id,
+            total_earned=cashback_amount,
+            total_paid_out=0.0,
+            current_balance=cashback_amount,
         )
+        stmt = stmt.on_conflict_do_update(
+            index_elements=["user_id"],
+            set_={
+                "total_earned": CashbackBalance.total_earned + cashback_amount,
+                "current_balance": CashbackBalance.current_balance + cashback_amount,
+            },
+        )
+        await self.db.execute(stmt)
         await self.db.flush()
-        # Re-fetch to return updated state
-        result = await self.db.execute(
-            select(CashbackBalance).where(CashbackBalance.user_id == user_id)
-        )
-        return result.scalar_one()

@@ -62,7 +62,7 @@ class Transaction(Base):
     dp_article_code: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)
     dp_is_bio: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
 
-    # SKU lookup key (composite: normalized_name|pack_qty|pack_size|pack_unit)
+    # SKU lookup key (composite: normalized_name|pack_qty|pack_size|pack_unit|variant|is_bio)
     lookup_key: Mapped[Optional[str]] = mapped_column(String(255), nullable=True, index=True)
 
     # Categorization - parent category name from app.core.categories

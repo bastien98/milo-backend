@@ -64,6 +64,14 @@ async def upload_receipt(
     file_content = await file.read()
     filename = file.filename or "receipt.pdf"
 
+    # Early file size validation — reject before hashing or DB work
+    MAX_UPLOAD_SIZE = 5 * 1024 * 1024  # 5MB — phone-scanned receipt PDFs are typically 100KB–2MB
+    if len(file_content) > MAX_UPLOAD_SIZE:
+        raise ImageValidationError(
+            f"File too large ({len(file_content) / (1024 * 1024):.1f}MB). Maximum is 5MB.",
+            details={"max_size_mb": 5},
+        )
+
     # Compute content hash for duplicate detection (only when enabled — storing NULL
     # bypasses the partial unique index ix_receipts_content_hash_active which only
     # applies WHERE content_hash IS NOT NULL)

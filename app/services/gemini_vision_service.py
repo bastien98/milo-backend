@@ -1,7 +1,7 @@
 """
 Gemini Vision service for receipt OCR and semantic line item extraction.
 
-Replaces Veryfi for OCR extraction and handles:
+ OCR extraction and handles:
 - Line item extraction with normalized names
 - Belgian pricing conventions (comma→dot, Hoeveelheidsvoordeel)
 - Deposit item detection (Leeggoed/Vidange)
@@ -9,7 +9,6 @@ Replaces Veryfi for OCR extraction and handles:
 """
 
 import asyncio
-import io
 import json
 import logging
 import time
@@ -21,6 +20,8 @@ from google import genai
 from pydantic import BaseModel as PydanticBaseModel, Field
 from google.genai import types
 
+from google.genai import errors as genai_errors
+
 from app.core.exceptions import GeminiAPIError
 from app.config import get_settings
 from app.core.categories import CATEGORIES_PROMPT_LIST, GRANULAR_CATEGORIES, get_parent_category
@@ -29,10 +30,19 @@ from app.core.stores import STORES_PROMPT_LIST
 settings = get_settings()
 logger = logging.getLogger(__name__)
 
-# Per-user semaphore: limits each user to 2 concurrent Gemini generate_content calls.
-# Without this, concurrent uploads from the same user hit the API simultaneously and
-# get queued server-side, escalating latency from ~60s to 180s+ for later requests.
-_user_semaphores: dict[str, asyncio.Semaphore] = {}
+# Deterministic unit conversion: raw receipt unit → (target unit, multiplier)
+# Liquids normalize to ml, solids normalize to g.
+_UNIT_CONVERSIONS: dict[str, tuple[str, float]] = {
+    "cl": ("ml", 10.0),
+    "ml": ("ml", 1.0),
+    "l":  ("ml", 1000.0),
+    "g":  ("g", 1.0),
+    "kg": ("g", 1000.0),
+}
+
+# Global semaphore: caps concurrent Gemini generate_content calls across all users.
+# Paid Tier 1 = 150 RPM. At ~60s per call, 10 concurrent ≈ 10 RPM (well within limit).
+_gemini_semaphore = asyncio.Semaphore(10)
 
 # Singleton genai.Client — reuses the underlying httpx.AsyncClient connection pool across
 # all background tasks. Creating a new client per task means a new TLS handshake and new
@@ -45,12 +55,6 @@ def _get_gemini_client() -> genai.Client:
     if _gemini_client is None:
         _gemini_client = genai.Client(api_key=settings.GEMINI_API_KEY)
     return _gemini_client
-
-
-def _get_user_semaphore(user_id: str) -> asyncio.Semaphore:
-    if user_id not in _user_semaphores:
-        _user_semaphores[user_id] = asyncio.Semaphore(2)
-    return _user_semaphores[user_id]
 
 
 @dataclass
@@ -87,7 +91,9 @@ class ExtractedLineItem:
         pack_qty = self.dp_pack_quantity or 1
         pack_size = self.dp_pack_size if self.dp_pack_size is not None else ""
         pack_unit = self.dp_pack_unit or ""
-        return f"{self.normalized_name}|{pack_qty}|{pack_size}|{pack_unit}"
+        variant = self.dp_product_variant or ""
+        is_bio = "bio" if self.dp_is_bio else ""
+        return f"{self.normalized_name}|{pack_qty}|{pack_size}|{pack_unit}|{variant}|{is_bio}"
 
 
 @dataclass
@@ -106,188 +112,49 @@ class GeminiExtractionResult:
 # Pydantic schemas passed as response_schema to Gemini — structurally constrains the JSON output
 # so the model cannot return a bare array instead of the expected object.
 class _LineItemSchema(PydanticBaseModel):
-    item_name: str = Field(
-        description=(
-            "Product text from the receipt line in ORIGINAL casing. "
-            "Keep brand, name, variant, size/packaging info. "
-            "Remove article codes, PLU numbers, quantity counts, unit prices, and total prices. "
-            "Examples: 'A 14515 BONI BIO volkorenspaghetti 500g 1 0,99 0,99' → 'BONI BIO volkorenspaghetti 500g', "
-            "'123456 COCA COLA ZERO 1,5L PET 2 3,58' → 'COCA COLA ZERO 1,5L PET'"
-        )
-    )
-    normalized_name: str = Field(
-        description=(
-            "Clean product name for EAN matching, ALWAYS lowercase. "
-            "ALWAYS keep brand name (it is part of product identity). "
-            "Remove quantities (450ml, 1L, 500g, 6x33cl), packaging types (PET, Blik, Fles), and receipt codes. "
-            "Keep original language (Dutch/French). "
-            "CRITICAL: the SAME product must ALWAYS produce the SAME normalized_name. "
-            "Examples: 'JUPILER PILS 6X33CL PET' → 'jupiler pils', "
-            "'BONI VOLLE MELK 1L' → 'boni volle melk', "
-            "'COCA COLA ZERO 1,5L PET' → 'coca-cola zero'"
-        )
-    )
-    normalized_brand: Optional[str] = Field(
-        default=None,
-        description=(
-            "Brand/manufacturer name only, lowercase. NOT the store chain name. "
-            "For store/house brands, use the house brand name: "
-            "Colruyt: Boni, Boni Selection, Boni Bio, Everyday. "
-            "Delhaize: 365, Delhaize, P'tits Lions. "
-            "Carrefour: Simpl, Carrefour Bio, Carrefour Classic. "
-            "ALL Lidl sub-brands are house brands (Milbona, Pikok, Chef Select, Deluxe, Freeway, Vemondo, Solevita, Alesto, Snack Day, Combino, Trattoria Alfredo, Fin Carré, etc.). "
-            "ALL Aldi sub-brands are house brands (Milsani, Moser Roth, Gourmet, Cucina, Lyttos, Barissimo, River, Sun Snacks, Bon Gelati, Choceur, etc.). "
-            "AH: AH, AH Basic, AH Excellent, Perla, Delicata. Jumbo: Jumbo. Intermarché: Top Budget, Pâturages. "
-            "Brands matching the store name (Delhaize, Carrefour, AH, Jumbo) are always house brands. "
-            "For fresh/deli/bakery items without a visible brand, use 'in-house'. "
-            "null only for truly generic items (loose fruit, vegetables by weight). "
-            "Examples: 'JUPILER PILS' → 'jupiler', 'MILBONA VOLLE MELK' → 'milbona', 'KIP KYOTO MET RIJST' → 'in-house', 'BANANEN 1KG' → null"
-        )
-    )
-    is_premium: bool = Field(
-        description=(
-            "true for premium/name brands (Coca-Cola, Jupiler, Danone, Lay's, Nestlé, Heinz). "
-            "false for store/house brands (Boni, 365, Everyday, Simpl, Delhaize, P'tits Lions, "
-            "Milbona, Pikok, Chef Select, Milsani, Moser Roth, AH, AH Basic, Perla, Jumbo, Top Budget, Cara) "
-            "and unbranded items. All Lidl and Aldi sub-brands are house brands. "
-            "Brands named after the store (Delhaize, Carrefour, AH, Jumbo) are house brands."
-        )
-    )
-    quantity: int = Field(
-        description="Number of items — parse from '2x', 'x3', '2 ST', etc. Default 1"
-    )
-    unit_price: Optional[float] = Field(
-        default=None,
-        description="Price per single item if shown separately on receipt"
-    )
-    total_price: float = Field(
-        description=(
-            "Total line price as a POSITIVE number. Convert Belgian comma decimals to dots (2,99 → 2.99). "
-            "ALWAYS positive — even for discount and deposit lines. "
-            "For discount lines, total_price is the discount AMOUNT (the reduction), as a positive number"
-        )
-    )
-    is_discount: bool = Field(
-        description=(
-            "true for discount/bonus lines: Hoeveelheidsvoordeel, Korting, Bon korting, Promotie, Actie, Actieprijs, Reductie, "
-            "Rode prijs, Prix rouge, Besparing, Voordeel, Promo, Aanbieding, Remise, Stuntprijs, Prix Choc, "
-            "2+1 gratis, 1+1 gratis, 3=2, 2e aan halve prijs, 2ème à -50%, Offert, Gratuit, Kwantiteitkorting, "
-            "Xtra korting, SuperPlus korting, Lidl Plus korting, AH Bonus, Jumbo Extra's, "
-            "Carte Carrefour, Bon de réduction, DLC court, "
-            "Leveranciersbon, E-coupon — any line that represents a price reduction. "
-            "NEVER mark deposit/leeggoed/vidange lines as discount — use is_deposit instead. "
-            "Set normalized_name to describe the discount (e.g. 'korting hoeveelheidsvoordeel', 'rode prijs', 'lidl plus korting')"
-        )
-    )
-    is_deposit: bool = Field(
-        description=(
-            "true for ANY deposit-related line — both deposit charges (buying containers) and deposit refunds (returning containers). "
-            "Dutch: Leeggoed, Statiegeld. French: Vidange, Consigne, Emballage. "
-            "These are NOT actual product purchases"
-        )
-    )
-    is_deposit_refund: bool = Field(
-        description=(
-            "true ONLY when the customer is receiving money back for returning containers. "
-            "Receipt text: 'Retour leeggoed', 'Retour vidange', 'Retour consigne', 'Leeggoed retour'. "
-            "false for deposit charges (buying new containers) and all non-deposit lines"
-        )
-    )
-    granular_category: str = Field(
-        description=(
-            "One category from the provided category list — must be one of the exact category names, or 'Other'. "
-            "For discount lines (is_discount=true), use: 'Discount' (general/korting/remise), "
-            "'Coupon' (leveranciersbon/bon de réduction/e-coupon), "
-            "'Loyalty Discount' (Lidl Plus/SuperPlus/Xtra/Carte Carrefour/AH Bonuskaart/Jumbo Extra's/Avantage Carte), "
-            "'Promotional Offer' (actieprijs/promo/rode prijs/prix rouge/aanbieding), "
-            "or 'Multi-Buy Deal' (2+1/1+1/3=2/gratis/offert/kwantiteitkorting/réduction de quantité). "
-            "Important Exclusions: Do not classify bottle returns/deposits (leeggoed/statiegeld/vidange) "
-            "or voucher payments (maaltijdcheques/titres-repas/ecocheques) as discounts."
-        )
-    )
-    unit_of_measure: Optional[str] = Field(
-        default=None,
-        description=(
-            "Unit for weighed/measured items: kg, g, l, ml, or piece. "
-            "Look for per-kg/per-liter pricing lines (e.g. '1.234 kg x 5.99/kg'). "
-            "null for standard packaged items"
-        )
-    )
-    weight_or_volume: Optional[float] = Field(
-        default=None,
-        description="Actual weight or volume purchased (numeric only). Parse from '0.547 kg', '1.5 l'. null if not shown"
-    )
-    price_per_unit_measure: Optional[float] = Field(
-        default=None,
-        description="Per-unit price (per kg, per liter). Parse from '5.99/kg', '1.29/l'. null if not shown"
-    )
-    dp_expanded_description: Optional[str] = Field(
-        default=None,
-        description="Full product text in lowercase, original language. Include brand, name, variant, pack info, packaging type — keep ALL product-identifying info"
-    )
-    dp_pack_quantity: Optional[int] = Field(
-        default=None,
-        description="Multi-pack count: '6X33CL'→6, '4x125g'→4. Default 1 for singles"
-    )
-    dp_pack_size: Optional[float] = Field(
-        default=None,
-        description="TOTAL pack size in ml (liquids) or g (solids). Multi-packs: multiply qty×per-item. '6X33CL'→1980.0, '1,5L'→1500.0"
-    )
-    dp_pack_unit: Optional[str] = Field(
-        default=None,
-        description="'ml' for liquids, 'g' for solids. null if no size info"
-    )
-    dp_product_variant: Optional[str] = Field(
-        default=None,
-        description="Flavor/style/sub-type in lowercase: 'zero', 'bruin', 'paprika', 'pils'. null if base product"
-    )
-    dp_article_code: Optional[str] = Field(
-        default=None,
-        description="Article/PLU/EAN/barcode from receipt ('ART 123456', 'PLU 4011'). null if not visible"
-    )
-    dp_is_bio: bool = Field(
-        description="true if BIO/BIOLOGISCH/BIOLOGIQUE/ORGANIC in text, false otherwise"
-    )
+    item_name: str = Field(description="Product text from receipt in original casing, without codes or prices")
+    normalized_name: str = Field(description="Lowercase canonical product name for matching")
+    normalized_brand: Optional[str] = Field(default=None, description="Lowercase brand name, or null")
+    is_premium: bool = Field(description="true for national/premium brands, false for house/store brands")
+    quantity: int = Field(description="Item count, default 1")
+    unit_price: Optional[float] = Field(default=None, description="Per-unit price if shown, else null")
+    total_price: float = Field(description="Positive float, dot decimal")
+    is_discount: bool = Field(description="true if this line is a price reduction")
+    is_deposit: bool = Field(description="true for any container deposit line")
+    is_deposit_refund: bool = Field(description="true only for deposit refund (returning containers)")
+    granular_category: str = Field(description="Category from the provided list, or 'Other'")
+    unit_of_measure: Optional[str] = Field(default=None, description="kg, g, l, ml, or piece — null for packaged items")
+    weight_or_volume: Optional[float] = Field(default=None, description="Measured quantity as float, or null")
+    price_per_unit_measure: Optional[float] = Field(default=None, description="Per-kg or per-liter price as float, or null")
+    dp_expanded_description: Optional[str] = Field(default=None, description="Full product text in lowercase for search, or null")
+    dp_pack_quantity: Optional[int] = Field(default=None, description="Multi-pack count, 1 for singles")
+    dp_per_item_size: Optional[float] = Field(default=None, description="Size of ONE item as printed on receipt. '6X33CL'→33, '1,5L'→1.5, '500g'→500. Do NOT multiply by pack quantity")
+    dp_pack_unit: Optional[str] = Field(default=None, description="Unit as printed on receipt, lowercase: 'cl', 'ml', 'l', 'g', 'kg'. Do NOT convert units")
+    dp_product_variant: Optional[str] = Field(default=None, description="Flavor/sub-type in lowercase, or null")
+    dp_article_code: Optional[str] = Field(default=None, description="Article/PLU/barcode from receipt, or null")
+    dp_is_bio: bool = Field(description="true if organic/bio product")
 
 
 class _ReceiptSchema(PydanticBaseModel):
-    vendor_name: str = Field(
-        description="Store/retailer name — must be one of the exact store names from the provided list, or 'Other'"
-    )
-    receipt_date: Optional[str] = Field(
-        default=None,
-        description="Receipt date in YYYY-MM-DD format. Convert DD/MM/YYYY to YYYY-MM-DD"
-    )
-    receipt_time: Optional[str] = Field(
-        default=None,
-        description="Time of purchase in HH:MM 24-hour format. null if not found"
-    )
-    payment_method: Optional[str] = Field(
-        default=None,
-        description="One of: bancontact, visa, mastercard, cash, payconiq, meal_vouchers, mixed. null if not found"
-    )
-    store_branch: Optional[str] = Field(
-        default=None,
-        description="Store location/branch (city or street), NOT the chain name. e.g., 'Colruyt Leuven' → 'Leuven'"
-    )
-    total: Optional[float] = Field(
-        default=None,
-        description="Total amount printed on the receipt — the net amount the customer paid"
-    )
-    line_items: list[_LineItemSchema] = Field(
-        description="All extracted line items. Include discount and deposit lines (all prices positive). Skip subtotals, totals, and payment lines"
-    )
+    vendor_name: str = Field(description="Store name from the provided list, or 'Other'")
+    receipt_date: Optional[str] = Field(default=None, description="YYYY-MM-DD format")
+    receipt_time: Optional[str] = Field(default=None, description="HH:MM 24-hour format, or null")
+    payment_method: Optional[str] = Field(default=None, description="bancontact/visa/mastercard/cash/payconiq/meal_vouchers/mixed, or null")
+    store_branch: Optional[str] = Field(default=None, description="Store location/branch only, or null")
+    total: Optional[float] = Field(default=None, description="Net amount paid")
+    line_items: list[_LineItemSchema] = Field(description="All line items including discounts and deposits")
 
 
 class GeminiVisionService:
     """Gemini Vision integration for receipt OCR and extraction."""
 
-    MODEL = "gemini-3.1-pro-preview"
-    MAX_TOKENS = 32000  # Actual output ~6k tokens + capped thinking budget; pro model supports 64k output
+    MODEL = "gemini-3.1-flash-lite-preview"
+    MAX_TOKENS = 32000
+    MAX_FILE_SIZE = 5 * 1024 * 1024  # 5MB — phone-scanned receipt PDFs are typically 100KB–2MB
 
     SYSTEM_PROMPT = '''You are a Belgian grocery receipt analyzer. Extract and normalize line items from receipt images.
 
-## EXTRACTION RULES
+## RECEIPT-LEVEL FIELDS
 
 ### Vendor Name
 - Identify the store/retailer from the receipt
@@ -317,28 +184,141 @@ class GeminiVisionService:
 - Examples: "Colruyt Leuven" → "Leuven", "Delhaize Etterbeek" → "Etterbeek"
 - Return null if no branch/location is found
 
-### IMPORTANT RULES
-- INCLUDE discount/bonus lines and deposit lines — extract ALL prices as POSITIVE values
-- Skip subtotals, totals, payment lines, VAT summary lines
-- One line item per receipt line — use the quantity field for multiples, do not create duplicate rows
+## ITEM EXTRACTION RULES
 
-### Belgian Receipt Promotion Patterns
-Belgian receipts show discounts on SEPARATE lines below the product, never inline. Always extract each receipt line as its own line item.
+- INCLUDE all line types: regular products, discount lines, and deposit lines
+- Skip subtotals, totals, payment lines, VAT summary lines, loyalty point summaries
+- One line item per receipt line — use the quantity field for multiple units, never create duplicate rows
+- All prices are ALWAYS output as POSITIVE numbers, including discounts and deposits
 
-Common patterns — extract each line as a SEPARATE item:
-- **Product + discount line**: Product at full price on line 1, discount on line 2 (often indented). Extract both: product (is_discount=false) + discount (is_discount=true, total_price = discount amount).
-  e.g. "COCA COLA 3,58" then "HOEVEELHEIDSVOORDEEL -0,60" → two items (3.58 + 0.60)
-- **Product + Actieprijs line**: Product at original price, then "ACTIEPRIJS" with promo price on next line. Extract both: product at original price (is_discount=false) + discount line with total_price = original minus promo price (is_discount=true).
-  e.g. "PRODUCT 3,58" then "ACTIEPRIJS 2,98" → product at 3.58 + discount at 0.60
-- **Multi-buy discounts**: Multiple products then a combined discount line.
-  e.g. "YOGHURT 2,49" twice then "2+1 GRATIS -2,49" → three items
-- **Loyalty discounts at receipt bottom**: Lidl Plus, SuperPlus, Xtra, Carte Carrefour discounts grouped near the subtotal — extract each as a discount line with granular_category "Loyalty Discount".
+## ITEM FIELD RULES
 
-For discount lines: set is_discount=true, normalized_name describes the discount type (e.g. "korting hoeveelheidsvoordeel", "actieprijs", "lidl plus korting").
+### item_name — Receipt Text Cleaning
+Copy the product text from the receipt line in ORIGINAL casing. Then:
+- KEEP: brand name, product name, variant, size/packaging info (e.g., "500g", "1,5L PET", "6x33cl")
+- REMOVE: article codes, PLU numbers, EAN/barcode numbers at the start of the line
+- REMOVE: quantity counts, unit prices, and total prices at the end of the line
 
-### Granular Categories
-Assign ONE category from this list for each item:
+Examples:
+- "A 14515 BONI BIO volkorenspaghetti 500g 1 0,99 0,99" → "BONI BIO volkorenspaghetti 500g"
+- "123456 COCA COLA ZERO 1,5L PET 2 3,58" → "COCA COLA ZERO 1,5L PET"
+
+### normalized_name — Canonical Product Name
+A clean, lowercase product name for EAN matching and deduplication. Rules:
+- ALWAYS include the brand name (it is part of product identity)
+- ALWAYS lowercase
+- REMOVE: quantities (450ml, 1L, 500g, 6x33cl), packaging types (PET, Blik, Fles), receipt codes
+- Keep the original language (Dutch or French — do not translate)
+- CRITICAL consistency rule: the SAME product seen on different receipts must ALWAYS produce the EXACT SAME normalized_name
+
+Examples:
+- "JUPILER PILS 6X33CL PET" → "jupiler pils"
+- "BONI VOLLE MELK 1L" → "boni volle melk"
+- "COCA COLA ZERO 1,5L PET" → "coca-cola zero"
+- For discount lines: describe the discount type, e.g. "korting hoeveelheidsvoordeel", "actieprijs", "lidl plus korting"
+
+### normalized_brand — Brand Identification
+Output brand/manufacturer name only, lowercase.
+
+House brands by retailer (is_premium=false):
+Colruyt: Boni, Boni Selection, Boni Bio, Everyday
+Delhaize: 365, Delhaize, P'tits Lions
+Carrefour: Simpl, Carrefour Bio, Carrefour Classic
+Lidl: ALL sub-brands (Milbona, Pikok, Chef Select, Deluxe, Freeway, Vemondo, Solevita, Alesto, Snack Day, Combino, Trattoria Alfredo, Fin Carré, etc.)
+Aldi: ALL sub-brands (Milsani, Moser Roth, Gourmet, Cucina, Lyttos, Barissimo, River, Sun Snacks, Bon Gelati, Choceur, etc.)
+AH: AH, AH Basic, AH Excellent, Perla, Delicata
+Jumbo: Jumbo
+Intermarché: Top Budget, Pâturages
+
+Rules:
+- Brand = store chain name → always house brand
+- Fresh/deli/bakery without visible brand → "in-house"
+- Truly generic (loose fruit, bulk) → null
+
+Receipt text → normalized_brand | is_premium
+"JUPILER PILS" → "jupiler" | true
+"MILBONA VOLLE MELK" → "milbona" | false
+"KIP KYOTO MET RIJST" → "in-house" | false
+"BANANEN 1KG" → null | false
+
+### is_premium — Premium vs House Brand Flag
+- true: premium/national brands (Coca-Cola, Jupiler, Danone, Lay's, Nestlé, Heinz, etc.)
+- false: ALL house brands listed above, ALL Lidl/Aldi sub-brands, brand = store chain name
+
+### Pricing Rules
+- Belgian receipts use commas as decimal separators — always convert to dots: 2,99 → 2.99
+- total_price is ALWAYS a positive float, for every line type including discounts and deposits
+- For discount lines: total_price is the discount AMOUNT (the reduction value), as a positive number. e.g., "HOEVEELHEIDSVOORDEEL -0,60" → total_price = 0.60
+- unit_price: only populate if the receipt explicitly shows a per-unit price separate from the total
+- quantity: parse from "2x", "x3", "2 ST", etc. Default 1
+
+## DISCOUNT LINE DETECTION
+
+Discounts appear on SEPARATE receipt lines. Extract each line as its own item.
+
+### Patterns (receipt → extraction)
+
+| Receipt lines | → item 1 | → item 2 |
+|---|---|---|
+| `COCA COLA 3,58` / `HOEVEELHEIDSVOORDEEL -0,60` | product, 3.58 | discount, 0.60 |
+| `PRODUCT 3,58` / `ACTIEPRIJS 2,98` | product, 3.58 | discount, 0.60 (=3.58−2.98) |
+| `YOGHURT 2,49` ×2 / `2+1 GRATIS -2,49` | product ×2, 2.49 each | discount, 2.49 |
+| `LIDL PLUS KORTING -1,20` (near subtotal) | — | discount, 1.20 |
+
+### Discount output rules
+- is_discount=true
+- total_price = discount AMOUNT (positive)
+- normalized_name = discount type (e.g. "korting hoeveelheidsvoordeel", "actieprijs")
+- granular_category = "Discount"
+
+### Terms → is_discount=true
+NL: Hoeveelheidsvoordeel, Korting, Bon korting, Promotie, Actie, Actieprijs, Reductie, Rode prijs, Besparing, Voordeel, Aanbieding, Stuntprijs, Kwantiteitkorting, Xtra korting, SuperPlus korting, Lidl Plus korting, AH Bonus, Jumbo Extra's
+FR: Prix rouge, Promo, Remise, Prix Choc, Carte Carrefour, Bon de réduction, DLC court
+Multi-buy: 2+1 gratis, 1+1 gratis, 3=2, 2e aan halve prijs, 2ème à -50%, 2ème à moitié prix, Offert, Gratuit
+Other: E-coupon, Leveranciersbon
+
+### NOT discounts
+- Deposits (leeggoed/statiegeld/vidange/consigne) → is_deposit
+- Voucher payments (maaltijdcheques/titres-repas/ecocheques) → skip entirely
+
+## DEPOSIT LINE DETECTION
+
+Deposits are NOT products. Set is_deposit=true.
+
+| Term | is_deposit | is_deposit_refund |
+|---|---|---|
+| Leeggoed, Statiegeld, Vidange, Consigne, Emballage | true | false |
+| Retour leeggoed, Retour vidange, Retour consigne, Leeggoed retour | true | true |
+
+## GRANULAR CATEGORIES
+
+Assign ONE category from this list for each item. Use "Other" if nothing fits.
+
 {categories}
+
+For all discount lines (is_discount=true): always use granular_category "Discount".
+
+## WEIGHED AND MEASURED ITEMS
+
+For items sold by weight/volume (fruit, veg, deli, cheese):
+
+Receipt text → unit_of_measure | weight_or_volume | price_per_unit_measure
+"1.234 kg x 5.99/kg = 7.39" → kg | 1.234 | 5.99
+"0.547 kg 3.28" → kg | 0.547 | null
+"1.5 l" → l | 1.5 | null
+Standard packaged items → null | null | null
+
+## DATA PLATFORM FIELDS (dp_ prefix)
+
+Populate for product lines only. null for discount/deposit lines.
+
+dp_expanded_description: full product text, lowercase → "jupiler pils 6x33cl pet"
+dp_pack_quantity: multi-pack count → "6X33CL"→6, "4x125g"→4, single→1
+dp_per_item_size: ONE item size, raw number, do NOT multiply by pack qty → "6X33CL"→33, "1,5L"→1.5, "500g"→500
+dp_pack_unit: unit as printed, lowercase: "cl","ml","l","g","kg". Do NOT convert units
+dp_product_variant: flavor/sub-type, lowercase → "zero","bruin","paprika","pils". null if base product
+dp_article_code: article/PLU/EAN from receipt → "ART 123456","PLU 4011". null if not visible
+dp_is_bio: BIO/BIOLOGISCH/BIOLOGIQUE/ORGANIC in text → true, else false
 
 Extract all line items from this receipt.'''
 
@@ -348,10 +328,18 @@ Extract all line items from this receipt.'''
     async def extract_receipt(self, file_content: bytes, user_id: str) -> GeminiExtractionResult:
         """Extract and normalize receipt data using Gemini Vision.
 
-        Uploads PDF via Files API, runs extraction, then cleans up.
+        Passes the PDF inline to avoid the Files API upload round-trip.
         A per-user semaphore limits concurrent generate_content calls to prevent
         API-side queuing that compounds latency under concurrent uploads.
         """
+        content_size = len(file_content)
+        if content_size > self.MAX_FILE_SIZE:
+            size_mb = content_size / (1024 * 1024)
+            raise GeminiAPIError(
+                f"Receipt file too large ({size_mb:.1f}MB). Maximum is 5MB.",
+                details={"error_type": "file_too_large", "size_bytes": content_size},
+            )
+
         system_prompt = (
             self.SYSTEM_PROMPT
             .replace("{categories}", CATEGORIES_PROMPT_LIST)
@@ -359,95 +347,57 @@ Extract all line items from this receipt.'''
         )
 
         logger.info(
-            f"Gemini extraction starting: content_size={len(file_content)} bytes, "
+            f"Gemini extraction starting: content_size={content_size} bytes, "
             f"model={self.MODEL}, max_tokens={self.MAX_TOKENS}, user_id={user_id}"
         )
 
-        # Verify API key is set
-        api_key = settings.GEMINI_API_KEY
-        if not api_key:
-            logger.error("GEMINI_API_KEY is not set!")
+        if not settings.GEMINI_API_KEY:
             raise GeminiAPIError("GEMINI_API_KEY not configured", details={"error_type": "config"})
-        logger.info(f"API key present: {api_key[:8]}...{api_key[-4:]} (length={len(api_key)})")
 
-        # Upload PDF to Gemini Files API
-        t0 = time.monotonic()
-        try:
-            uploaded_file = await self.client.aio.files.upload(
-                file=io.BytesIO(file_content),
-                config=types.UploadFileConfig(
-                    mime_type="application/pdf",
-                    display_name="receipt.pdf",
-                ),
-            )
-            upload_elapsed = time.monotonic() - t0
-            logger.info(
-                f"⏱ gemini_file_upload: {upload_elapsed:.3f}s — "
-                f"file_name={uploaded_file.name}, "
-                f"state={getattr(uploaded_file, 'state', 'unknown')}, "
-                f"uri={getattr(uploaded_file, 'uri', 'N/A')}"
-            )
-        except Exception as e:
-            logger.error(f"Gemini file upload failed after {time.monotonic() - t0:.3f}s: {type(e).__name__}: {e}")
-            raise GeminiAPIError(
-                f"File upload failed: {e}",
-                details={"error_type": "upload_failed", "error": str(e)},
-            )
+        content_part = types.Part.from_bytes(data=file_content, mime_type="application/pdf")
 
         response_text = None
         try:
-            logger.info(
-                f"Calling generate_content: model={self.MODEL}, "
-                f"file={uploaded_file.name}, timeout=900s, AFC=disabled"
-            )
             t0 = time.monotonic()
-            async with _get_user_semaphore(user_id):
+            async with _gemini_semaphore:
                 semaphore_wait = time.monotonic() - t0
                 if semaphore_wait > 0.1:
-                    logger.info(f"⏱ semaphore_wait: {semaphore_wait:.3f}s (another request was in progress)")
+                    logger.info(f"⏱ semaphore_wait: {semaphore_wait:.3f}s (global concurrency limit reached)")
                 t1 = time.monotonic()
-                response = await asyncio.wait_for(
-                    self.client.aio.models.generate_content(
-                        model=self.MODEL,
-                        contents=[uploaded_file],
-                        config=types.GenerateContentConfig(
-                            system_instruction=system_prompt,
-                            max_output_tokens=self.MAX_TOKENS,
-                            temperature=1.0,
-                            response_mime_type="application/json",
-                            response_schema=_ReceiptSchema,
-                            media_resolution=types.MediaResolution.MEDIA_RESOLUTION_MEDIUM,
-                        ),
+                response = await self.client.aio.models.generate_content(
+                    model=self.MODEL,
+                    contents=[content_part],
+                    config=types.GenerateContentConfig(
+                        system_instruction=system_prompt,
+                        max_output_tokens=self.MAX_TOKENS,
+                        temperature=1.0,
+                        thinking_config=types.ThinkingConfig(thinking_level="low"),
+                        response_mime_type="application/json",
+                        response_schema=_ReceiptSchema,
+                        media_resolution=types.MediaResolution.MEDIA_RESOLUTION_MEDIUM,
                     ),
-                    timeout=900,  # 15 minutes — thinking models can be slow
                 )
             generate_elapsed = time.monotonic() - t1
-            total_elapsed = time.monotonic() - t0
-            logger.info(f"⏱ gemini_generate_content: {generate_elapsed:.3f}s (total incl. semaphore: {total_elapsed:.3f}s)")
-
-            # Log full response metadata
+            um = getattr(response, 'usage_metadata', None)
+            tokens = (
+                f"in={getattr(um, 'prompt_token_count', '?')}, "
+                f"out={getattr(um, 'candidates_token_count', '?')}, "
+                f"total={getattr(um, 'total_token_count', '?')}"
+            ) if um else "no usage data"
             logger.info(
-                f"Response metadata: "
-                f"candidates={len(response.candidates) if response.candidates else 0}, "
-                f"finish_reason={response.candidates[0].finish_reason if response.candidates else 'N/A'}, "
-                f"has_text={bool(response.text) if hasattr(response, 'text') else 'N/A'}"
+                f"⏱ gemini_generate_content: {generate_elapsed:.1f}s, "
+                f"tokens=[{tokens}], "
+                f"finish_reason={response.candidates[0].finish_reason if response.candidates else 'N/A'}"
             )
 
-            # Log token usage
-            if hasattr(response, 'usage_metadata') and response.usage_metadata:
-                um = response.usage_metadata
-                logger.info(
-                    f"Gemini token usage: "
-                    f"input={getattr(um, 'prompt_token_count', '?')}, "
-                    f"output={getattr(um, 'candidates_token_count', '?')}, "
-                    f"total={getattr(um, 'total_token_count', '?')}"
-                )
-            else:
-                logger.warning("No usage_metadata in response")
-
-            # Check for truncation
+            # Check for safety-blocked responses before accessing .text (can hang indefinitely)
             if response.candidates and response.candidates[0].finish_reason:
                 finish_reason = str(response.candidates[0].finish_reason)
+                if "SAFETY" in finish_reason or "BLOCKED" in finish_reason:
+                    raise GeminiAPIError(
+                        "Receipt image was blocked by safety filters",
+                        details={"error_type": "safety_blocked", "finish_reason": finish_reason},
+                    )
                 if "MAX_TOKENS" in finish_reason or "LENGTH" in finish_reason:
                     logger.warning(
                         f"Gemini response truncated (finish_reason={finish_reason}). "
@@ -456,18 +406,11 @@ Extract all line items from this receipt.'''
 
             response_text = response.text
             if not response_text:
-                # Log everything we can about the response for debugging
-                logger.error(
-                    f"Gemini returned empty response. "
-                    f"Candidates: {response.candidates}, "
-                    f"prompt_feedback: {getattr(response, 'prompt_feedback', 'N/A')}"
-                )
                 raise GeminiAPIError(
                     "Gemini returned empty response",
                     details={"error_type": "empty_response"},
                 )
 
-            logger.info(f"Response text length: {len(response_text)} chars")
             data = json.loads(response_text)
             logger.info(
                 f"Gemini response parsed: vendor={data.get('vendor_name')}, "
@@ -477,22 +420,21 @@ Extract all line items from this receipt.'''
 
             return self._build_result(data)
 
-        except asyncio.TimeoutError:
-            elapsed = time.monotonic() - t0
-            logger.error(f"Gemini generate_content timed out after {elapsed:.1f}s (limit=900s)")
-            raise GeminiAPIError(
-                "Receipt extraction timed out",
-                details={"error_type": "timeout", "elapsed_seconds": elapsed},
-            )
         except json.JSONDecodeError as e:
             logger.error(f"Failed to parse Gemini response as JSON: {e}")
-            logger.error(f"Raw response (first 1000 chars): {response_text[:1000] if response_text else 'empty'}")
             raise GeminiAPIError(
                 "Failed to parse extraction response",
                 details={"error_type": "parse_error", "parse_error": str(e)},
             )
         except GeminiAPIError:
             raise
+        except genai_errors.APIError as e:
+            elapsed = time.monotonic() - t0
+            logger.error(f"Gemini API error after {elapsed:.1f}s: code={e.code}, message={e.message}")
+            raise GeminiAPIError(
+                f"Gemini API error: {e.message}",
+                details={"error_type": "api_error", "status_code": e.code, "message": e.message},
+            )
         except Exception as e:
             elapsed = time.monotonic() - t0
             logger.exception(f"Extraction failed after {elapsed:.1f}s: {type(e).__name__}: {e}")
@@ -500,13 +442,6 @@ Extract all line items from this receipt.'''
                 f"Extraction failed: {str(e)}",
                 details={"error_type": "unexpected", "error_class": type(e).__name__, "error": str(e)},
             )
-        finally:
-            # Best-effort cleanup — files auto-expire after 48h anyway
-            try:
-                await self.client.aio.files.delete(name=uploaded_file.name)
-                logger.info(f"Cleaned up uploaded file: {uploaded_file.name}")
-            except Exception as cleanup_err:
-                logger.warning(f"File cleanup failed (non-critical): {cleanup_err}")
 
     def _build_result(self, data: dict) -> GeminiExtractionResult:
         """Build extraction result from parsed JSON."""
@@ -587,18 +522,27 @@ Extract all line items from this receipt.'''
                 except (ValueError, TypeError):
                     dp_pack_quantity = None
 
-            dp_pack_size = item.get("dp_pack_size")
-            if dp_pack_size is not None:
+            # Deterministic pack size: LLM returns per-item size + raw unit,
+            # we convert units and multiply by quantity here.
+            dp_per_item_size = item.get("dp_per_item_size")
+            raw_unit = item.get("dp_pack_unit")
+            if dp_per_item_size is not None:
                 try:
-                    dp_pack_size = float(dp_pack_size)
+                    dp_per_item_size = float(dp_per_item_size)
                 except (ValueError, TypeError):
-                    dp_pack_size = None
+                    dp_per_item_size = None
 
-            dp_pack_unit = item.get("dp_pack_unit")
-            if dp_pack_unit and dp_pack_unit.lower() not in ("ml", "g"):
+            if raw_unit:
+                raw_unit = raw_unit.lower().strip()
+
+            if dp_per_item_size is not None and raw_unit in _UNIT_CONVERSIONS:
+                target_unit, factor = _UNIT_CONVERSIONS[raw_unit]
+                qty = dp_pack_quantity or 1
+                dp_pack_size = dp_per_item_size * factor * qty
+                dp_pack_unit = target_unit
+            else:
+                dp_pack_size = None
                 dp_pack_unit = None
-            elif dp_pack_unit:
-                dp_pack_unit = dp_pack_unit.lower()
 
             dp_product_variant = item.get("dp_product_variant")
             if dp_product_variant:
