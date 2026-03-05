@@ -599,10 +599,6 @@ _TREE = [
                 "excluded": True,
                 "granular": [
                     "Discount",
-                    "Coupon",
-                    "Loyalty Discount",
-                    "Promotional Offer",
-                    "Multi-Buy Deal",
                 ],
             },
             {

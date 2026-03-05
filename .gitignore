@@ -58,3 +58,6 @@ scripts/railway-logs.sh
 
 BACKEND_CONTEXT.txt
 WalletCerts/
+
+# Gemini debug dumps
+debug_dumps/
