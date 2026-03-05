@@ -16,6 +16,7 @@ if TYPE_CHECKING:
     from app.models.budget import Budget
     from app.models.budget_history import BudgetHistory
     from app.models.cashback import CashbackTransaction, CashbackBalance
+    from app.models.spin import SpinTransaction
 
 
 class User(Base):
@@ -61,4 +62,7 @@ class User(Base):
     )
     cashback_balance: Mapped[Optional["CashbackBalance"]] = relationship(
         "CashbackBalance", back_populates="user", cascade="all, delete-orphan", uselist=False
+    )
+    spin_transactions: Mapped[List["SpinTransaction"]] = relationship(
+        "SpinTransaction", back_populates="user", cascade="all, delete-orphan"
     )
