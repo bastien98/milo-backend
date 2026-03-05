@@ -20,6 +20,8 @@ from google import genai
 from pydantic import BaseModel as PydanticBaseModel, Field
 from google.genai import types
 
+from google.genai import errors as genai_errors
+
 from app.core.exceptions import GeminiAPIError
 from app.config import get_settings
 from app.core.categories import CATEGORIES_PROMPT_LIST, GRANULAR_CATEGORIES, get_parent_category
@@ -38,10 +40,9 @@ _UNIT_CONVERSIONS: dict[str, tuple[str, float]] = {
     "kg": ("g", 1000.0),
 }
 
-# Per-user semaphore: limits each user to 2 concurrent Gemini generate_content calls.
-# Without this, concurrent uploads from the same user hit the API simultaneously and
-# get queued server-side, escalating latency from ~60s to 180s+ for later requests.
-_user_semaphores: dict[str, asyncio.Semaphore] = {}
+# Global semaphore: caps concurrent Gemini generate_content calls across all users.
+# Paid Tier 1 = 150 RPM. At ~60s per call, 10 concurrent ≈ 10 RPM (well within limit).
+_gemini_semaphore = asyncio.Semaphore(10)
 
 # Singleton genai.Client — reuses the underlying httpx.AsyncClient connection pool across
 # all background tasks. Creating a new client per task means a new TLS handshake and new
@@ -54,12 +55,6 @@ def _get_gemini_client() -> genai.Client:
     if _gemini_client is None:
         _gemini_client = genai.Client(api_key=settings.GEMINI_API_KEY)
     return _gemini_client
-
-
-def _get_user_semaphore(user_id: str) -> asyncio.Semaphore:
-    if user_id not in _user_semaphores:
-        _user_semaphores[user_id] = asyncio.Semaphore(2)
-    return _user_semaphores[user_id]
 
 
 @dataclass
@@ -96,7 +91,9 @@ class ExtractedLineItem:
         pack_qty = self.dp_pack_quantity or 1
         pack_size = self.dp_pack_size if self.dp_pack_size is not None else ""
         pack_unit = self.dp_pack_unit or ""
-        return f"{self.normalized_name}|{pack_qty}|{pack_size}|{pack_unit}"
+        variant = self.dp_product_variant or ""
+        is_bio = "bio" if self.dp_is_bio else ""
+        return f"{self.normalized_name}|{pack_qty}|{pack_size}|{pack_unit}|{variant}|{is_bio}"
 
 
 @dataclass
@@ -153,7 +150,7 @@ class GeminiVisionService:
 
     MODEL = "gemini-3.1-flash-lite-preview"
     MAX_TOKENS = 32000
-    MAX_FILE_SIZE = 20 * 1024 * 1024  # 20MB — Gemini inline data limit
+    MAX_FILE_SIZE = 5 * 1024 * 1024  # 5MB — phone-scanned receipt PDFs are typically 100KB–2MB
 
     SYSTEM_PROMPT = '''You are a Belgian grocery receipt analyzer. Extract and normalize line items from receipt images.
 
@@ -339,7 +336,7 @@ Extract all line items from this receipt.'''
         if content_size > self.MAX_FILE_SIZE:
             size_mb = content_size / (1024 * 1024)
             raise GeminiAPIError(
-                f"Receipt file too large ({size_mb:.1f}MB). Maximum is 20MB.",
+                f"Receipt file too large ({size_mb:.1f}MB). Maximum is 5MB.",
                 details={"error_type": "file_too_large", "size_bytes": content_size},
             )
 
@@ -362,26 +359,23 @@ Extract all line items from this receipt.'''
         response_text = None
         try:
             t0 = time.monotonic()
-            async with _get_user_semaphore(user_id):
+            async with _gemini_semaphore:
                 semaphore_wait = time.monotonic() - t0
                 if semaphore_wait > 0.1:
-                    logger.info(f"⏱ semaphore_wait: {semaphore_wait:.3f}s (another request was in progress)")
+                    logger.info(f"⏱ semaphore_wait: {semaphore_wait:.3f}s (global concurrency limit reached)")
                 t1 = time.monotonic()
-                response = await asyncio.wait_for(
-                    self.client.aio.models.generate_content(
-                        model=self.MODEL,
-                        contents=[content_part],
-                        config=types.GenerateContentConfig(
-                            system_instruction=system_prompt,
-                            max_output_tokens=self.MAX_TOKENS,
-                            temperature=1.0,
-                            thinking_config=types.ThinkingConfig(thinking_level="low"),
-                            response_mime_type="application/json",
-                            response_schema=_ReceiptSchema,
-                            media_resolution=types.MediaResolution.MEDIA_RESOLUTION_MEDIUM,
-                        ),
+                response = await self.client.aio.models.generate_content(
+                    model=self.MODEL,
+                    contents=[content_part],
+                    config=types.GenerateContentConfig(
+                        system_instruction=system_prompt,
+                        max_output_tokens=self.MAX_TOKENS,
+                        temperature=1.0,
+                        thinking_config=types.ThinkingConfig(thinking_level="low"),
+                        response_mime_type="application/json",
+                        response_schema=_ReceiptSchema,
+                        media_resolution=types.MediaResolution.MEDIA_RESOLUTION_MEDIUM,
                     ),
-                    timeout=900,  # 15 minutes — thinking models can be slow
                 )
             generate_elapsed = time.monotonic() - t1
             um = getattr(response, 'usage_metadata', None)
@@ -396,9 +390,14 @@ Extract all line items from this receipt.'''
                 f"finish_reason={response.candidates[0].finish_reason if response.candidates else 'N/A'}"
             )
 
-            # Check for truncation
+            # Check for safety-blocked responses before accessing .text (can hang indefinitely)
             if response.candidates and response.candidates[0].finish_reason:
                 finish_reason = str(response.candidates[0].finish_reason)
+                if "SAFETY" in finish_reason or "BLOCKED" in finish_reason:
+                    raise GeminiAPIError(
+                        "Receipt image was blocked by safety filters",
+                        details={"error_type": "safety_blocked", "finish_reason": finish_reason},
+                    )
                 if "MAX_TOKENS" in finish_reason or "LENGTH" in finish_reason:
                     logger.warning(
                         f"Gemini response truncated (finish_reason={finish_reason}). "
@@ -421,13 +420,6 @@ Extract all line items from this receipt.'''
 
             return self._build_result(data)
 
-        except asyncio.TimeoutError:
-            elapsed = time.monotonic() - t0
-            logger.error(f"Gemini generate_content timed out after {elapsed:.1f}s (limit=900s)")
-            raise GeminiAPIError(
-                "Receipt extraction timed out",
-                details={"error_type": "timeout", "elapsed_seconds": elapsed},
-            )
         except json.JSONDecodeError as e:
             logger.error(f"Failed to parse Gemini response as JSON: {e}")
             raise GeminiAPIError(
@@ -436,6 +428,13 @@ Extract all line items from this receipt.'''
             )
         except GeminiAPIError:
             raise
+        except genai_errors.APIError as e:
+            elapsed = time.monotonic() - t0
+            logger.error(f"Gemini API error after {elapsed:.1f}s: code={e.code}, message={e.message}")
+            raise GeminiAPIError(
+                f"Gemini API error: {e.message}",
+                details={"error_type": "api_error", "status_code": e.code, "message": e.message},
+            )
         except Exception as e:
             elapsed = time.monotonic() - t0
             logger.exception(f"Extraction failed after {elapsed:.1f}s: {type(e).__name__}: {e}")

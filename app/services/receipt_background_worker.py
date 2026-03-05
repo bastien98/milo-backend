@@ -4,7 +4,6 @@ Runs outside the request lifecycle with its own DB session.
 Called via FastAPI BackgroundTasks from the upload endpoint.
 """
 
-import asyncio
 import logging
 import time
 from datetime import date, datetime, timezone
@@ -59,16 +58,10 @@ async def process_receipt_background(
             await session.commit()
             logger.info(f"⏱ bg_mark_processing: {time.monotonic() - t0:.3f}s")
 
-            # Step 2: Upload PDF to Gemini Files API and extract (15 min max)
+            # Step 2: Extract via Gemini Vision
             t0 = time.monotonic()
             gemini_service = GeminiVisionService()
-            try:
-                extraction_result = await asyncio.wait_for(
-                    gemini_service.extract_receipt(file_content, user_id=user_id),
-                    timeout=900,
-                )
-            except asyncio.TimeoutError:
-                raise Exception("Receipt processing timed out after 15 minutes")
+            extraction_result = await gemini_service.extract_receipt(file_content, user_id=user_id)
             logger.info(
                 f"⏱ bg_gemini_extraction: {time.monotonic() - t0:.3f}s - "
                 f"vendor={extraction_result.vendor_name}, "
