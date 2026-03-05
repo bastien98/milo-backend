@@ -103,9 +103,8 @@ class CashbackService:
             effective_rate=effective_rate,
         )
 
-        # Ensure balance row exists, then atomically increment
-        await self.repo.get_or_create_balance(user_id)
-        await self.repo.update_balance_atomic(user_id, cashback_amount)
+        # Upsert balance: insert if new user, atomically increment if exists
+        await self.repo.upsert_balance_increment(user_id, cashback_amount)
 
         logger.info(
             f"Cashback awarded: receipt={receipt_id}, "

@@ -1,7 +1,7 @@
 from datetime import date, datetime, time
 from typing import Optional, List
 
-from sqlalchemy import select, func, and_
+from sqlalchemy import select, func, and_, update
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -125,40 +125,39 @@ class ReceiptRepository:
         store_branch: Optional[str] = None,
         storage_key: Optional[str] = None,
         content_hash: Optional[str] = None,
-    ) -> Optional[Receipt]:
-        """Update a receipt."""
-        receipt = await self.get_by_id(receipt_id)
-        if not receipt:
-            return None
-
+    ) -> None:
+        """Update a receipt with a direct UPDATE statement (single round-trip)."""
+        values = {}
         if status is not None:
-            receipt.status = status
+            values["status"] = status
         if store_name is not None:
-            receipt.store_name = store_name
+            values["store_name"] = store_name
         if receipt_date is not None:
-            receipt.receipt_date = receipt_date
+            values["receipt_date"] = receipt_date
         if total_amount is not None:
-            receipt.total_amount = total_amount
+            values["total_amount"] = total_amount
         if error_message is not None:
-            receipt.error_message = error_message
+            values["error_message"] = error_message
         if error_code is not None:
-            receipt.error_code = error_code
+            values["error_code"] = error_code
         if processed_at is not None:
-            receipt.processed_at = processed_at
+            values["processed_at"] = processed_at
         if receipt_time is not None:
-            receipt.receipt_time = receipt_time
+            values["receipt_time"] = receipt_time
         if payment_method is not None:
-            receipt.payment_method = payment_method
+            values["payment_method"] = payment_method
         if store_branch is not None:
-            receipt.store_branch = store_branch
+            values["store_branch"] = store_branch
         if storage_key is not None:
-            receipt.storage_key = storage_key
+            values["storage_key"] = storage_key
         if content_hash is not None:
-            receipt.content_hash = content_hash
+            values["content_hash"] = content_hash
 
-        await self.db.flush()
-        await self.db.refresh(receipt)
-        return receipt
+        if values:
+            await self.db.execute(
+                update(Receipt).where(Receipt.id == receipt_id).values(**values)
+            )
+            await self.db.flush()
 
     async def get_by_user_with_transactions(
         self,

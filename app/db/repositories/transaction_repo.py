@@ -1,7 +1,8 @@
+import uuid
 from datetime import date
 from typing import Optional, List
 
-from sqlalchemy import select, func, and_, delete, or_
+from sqlalchemy import select, func, and_, delete, insert, or_
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.transaction import Transaction
@@ -148,12 +149,45 @@ class TransactionRepository:
         await self.db.refresh(transaction)
         return transaction
 
-    async def create_batch(self, transactions: list[Transaction]) -> list[Transaction]:
-        """Create multiple transactions with a single flush (much faster than N individual creates)."""
-        for txn in transactions:
-            self.db.add(txn)
+    async def create_batch(self, transactions: list[Transaction]) -> None:
+        """Bulk-insert transactions with a single multi-row INSERT statement."""
+        if not transactions:
+            return
+        rows = [
+            {
+                "id": str(uuid.uuid4()),
+                "user_id": txn.user_id,
+                "receipt_id": txn.receipt_id,
+                "store_name": txn.store_name,
+                "item_name": txn.item_name,
+                "item_price": txn.item_price,
+                "quantity": txn.quantity,
+                "unit_price": txn.unit_price,
+                "category": txn.category,
+                "date": txn.date,
+                "normalized_name": txn.normalized_name,
+                "normalized_brand": txn.normalized_brand,
+                "is_premium": txn.is_premium,
+                "is_discount": txn.is_discount,
+                "is_deposit": txn.is_deposit,
+                "is_deposit_refund": txn.is_deposit_refund,
+                "granular_category": txn.granular_category,
+                "unit_of_measure": txn.unit_of_measure,
+                "weight_or_volume": txn.weight_or_volume,
+                "price_per_unit_measure": txn.price_per_unit_measure,
+                "dp_expanded_description": txn.dp_expanded_description,
+                "dp_pack_quantity": txn.dp_pack_quantity,
+                "dp_pack_size": txn.dp_pack_size,
+                "dp_pack_unit": txn.dp_pack_unit,
+                "dp_product_variant": txn.dp_product_variant,
+                "dp_article_code": txn.dp_article_code,
+                "dp_is_bio": txn.dp_is_bio,
+                "lookup_key": txn.lookup_key,
+            }
+            for txn in transactions
+        ]
+        await self.db.execute(insert(Transaction), rows)
         await self.db.flush()
-        return transactions
 
     async def update(
         self,
