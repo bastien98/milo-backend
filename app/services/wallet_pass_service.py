@@ -52,7 +52,6 @@ class WalletPassService:
             "backgroundColor": self._color_to_rgb_string(request.background_color),
             "foregroundColor": self._color_to_rgb_string(request.foreground_color),
             "labelColor": self._color_to_rgb_string(request.label_color),
-            "logoText": request.store_name,
             "storeCard": {
                 "headerFields": [],
                 "primaryFields": [],
