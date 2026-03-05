@@ -10,16 +10,17 @@ logger = logging.getLogger(__name__)
 
 
 class CashbackService:
-    _SEGMENT_SIZE = Decimal("50")
-    _BASE_RATE = Decimal("0.0050")
-    _RATE_STEP = Decimal("0.0005")
-    _MAX_RATE = Decimal("0.0100")
-
-    # Float aliases for external reference
-    SEGMENT_SIZE = 50.0
-    BASE_RATE = 0.005
-    RATE_STEP = 0.0005
-    MAX_RATE = 0.01
+    # Progressive tiers: (upper_bound, rate)
+    # First 5 segments are €80, last segment is €100. Cap at €500.
+    _TIERS = [
+        (Decimal("80"), Decimal("0.0050")),    # €0–€80:   0.50%
+        (Decimal("160"), Decimal("0.0060")),   # €80–€160:  0.60%
+        (Decimal("240"), Decimal("0.0070")),   # €160–€240: 0.70%
+        (Decimal("320"), Decimal("0.0080")),   # €240–€320: 0.80%
+        (Decimal("400"), Decimal("0.0090")),   # €320–€400: 0.90%
+        (Decimal("500"), Decimal("0.0100")),   # €400–€500: 1.00%
+    ]
+    _MAX_ELIGIBLE = Decimal("500")
 
     def __init__(self, db: AsyncSession):
         self.db = db
@@ -30,23 +31,21 @@ class CashbackService:
         """Pure function. Returns (cashback_amount, effective_rate).
 
         Uses Decimal arithmetic internally to avoid floating-point rounding errors.
+        Applies progressive tiers and caps eligible spending at €500.
         """
         if total_amount <= 0:
             return 0.0, 0.0
 
-        remaining = Decimal(str(total_amount))
+        eligible = min(Decimal(str(total_amount)), CashbackService._MAX_ELIGIBLE)
         cashback = Decimal("0")
-        segment = 0
+        prev_bound = Decimal("0")
 
-        while remaining > 0:
-            rate = min(
-                CashbackService._BASE_RATE + segment * CashbackService._RATE_STEP,
-                CashbackService._MAX_RATE,
-            )
-            slice_ = min(remaining, CashbackService._SEGMENT_SIZE)
+        for upper_bound, rate in CashbackService._TIERS:
+            if eligible <= prev_bound:
+                break
+            slice_ = min(eligible, upper_bound) - prev_bound
             cashback += slice_ * rate
-            remaining -= slice_
-            segment += 1
+            prev_bound = upper_bound
 
         cashback = float(cashback.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP))
         effective_rate = round(cashback / total_amount, 6)
@@ -58,30 +57,25 @@ class CashbackService:
         if total_amount <= 0:
             return []
 
+        eligible = min(Decimal(str(total_amount)), CashbackService._MAX_ELIGIBLE)
         segments = []
-        remaining = Decimal(str(total_amount))
-        segment = 0
+        prev_bound = Decimal("0")
 
-        while remaining > 0:
-            rate = min(
-                CashbackService._BASE_RATE + segment * CashbackService._RATE_STEP,
-                CashbackService._MAX_RATE,
-            )
-            slice_ = min(remaining, CashbackService._SEGMENT_SIZE)
-            slice_start = segment * CashbackService._SEGMENT_SIZE
-            slice_end = slice_start + slice_
+        for i, (upper_bound, rate) in enumerate(CashbackService._TIERS):
+            if eligible <= prev_bound:
+                break
+            slice_ = min(eligible, upper_bound) - prev_bound
             seg_cashback = slice_ * rate
             segments.append(
                 {
-                    "segment": segment + 1,
-                    "slice_start": float(slice_start),
-                    "slice_end": float(slice_end),
+                    "segment": i + 1,
+                    "slice_start": float(prev_bound),
+                    "slice_end": float(prev_bound + slice_),
                     "rate": float(rate),
                     "cashback": float(seg_cashback.quantize(Decimal("0.0001"), rounding=ROUND_HALF_UP)),
                 }
             )
-            remaining -= slice_
-            segment += 1
+            prev_bound = upper_bound
 
         return segments
 
