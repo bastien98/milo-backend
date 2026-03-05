@@ -82,9 +82,12 @@ class SpinService:
         self.spin_repo = SpinRepository(db)
         self.cashback_repo = CashbackRepository(db)
 
-    def resolve_spin(self, has_double_next: bool = False) -> SpinOutcome:
+    def resolve_spin(self, has_double_next: bool = False, force_segment: Optional[int] = None) -> SpinOutcome:
         """Determine the spin outcome server-side. Pure logic, no DB."""
-        segment = _pick_weighted(WHEEL_SEGMENTS)
+        if force_segment is not None and 0 <= force_segment < len(WHEEL_SEGMENTS):
+            segment = WHEEL_SEGMENTS[force_segment]
+        else:
+            segment = _pick_weighted(WHEEL_SEGMENTS)
 
         cash_value = 0.0
         mystery_reveal_value = None
@@ -121,7 +124,7 @@ class SpinService:
         )
 
     async def execute_spin(
-        self, user_id: str, has_double_next: bool = False
+        self, user_id: str, has_double_next: bool = False, force_segment: Optional[int] = None
     ) -> tuple[SpinOutcome, float, int]:
         """
         Full spin flow:
@@ -131,7 +134,7 @@ class SpinService:
         4. Award free spin if Try Again
         5. Return (outcome, new_balance, spins_remaining)
         """
-        outcome = self.resolve_spin(has_double_next)
+        outcome = self.resolve_spin(has_double_next, force_segment=force_segment)
 
         # Credit cash to user's cashback balance
         if outcome.cash_value > 0:

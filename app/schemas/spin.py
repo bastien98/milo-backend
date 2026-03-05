@@ -7,6 +7,7 @@ from pydantic import BaseModel
 class SpinRequest(BaseModel):
     """Request to spin the wheel. has_double_next indicates the previous spin was a Double Next."""
     has_double_next: bool = False
+    force_segment: Optional[int] = None  # Test mode: force a specific segment index (0-7)
 
 
 class SpinSegmentResponse(BaseModel):
