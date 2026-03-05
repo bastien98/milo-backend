@@ -8,6 +8,7 @@ from typing import Sequence, Union
 
 from alembic import op
 import sqlalchemy as sa
+from sqlalchemy.dialects import postgresql
 
 
 # revision identifiers, used by Alembic.
@@ -18,9 +19,13 @@ depends_on: Union[str, Sequence[str], None] = None
 
 
 def upgrade() -> None:
-    # Create enum type
-    cashbackstatus = sa.Enum("pending", "confirmed", "paid_out", name="cashbackstatus")
-    cashbackstatus.create(op.get_bind(), checkfirst=True)
+    # Create enum type explicitly (checkfirst for idempotency)
+    cashbackstatus_type = postgresql.ENUM(
+        "pending", "confirmed", "paid_out",
+        name="cashbackstatus",
+        create_type=False,
+    )
+    cashbackstatus_type.create(op.get_bind(), checkfirst=True)
 
     # cashback_transactions — one row per completed receipt
     op.create_table(
@@ -45,7 +50,7 @@ def upgrade() -> None:
         sa.Column("effective_rate", sa.Float(), nullable=False),
         sa.Column(
             "status",
-            cashbackstatus,
+            cashbackstatus_type,
             nullable=False,
             server_default="confirmed",
         ),
