@@ -41,6 +41,7 @@ async def spin_wheel(
     outcome, new_balance, spins_delta = await svc.execute_spin(
         user_id=current_user.id,
         has_double_next=body.has_double_next,
+        is_respin=body.is_respin,
         force_segment=body.force_segment,
     )
 
