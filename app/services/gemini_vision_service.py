@@ -9,7 +9,6 @@ Replaces Veryfi for OCR extraction and handles:
 """
 
 import asyncio
-import io
 import json
 import logging
 import time
@@ -284,6 +283,7 @@ class GeminiVisionService:
 
     MODEL = "gemini-3.1-pro-preview"
     MAX_TOKENS = 32000  # Actual output ~6k tokens + capped thinking budget; pro model supports 64k output
+    MAX_FILE_SIZE = 20 * 1024 * 1024  # 20MB — Gemini inline data limit
 
     SYSTEM_PROMPT = '''You are a Belgian grocery receipt analyzer. Extract and normalize line items from receipt images.
 
@@ -348,10 +348,18 @@ Extract all line items from this receipt.'''
     async def extract_receipt(self, file_content: bytes, user_id: str) -> GeminiExtractionResult:
         """Extract and normalize receipt data using Gemini Vision.
 
-        Uploads PDF via Files API, runs extraction, then cleans up.
+        Passes the PDF inline to avoid the Files API upload round-trip.
         A per-user semaphore limits concurrent generate_content calls to prevent
         API-side queuing that compounds latency under concurrent uploads.
         """
+        content_size = len(file_content)
+        if content_size > self.MAX_FILE_SIZE:
+            size_mb = content_size / (1024 * 1024)
+            raise GeminiAPIError(
+                f"Receipt file too large ({size_mb:.1f}MB). Maximum is 20MB.",
+                details={"error_type": "file_too_large", "size_bytes": content_size},
+            )
+
         system_prompt = (
             self.SYSTEM_PROMPT
             .replace("{categories}", CATEGORIES_PROMPT_LIST)
@@ -359,7 +367,7 @@ Extract all line items from this receipt.'''
         )
 
         logger.info(
-            f"Gemini extraction starting: content_size={len(file_content)} bytes, "
+            f"Gemini extraction starting: content_size={content_size} bytes, "
             f"model={self.MODEL}, max_tokens={self.MAX_TOKENS}, user_id={user_id}"
         )
 
@@ -370,36 +378,11 @@ Extract all line items from this receipt.'''
             raise GeminiAPIError("GEMINI_API_KEY not configured", details={"error_type": "config"})
         logger.info(f"API key present: {api_key[:8]}...{api_key[-4:]} (length={len(api_key)})")
 
-        # Upload PDF to Gemini Files API
-        t0 = time.monotonic()
-        try:
-            uploaded_file = await self.client.aio.files.upload(
-                file=io.BytesIO(file_content),
-                config=types.UploadFileConfig(
-                    mime_type="application/pdf",
-                    display_name="receipt.pdf",
-                ),
-            )
-            upload_elapsed = time.monotonic() - t0
-            logger.info(
-                f"⏱ gemini_file_upload: {upload_elapsed:.3f}s — "
-                f"file_name={uploaded_file.name}, "
-                f"state={getattr(uploaded_file, 'state', 'unknown')}, "
-                f"uri={getattr(uploaded_file, 'uri', 'N/A')}"
-            )
-        except Exception as e:
-            logger.error(f"Gemini file upload failed after {time.monotonic() - t0:.3f}s: {type(e).__name__}: {e}")
-            raise GeminiAPIError(
-                f"File upload failed: {e}",
-                details={"error_type": "upload_failed", "error": str(e)},
-            )
+        content_part = types.Part.from_bytes(data=file_content, mime_type="application/pdf")
+        logger.info(f"Using inline PDF ({content_size} bytes)")
 
         response_text = None
         try:
-            logger.info(
-                f"Calling generate_content: model={self.MODEL}, "
-                f"file={uploaded_file.name}, timeout=900s, AFC=disabled"
-            )
             t0 = time.monotonic()
             async with _get_user_semaphore(user_id):
                 semaphore_wait = time.monotonic() - t0
@@ -409,7 +392,7 @@ Extract all line items from this receipt.'''
                 response = await asyncio.wait_for(
                     self.client.aio.models.generate_content(
                         model=self.MODEL,
-                        contents=[uploaded_file],
+                        contents=[content_part],
                         config=types.GenerateContentConfig(
                             system_instruction=system_prompt,
                             max_output_tokens=self.MAX_TOKENS,
@@ -425,7 +408,7 @@ Extract all line items from this receipt.'''
             total_elapsed = time.monotonic() - t0
             logger.info(f"⏱ gemini_generate_content: {generate_elapsed:.3f}s (total incl. semaphore: {total_elapsed:.3f}s)")
 
-            # Log full response metadata
+            # Log response metadata
             logger.info(
                 f"Response metadata: "
                 f"candidates={len(response.candidates) if response.candidates else 0}, "
@@ -456,7 +439,6 @@ Extract all line items from this receipt.'''
 
             response_text = response.text
             if not response_text:
-                # Log everything we can about the response for debugging
                 logger.error(
                     f"Gemini returned empty response. "
                     f"Candidates: {response.candidates}, "
@@ -500,13 +482,6 @@ Extract all line items from this receipt.'''
                 f"Extraction failed: {str(e)}",
                 details={"error_type": "unexpected", "error_class": type(e).__name__, "error": str(e)},
             )
-        finally:
-            # Best-effort cleanup — files auto-expire after 48h anyway
-            try:
-                await self.client.aio.files.delete(name=uploaded_file.name)
-                logger.info(f"Cleaned up uploaded file: {uploaded_file.name}")
-            except Exception as cleanup_err:
-                logger.warning(f"File cleanup failed (non-critical): {cleanup_err}")
 
     def _build_result(self, data: dict) -> GeminiExtractionResult:
         """Build extraction result from parsed JSON."""
