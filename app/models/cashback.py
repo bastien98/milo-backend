@@ -30,7 +30,8 @@ class CashbackTransaction(Base):
     cashback_amount: Mapped[float] = mapped_column(Float, nullable=False)
     effective_rate: Mapped[float] = mapped_column(Float, nullable=False)
     status: Mapped[CashbackStatus] = mapped_column(
-        SAEnum(CashbackStatus, name="cashbackstatus"),
+        SAEnum(CashbackStatus, name="cashbackstatus",
+               values_callable=lambda e: [m.value for m in e]),
         nullable=False,
         default=CashbackStatus.CONFIRMED,
     )
