@@ -12,6 +12,7 @@ from app.db.base import Base
 from app.models import user, receipt, transaction, user_profile  # noqa
 from app.models import budget, budget_history  # noqa
 from app.models import user_enriched_profile  # noqa
+from app.models import spin  # noqa
 from app.config import get_settings
 
 # this is the Alembic Config object, which provides
