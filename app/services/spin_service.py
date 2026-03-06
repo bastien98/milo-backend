@@ -208,7 +208,7 @@ class SpinService:
             await self.cashback_repo.add_spins(user_id, 1)
 
         # Expire cached ORM objects so we read fresh DB values after all mutations
-        await self.db.expire_all()
+        self.db.expire_all()
         balance = await self.cashback_repo.get_or_create_balance(user_id)
 
         return outcome, balance.current_balance, balance.spins_available
