@@ -12,7 +12,7 @@ logger = logging.getLogger(__name__)
 
 QUALIFYING_AMOUNT = 50.0
 QUALIFYING_WINDOW_DAYS = 7
-MAX_SPINS = 3
+MAX_SPINS = 5
 
 # Cashback tier boundaries (must match CashbackService._TIERS)
 _TIER_BOUNDARIES = [
@@ -61,20 +61,19 @@ async def check_gold_tier(db: AsyncSession, user_id: str) -> bool:
 def calculate_spins_for_receipt(receipt_total: float) -> int:
     """Calculate spins awarded based on cashback segments covered.
 
-    Spins start from the second segment (€80-€160).
-    €0-€80: 0 spins, €80-€160: 1 spin, €160-€240: 2 spins, €240+: 3 spins (max).
+    +1 spin for each segment crossed from €80 onwards.
+    €0-€80: 0 spins, €80-€160: 1, €160-€240: 2, €240-€320: 3, €320-€400: 4, €400-€500: 5 (max).
     """
     if receipt_total <= 0:
         return 0
 
     amount = Decimal(str(receipt_total))
 
-    # Spins only from second segment onwards
-    if amount <= _TIER_BOUNDARIES[0]:  # <= €80
-        return 0
-    elif amount <= _TIER_BOUNDARIES[1]:  # <= €160
-        return 1
-    elif amount <= _TIER_BOUNDARIES[2]:  # <= €240
-        return 2
-    else:
-        return MAX_SPINS
+    # +1 spin for each segment crossed from €80 onwards
+    spins = 0
+    for boundary in _TIER_BOUNDARIES[:-1]:  # skip last boundary (€500 cap)
+        if amount > boundary:
+            spins += 1
+        else:
+            break
+    return min(spins, MAX_SPINS)

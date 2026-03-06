@@ -44,7 +44,7 @@ async def get_summary(
     balance = await svc.get_balance(current_user.id)
     is_gold = await check_gold_tier(db, current_user.id)
     transactions, total = await svc.get_transaction_history(
-        current_user.id, page=1, page_size=5
+        current_user.id, page=1, page_size=10
     )
 
     # Build response with store_name/receipt_date from the receipt relationship
