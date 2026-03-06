@@ -2,7 +2,7 @@ import uuid
 from datetime import datetime
 from typing import TYPE_CHECKING, Optional
 
-from sqlalchemy import String, DateTime, Float, ForeignKey, Enum as SAEnum
+from sqlalchemy import String, DateTime, Float, Integer, ForeignKey, Enum as SAEnum
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from sqlalchemy.sql import func
 
@@ -35,6 +35,7 @@ class CashbackTransaction(Base):
         nullable=False,
         default=CashbackStatus.CONFIRMED,
     )
+    spins_awarded: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
     )
@@ -56,6 +57,7 @@ class CashbackBalance(Base):
     total_earned: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
     total_paid_out: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
     current_balance: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
+    spins_available: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
     updated_at: Mapped[Optional[datetime]] = mapped_column(
         DateTime(timezone=True), onupdate=func.now()
     )

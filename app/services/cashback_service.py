@@ -85,7 +85,12 @@ class CashbackService:
         receipt_id: str,
         receipt_total: float,
     ) -> CashbackTransaction:
-        """Award cashback for a completed receipt. Idempotent."""
+        """Award cashback for a completed receipt. Idempotent.
+
+        Also checks Gold Tier status and awards spins accordingly.
+        """
+        from app.services.gold_tier_service import check_gold_tier, calculate_spins_for_receipt
+
         # Check idempotency — skip if already awarded
         existing = await self.repo.get_cashback_transaction_by_receipt(receipt_id)
         if existing:
@@ -94,6 +99,10 @@ class CashbackService:
 
         cashback_amount, effective_rate = self.calculate_cashback(receipt_total)
 
+        # Determine Gold Tier status and spins
+        is_gold = await check_gold_tier(self.db, user_id)
+        spins_awarded = calculate_spins_for_receipt(receipt_total) if is_gold else 0
+
         # Create transaction
         txn = await self.repo.create_cashback_transaction(
             user_id=user_id,
@@ -101,14 +110,20 @@ class CashbackService:
             receipt_total=receipt_total,
             cashback_amount=cashback_amount,
             effective_rate=effective_rate,
+            spins_awarded=spins_awarded,
         )
 
         # Upsert balance: insert if new user, atomically increment if exists
         await self.repo.upsert_balance_increment(user_id, cashback_amount)
 
+        # Add spins to balance
+        if spins_awarded > 0:
+            await self.repo.add_spins(user_id, spins_awarded)
+
         logger.info(
             f"Cashback awarded: receipt={receipt_id}, "
-            f"total={receipt_total}, cashback={cashback_amount}, rate={effective_rate}"
+            f"total={receipt_total}, cashback={cashback_amount}, "
+            f"rate={effective_rate}, spins={spins_awarded}, gold_tier={is_gold}"
         )
         return txn
 

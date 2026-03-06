@@ -20,6 +20,7 @@ class CashbackRepository:
         receipt_total: float,
         cashback_amount: float,
         effective_rate: float,
+        spins_awarded: int = 0,
     ) -> CashbackTransaction:
         txn = CashbackTransaction(
             user_id=user_id,
@@ -27,6 +28,7 @@ class CashbackRepository:
             receipt_total=receipt_total,
             cashback_amount=cashback_amount,
             effective_rate=effective_rate,
+            spins_awarded=spins_awarded,
             status=CashbackStatus.CONFIRMED,
         )
         self.db.add(txn)
@@ -102,3 +104,28 @@ class CashbackRepository:
         )
         await self.db.execute(stmt)
         await self.db.flush()
+
+    async def add_spins(self, user_id: str, spins: int) -> None:
+        """Atomically add spins to user's balance."""
+        if spins <= 0:
+            return
+        await self.get_or_create_balance(user_id)
+        await self.db.execute(
+            update(CashbackBalance)
+            .where(CashbackBalance.user_id == user_id)
+            .values(spins_available=CashbackBalance.spins_available + spins)
+        )
+        await self.db.flush()
+
+    async def consume_spin(self, user_id: str) -> bool:
+        """Atomically consume 1 spin. Returns False if no spins available."""
+        result = await self.db.execute(
+            update(CashbackBalance)
+            .where(
+                CashbackBalance.user_id == user_id,
+                CashbackBalance.spins_available > 0,
+            )
+            .values(spins_available=CashbackBalance.spins_available - 1)
+        )
+        await self.db.flush()
+        return result.rowcount > 0
