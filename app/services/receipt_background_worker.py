@@ -27,7 +27,6 @@ async def process_receipt_background(
     user_id: str,
     file_content: bytes,
     filename: str,
-    receipt_date_override: Optional[date] = None,
 ) -> None:
     """Process a receipt in the background.
 
@@ -80,9 +79,83 @@ async def process_receipt_background(
             cleaned_store_name = canonical_store
             logger.info(f"⏱ bg_store_resolution: {time.monotonic() - t0:.3f}s")
 
+            # Step 3.5: Post-extraction fraud checks
+            from app.services.fraud import FraudDetectionService
+            from app.config import get_settings
+
+            bg_settings = get_settings()
+            if bg_settings.DUPLICATE_DETECTION_ENABLED:
+                t0 = time.monotonic()
+                fraud_service = FraudDetectionService()
+
+                item_count = len(extraction_result.line_items)
+                preliminary_total = extraction_result.total or sum(
+                    item.total_price for item in extraction_result.line_items
+                )
+
+                extraction_data = {
+                    "store_name": cleaned_store_name,
+                    "receipt_date": extraction_result.receipt_date,
+                    "total_amount": preliminary_total,
+                    "item_count": item_count,
+                }
+
+                # result_store collects computed values (e.g. fingerprint) from checks
+                result_store: dict = {}
+                fraud_result = await fraud_service.run_post_extraction_checks(
+                    extraction_data,
+                    user_id=user_id,
+                    receipt_id=receipt_id,
+                    receipt_repo=receipt_repo,
+                    result_store=result_store,
+                )
+
+                if fraud_result.should_block:
+                    blocking = fraud_result.blocking_signal
+                    # Map check names to user-facing error codes and messages
+                    error_code_map = {
+                        "receipt_age": "receipt_too_old",
+                        "fingerprint": "duplicate_content",
+                    }
+                    error_message_map = {
+                        "receipt_age": "This receipt is too old. Only receipts from the last 7 days are accepted.",
+                        "fingerprint": "This receipt appears to be a duplicate of one you already uploaded.",
+                    }
+                    check_name = blocking.check_name if blocking else ""
+                    error_code = error_code_map.get(check_name, "fraud_detected")
+                    error_message = error_message_map.get(check_name, "Receipt rejected by fraud detection.")
+
+                    logger.warning(
+                        f"Fraud check blocked receipt: receipt_id={receipt_id}, "
+                        f"error_code={error_code}, flags={fraud_result.fraud_flags}"
+                    )
+                    await receipt_repo.update(
+                        receipt_id=receipt_id,
+                        status=ReceiptStatus.FAILED,
+                        error_message=error_message,
+                        error_code=error_code,
+                        receipt_date=extraction_result.receipt_date,
+                        store_name=cleaned_store_name,
+                        fraud_score=fraud_result.fraud_score,
+                        fraud_flags=fraud_result.fraud_flags_json,
+                        receipt_fingerprint=result_store.get("receipt_fingerprint"),
+                    )
+                    await session.commit()
+                    logger.info(f"bg_fraud_check: {time.monotonic() - t0:.3f}s — BLOCKED")
+                    return
+
+                # Store fraud metadata + fingerprint on the receipt
+                await receipt_repo.update(
+                    receipt_id=receipt_id,
+                    fraud_score=fraud_result.fraud_score,
+                    fraud_flags=fraud_result.fraud_flags_json,
+                    receipt_fingerprint=result_store.get("receipt_fingerprint"),
+                )
+                logger.info(f"bg_fraud_check: {time.monotonic() - t0:.3f}s — CLEAN")
+
             # Step 4: Create transactions (batch insert — single flush)
             t0 = time.monotonic()
-            final_date = receipt_date_override or extraction_result.receipt_date
+            final_date = extraction_result.receipt_date
             txn_date = final_date or date.today()
 
             transactions = [

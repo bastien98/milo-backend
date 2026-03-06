@@ -54,6 +54,11 @@ class Receipt(Base):
     storage_key: Mapped[Optional[str]] = mapped_column(String, nullable=True)
     content_hash: Mapped[Optional[str]] = mapped_column(String(64), nullable=True, index=True)
 
+    # Fraud detection
+    receipt_fingerprint: Mapped[Optional[str]] = mapped_column(String(128), nullable=True, index=True)
+    fraud_score: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    fraud_flags: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+
     # Timestamps
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()

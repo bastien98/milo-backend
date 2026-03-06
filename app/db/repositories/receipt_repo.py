@@ -93,6 +93,8 @@ class ReceiptRepository:
         status: ReceiptStatus = ReceiptStatus.PENDING,
         storage_key: Optional[str] = None,
         content_hash: Optional[str] = None,
+        fraud_score: Optional[float] = None,
+        fraud_flags: Optional[str] = None,
     ) -> Receipt:
         """Create a new receipt."""
         receipt = Receipt(
@@ -104,6 +106,8 @@ class ReceiptRepository:
             source=ReceiptSource.RECEIPT_UPLOAD,
             storage_key=storage_key,
             content_hash=content_hash,
+            fraud_score=fraud_score,
+            fraud_flags=fraud_flags,
         )
         self.db.add(receipt)
         await self.db.flush()
@@ -125,6 +129,9 @@ class ReceiptRepository:
         store_branch: Optional[str] = None,
         storage_key: Optional[str] = None,
         content_hash: Optional[str] = None,
+        receipt_fingerprint: Optional[str] = None,
+        fraud_score: Optional[float] = None,
+        fraud_flags: Optional[str] = None,
     ) -> None:
         """Update a receipt with a direct UPDATE statement (single round-trip)."""
         values = {}
@@ -152,12 +159,42 @@ class ReceiptRepository:
             values["storage_key"] = storage_key
         if content_hash is not None:
             values["content_hash"] = content_hash
+        if receipt_fingerprint is not None:
+            values["receipt_fingerprint"] = receipt_fingerprint
+        if fraud_score is not None:
+            values["fraud_score"] = fraud_score
+        if fraud_flags is not None:
+            values["fraud_flags"] = fraud_flags
 
         if values:
             await self.db.execute(
                 update(Receipt).where(Receipt.id == receipt_id).values(**values)
             )
             await self.db.flush()
+
+    async def find_by_fingerprint_and_user(
+        self,
+        fingerprint: str,
+        user_id: str,
+        exclude_receipt_id: Optional[str] = None,
+    ) -> Optional[Receipt]:
+        """Find a completed receipt with the same fingerprint for this user.
+
+        Scoped to user (same person re-uploading a modified version).
+        Excludes FAILED receipts and optionally the current receipt.
+        """
+        conditions = [
+            Receipt.receipt_fingerprint == fingerprint,
+            Receipt.user_id == user_id,
+            Receipt.status == ReceiptStatus.COMPLETED,
+        ]
+        if exclude_receipt_id:
+            conditions.append(Receipt.id != exclude_receipt_id)
+
+        result = await self.db.execute(
+            select(Receipt).where(and_(*conditions)).limit(1)
+        )
+        return result.scalar_one_or_none()
 
     async def get_by_user_with_transactions(
         self,

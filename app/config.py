@@ -49,6 +49,9 @@ class Settings(BaseSettings):
     # Duplicate detection
     DUPLICATE_DETECTION_ENABLED: bool = True
 
+    # Fraud detection — 7-day rolling window for receipt uploads
+    RECEIPT_AGE_CHECK_ENABLED: bool = True
+
     # CORS
     CORS_ORIGINS: List[str] = ["*"]
 

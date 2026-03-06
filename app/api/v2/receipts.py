@@ -30,7 +30,8 @@ from app.schemas.receipt import (
 from app.services.receipt_background_worker import process_receipt_background
 from app.db.repositories.receipt_repo import ReceiptRepository
 from app.db.repositories.transaction_repo import TransactionRepository
-from app.core.exceptions import ResourceNotFoundError, DuplicateReceiptError, ImageValidationError
+from app.core.exceptions import ResourceNotFoundError, DuplicateReceiptError, ImageValidationError, ReceiptFraudError
+from app.services.fraud import FraudDetectionService
 
 router = APIRouter()
 
@@ -39,7 +40,6 @@ router = APIRouter()
 async def upload_receipt(
     background_tasks: BackgroundTasks,
     file: UploadFile = File(...),
-    receipt_date: Optional[date] = Query(None, description="Override receipt date"),
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_db_user),
 ):
@@ -72,6 +72,26 @@ async def upload_receipt(
             details={"max_size_mb": 5},
         )
 
+    # PDF fraud metadata check (upload-time, lightweight)
+    fraud_score = None
+    fraud_flags_json = None
+    if settings.DUPLICATE_DETECTION_ENABLED:
+        fraud_service = FraudDetectionService()
+        fraud_result = await fraud_service.run_upload_checks(file_content)
+
+        if fraud_result.should_block:
+            raise ReceiptFraudError(
+                "This file appears to have been modified. Please upload the original PDF.",
+                details={
+                    "error_code": "pdf_tampering_detected",
+                    "fraud_score": fraud_result.fraud_score,
+                    "fraud_flags": fraud_result.fraud_flags,
+                },
+            )
+
+        fraud_score = fraud_result.fraud_score
+        fraud_flags_json = fraud_result.fraud_flags_json
+
     # Compute content hash for duplicate detection (only when enabled — storing NULL
     # bypasses the partial unique index ix_receipts_content_hash_active which only
     # applies WHERE content_hash IS NOT NULL)
@@ -103,6 +123,8 @@ async def upload_receipt(
         file_size=len(file_content),
         status=ReceiptStatus.PENDING,
         content_hash=content_hash,
+        fraud_score=fraud_score,
+        fraud_flags=fraud_flags_json,
     )
 
     # Commit DB — catch IntegrityError from the unique partial index on content_hash
@@ -128,7 +150,6 @@ async def upload_receipt(
         user_id=current_user.id,
         file_content=file_content,
         filename=filename,
-        receipt_date_override=receipt_date,
     )
 
     return ReceiptUploadAcceptedResponse(
