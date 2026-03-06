@@ -91,7 +91,8 @@ class SpinService:
         self.cashback_repo = CashbackRepository(db)
 
     def resolve_spin(
-        self, has_double_next: bool = False, is_respin: bool = False, force_segment: Optional[int] = None
+        self, has_double_next: bool = False, is_respin: bool = False,
+        is_last_spin: bool = False, force_segment: Optional[int] = None,
     ) -> SpinOutcome:
         """Determine the spin outcome server-side. Pure logic, no DB."""
         if force_segment is not None and 0 <= force_segment < len(WHEEL_SEGMENTS):
@@ -100,6 +101,9 @@ class SpinService:
             excluded_types = set()
             # Prevent consecutive 2x
             if has_double_next:
+                excluded_types.add("double_next")
+            # Prevent 2x on last spin (no next spin to double)
+            if is_last_spin:
                 excluded_types.add("double_next")
             # Prevent consecutive retry (Try Again)
             if is_respin:
@@ -161,18 +165,29 @@ class SpinService:
     ) -> tuple[SpinOutcome, float, int]:
         """
         Full spin flow:
-        1. Resolve outcome
-        2. Credit cashback balance if cash won
-        3. Record spin transaction
-        4. Award free spin if Try Again
-        5. Return (outcome, new_balance, spins_remaining)
+        1. Consume a spin from balance (server-side)
+        2. Resolve outcome
+        3. Credit cashback balance if cash won
+        4. Record spin transaction
+        5. Award free spin if Try Again
+        6. Return (outcome, new_balance, spins_remaining)
         """
-        outcome = self.resolve_spin(has_double_next, is_respin=is_respin, force_segment=force_segment)
+        # Consume spin server-side
+        await self.cashback_repo.consume_spin(user_id)
+
+        # Check if this was the user's last spin (no spins left after consuming)
+        balance_after_consume = await self.cashback_repo.get_or_create_balance(user_id)
+        is_last_spin = balance_after_consume.spins_available == 0
+
+        outcome = self.resolve_spin(
+            has_double_next, is_respin=is_respin,
+            is_last_spin=is_last_spin, force_segment=force_segment,
+        )
 
         # Credit cash to user's cashback balance
         if outcome.cash_value > 0:
             await self.cashback_repo.get_or_create_balance(user_id)
-            await self.cashback_repo.update_balance_atomic(user_id, outcome.cash_value)
+            await self.cashback_repo.upsert_balance_increment(user_id, outcome.cash_value)
 
         # Record the spin transaction
         await self.spin_repo.create_spin_transaction(
@@ -189,14 +204,13 @@ class SpinService:
         await self.spin_repo.update_budget(outcome.cash_value)
 
         # Award free spin if Try Again
-        spins_delta = 0
         if outcome.grants_free_spin:
-            spins_delta = 1  # net zero: used 1, got 1 back
+            await self.cashback_repo.add_spins(user_id, 1)
 
-        # Get updated balance
+        # Get updated balance (refreshed after all mutations)
         balance = await self.cashback_repo.get_or_create_balance(user_id)
 
-        return outcome, balance.current_balance, spins_delta
+        return outcome, balance.current_balance, balance.spins_available
 
     @staticmethod
     def get_wheel_config() -> list[dict]:
