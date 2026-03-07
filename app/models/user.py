@@ -18,6 +18,7 @@ if TYPE_CHECKING:
     from app.models.cashback import CashbackTransaction, CashbackBalance
     from app.models.spin import SpinTransaction
     from app.models.referral import Referral
+    from app.models.withdrawal import WithdrawalRequest
 
 
 class User(Base):
@@ -70,4 +71,7 @@ class User(Base):
     referrals_made: Mapped[List["Referral"]] = relationship(
         "Referral", foreign_keys="[Referral.referrer_id]",
         back_populates="referrer", cascade="all, delete-orphan"
+    )
+    withdrawal_requests: Mapped[List["WithdrawalRequest"]] = relationship(
+        "WithdrawalRequest", back_populates="user", cascade="all, delete-orphan"
     )

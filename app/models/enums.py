@@ -57,3 +57,11 @@ class CashbackStatus(str, Enum):
 class ReferralStatus(str, Enum):
     PENDING = "pending"
     COMPLETED = "completed"
+
+
+class WithdrawalStatus(str, Enum):
+    PENDING_REVIEW = "pending_review"
+    AUTO_APPROVED = "auto_approved"
+    APPROVED = "approved"
+    REJECTED = "rejected"
+    PAID_OUT = "paid_out"
