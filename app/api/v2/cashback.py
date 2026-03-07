@@ -1,6 +1,6 @@
 from math import ceil
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_db, get_current_db_user
@@ -14,6 +14,7 @@ from app.schemas.cashback import (
     CashbackTransactionResponse,
     CashbackCalculationPreview,
     CashbackSegment,
+    CashbackClaimResponse,
 )
 
 router = APIRouter()
@@ -138,4 +139,29 @@ async def preview_cashback(
         cashback_amount=cashback_amount,
         effective_rate=effective_rate,
         segments=[CashbackSegment(**s) for s in segments],
+    )
+
+
+@router.post("/claim/{receipt_id}", response_model=CashbackClaimResponse)
+async def claim_cashback(
+    receipt_id: str,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_db_user),
+):
+    """Confirm a pending cashback reward and credit it to the user's wallet.
+
+    Called when the user taps 'Tap to claim' in the app. Idempotent — safe to
+    call multiple times for the same receipt.
+    """
+    svc = CashbackService(db)
+    txn = await svc.claim_cashback(current_user.id, receipt_id)
+    if txn is None:
+        raise HTTPException(status_code=404, detail="No cashback transaction found for this receipt")
+
+    balance = await svc.get_balance(current_user.id)
+    return CashbackClaimResponse(
+        receipt_id=receipt_id,
+        cashback_amount=txn.cashback_amount,
+        spins_awarded=txn.spins_awarded,
+        new_balance=balance.current_balance,
     )

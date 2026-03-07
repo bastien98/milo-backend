@@ -1,10 +1,12 @@
 import logging
 from decimal import Decimal, ROUND_HALF_UP
+from typing import Optional
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.repositories.cashback_repo import CashbackRepository
 from app.models.cashback import CashbackTransaction, CashbackBalance
+from app.models.enums import CashbackStatus
 
 logger = logging.getLogger(__name__)
 
@@ -85,16 +87,18 @@ class CashbackService:
         receipt_id: str,
         receipt_total: float,
     ) -> CashbackTransaction:
-        """Award cashback for a completed receipt. Idempotent.
+        """Create a PENDING cashback transaction for a completed receipt. Idempotent.
 
-        Also checks Gold Tier status and awards spins accordingly.
+        The balance is NOT credited here. The user must explicitly tap "Tap to claim"
+        in the app, which calls claim_cashback(), to move the transaction to CONFIRMED
+        and credit the amount to their wallet.
         """
         from app.services.gold_tier_service import check_gold_tier, calculate_spins_for_receipt
 
-        # Check idempotency — skip if already awarded
+        # Check idempotency — skip if already created
         existing = await self.repo.get_cashback_transaction_by_receipt(receipt_id)
         if existing:
-            logger.info(f"Cashback already awarded for receipt {receipt_id}, skipping")
+            logger.info(f"Cashback transaction already exists for receipt {receipt_id}, skipping")
             return existing
 
         cashback_amount, effective_rate = self.calculate_cashback(receipt_total)
@@ -103,7 +107,8 @@ class CashbackService:
         is_gold = await check_gold_tier(self.db, user_id)
         spins_awarded = calculate_spins_for_receipt(receipt_total) if is_gold else 0
 
-        # Create transaction
+        # Create PENDING transaction — balance and spins are NOT credited yet.
+        # They will be credited when the user claims via claim_cashback().
         txn = await self.repo.create_cashback_transaction(
             user_id=user_id,
             receipt_id=receipt_id,
@@ -111,19 +116,49 @@ class CashbackService:
             cashback_amount=cashback_amount,
             effective_rate=effective_rate,
             spins_awarded=spins_awarded,
+            status=CashbackStatus.PENDING,
         )
 
-        # Upsert balance: insert if new user, atomically increment if exists
-        await self.repo.upsert_balance_increment(user_id, cashback_amount)
-
-        # Add spins to balance
-        if spins_awarded > 0:
-            await self.repo.add_spins(user_id, spins_awarded)
-
         logger.info(
-            f"Cashback awarded: receipt={receipt_id}, "
+            f"Cashback pending (awaiting claim): receipt={receipt_id}, "
             f"total={receipt_total}, cashback={cashback_amount}, "
             f"rate={effective_rate}, spins={spins_awarded}, gold_tier={is_gold}"
+        )
+        return txn
+
+    async def claim_cashback(
+        self, user_id: str, receipt_id: str
+    ) -> Optional[CashbackTransaction]:
+        """Confirm a PENDING cashback transaction and credit the user's wallet.
+
+        Idempotent: safe to call multiple times for the same receipt.
+        Returns None if no transaction exists for this receipt.
+        Returns the transaction unchanged if already CONFIRMED or PAID_OUT.
+        """
+        txn = await self.repo.get_cashback_transaction_by_receipt(receipt_id)
+        if txn is None:
+            return None
+
+        # Security: ensure the transaction belongs to the requesting user
+        if txn.user_id != user_id:
+            return None
+
+        # Already confirmed — idempotent
+        if txn.status in (CashbackStatus.CONFIRMED, CashbackStatus.PAID_OUT):
+            logger.info(f"Cashback already confirmed for receipt {receipt_id}, skipping")
+            return txn
+
+        # Confirm the transaction and credit balance + spins atomically
+        await self.repo.confirm_transaction(receipt_id)
+        await self.repo.upsert_balance_increment(user_id, txn.cashback_amount)
+        if txn.spins_awarded > 0:
+            await self.repo.add_spins(user_id, txn.spins_awarded)
+
+        txn.status = CashbackStatus.CONFIRMED
+
+        logger.info(
+            f"Cashback claimed: receipt={receipt_id}, "
+            f"cashback={txn.cashback_amount}, spins={txn.spins_awarded}"
         )
         return txn
 

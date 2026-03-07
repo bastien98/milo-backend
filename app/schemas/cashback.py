@@ -62,3 +62,10 @@ class CashbackHistoryResponse(BaseModel):
     page: int
     page_size: int
     total_pages: int
+
+
+class CashbackClaimResponse(BaseModel):
+    receipt_id: str
+    cashback_amount: float
+    spins_awarded: int = 0
+    new_balance: float

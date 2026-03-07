@@ -21,6 +21,7 @@ class CashbackRepository:
         cashback_amount: float,
         effective_rate: float,
         spins_awarded: int = 0,
+        status: CashbackStatus = CashbackStatus.PENDING,
     ) -> CashbackTransaction:
         txn = CashbackTransaction(
             user_id=user_id,
@@ -29,11 +30,20 @@ class CashbackRepository:
             cashback_amount=cashback_amount,
             effective_rate=effective_rate,
             spins_awarded=spins_awarded,
-            status=CashbackStatus.CONFIRMED,
+            status=status,
         )
         self.db.add(txn)
         await self.db.flush()
         return txn
+
+    async def confirm_transaction(self, receipt_id: str) -> None:
+        """Mark a PENDING transaction as CONFIRMED."""
+        await self.db.execute(
+            update(CashbackTransaction)
+            .where(CashbackTransaction.receipt_id == receipt_id)
+            .values(status=CashbackStatus.CONFIRMED)
+        )
+        await self.db.flush()
 
     async def get_cashback_transaction_by_receipt(
         self, receipt_id: str
