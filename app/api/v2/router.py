@@ -1,7 +1,7 @@
 from fastapi import APIRouter
 
 # Import v2-specific endpoints (using Gemini)
-from app.api.v2 import chat, receipts, periods, budgets, wallet_pass, categories, promos, cashback, spin
+from app.api.v2 import chat, receipts, periods, budgets, wallet_pass, categories, promos, cashback, spin, referral
 
 # Reuse v1 endpoints that don't interact with LLMs
 from app.api.v1 import health, transactions, analytics, profile
@@ -48,3 +48,6 @@ api_router.include_router(cashback.router, prefix="/cashback", tags=["v2 - cashb
 
 # Spin wheel - prize wheel with server-side outcome determination
 api_router.include_router(spin.router, prefix="/spin", tags=["v2 - spin"])
+
+# Referral - dual-sided referral program
+api_router.include_router(referral.router, prefix="/referral", tags=["v2 - referral"])

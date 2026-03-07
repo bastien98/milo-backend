@@ -52,3 +52,8 @@ class CashbackStatus(str, Enum):
     PENDING = "pending"
     CONFIRMED = "confirmed"
     PAID_OUT = "paid_out"
+
+
+class ReferralStatus(str, Enum):
+    PENDING = "pending"
+    COMPLETED = "completed"

@@ -31,6 +31,8 @@ class UserProfile(Base):
         SQLEnum(Language, native_enum=False), nullable=True
     )
     preferred_stores: Mapped[Optional[list]] = mapped_column(JSONB, nullable=True)
+    referral_code: Mapped[Optional[str]] = mapped_column(String(10), unique=True, nullable=True, index=True)
+    referred_by_code: Mapped[Optional[str]] = mapped_column(String(10), nullable=True)
     profile_completed: Mapped[bool] = mapped_column(Boolean, default=False)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()

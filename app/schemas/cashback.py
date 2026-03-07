@@ -17,6 +17,7 @@ class CashbackTransactionResponse(BaseModel):
     store_name: Optional[str] = None
     receipt_date: Optional[date] = None
     spins_awarded: int = 0
+    is_referral_reward: bool = False
 
     class Config:
         from_attributes = True

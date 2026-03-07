@@ -169,6 +169,19 @@ async def process_receipt_background(
                 await session.commit()
                 logger.info(f"⏱ bg_award_cashback: {time.monotonic() - t0:.3f}s")
 
+            # Step 8: Complete referral if this is referee's first receipt
+            try:
+                t0 = time.monotonic()
+                from app.services.referral_service import ReferralService
+                referral_svc = ReferralService(session)
+                referral_completed = await referral_svc.complete_referral_on_first_receipt(user_id)
+                await session.commit()
+                if referral_completed:
+                    logger.info(f"⏱ bg_referral_completed: {time.monotonic() - t0:.3f}s")
+            except Exception as ref_err:
+                logger.warning(f"Referral completion check failed (non-fatal): {ref_err}")
+                await session.rollback()
+
             invalidate_user(user_id)
 
             logger.info(

@@ -1,12 +1,16 @@
 from math import ceil
 
 from fastapi import APIRouter, Depends, HTTPException, Query
+from sqlalchemy import select, or_, and_
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_db, get_current_db_user
+from app.models.referral import Referral
+from app.models.enums import CashbackStatus, ReferralStatus
 from app.models.user import User
 from app.services.cashback_service import CashbackService
 from app.services.gold_tier_service import check_gold_tier
+from app.services.referral_service import REWARD_EUROS, REWARD_SPINS
 from app.schemas.cashback import (
     CashbackBalanceResponse,
     CashbackSummaryResponse,
@@ -48,9 +52,11 @@ async def get_summary(
         current_user.id, page=1, page_size=10
     )
 
-    # Build response with store_name/receipt_date from the receipt relationship
+    # Build response — only include claimed (CONFIRMED/PAID_OUT) transactions
     recent = []
     for txn in transactions:
+        if txn.status not in (CashbackStatus.CONFIRMED, CashbackStatus.PAID_OUT):
+            continue
         receipt = txn.receipt
         recent.append(
             CashbackTransactionResponse(
@@ -66,6 +72,42 @@ async def get_summary(
                 spins_awarded=txn.spins_awarded,
             )
         )
+
+    # Include claimed referral rewards as recent entries
+    referral_result = await db.execute(
+        select(Referral).where(
+            or_(
+                and_(
+                    Referral.referrer_id == current_user.id,
+                    Referral.referrer_reward_claimed == True,
+                ),
+                and_(
+                    Referral.referee_id == current_user.id,
+                    Referral.referee_reward_claimed == True,
+                ),
+            )
+        ).order_by(Referral.completed_at.desc())
+    )
+    claimed_referrals = referral_result.scalars().all()
+    for ref in claimed_referrals:
+        recent.append(
+            CashbackTransactionResponse(
+                id=f"referral-{ref.id}",
+                receipt_id=f"referral-{ref.id}",
+                receipt_total=0,
+                cashback_amount=REWARD_EUROS,
+                effective_rate=0,
+                status=CashbackStatus.CONFIRMED,
+                created_at=ref.completed_at or ref.created_at,
+                store_name="Referral Bonus",
+                receipt_date=None,
+                spins_awarded=REWARD_SPINS,
+                is_referral_reward=True,
+            )
+        )
+
+    # Sort all entries by date descending
+    recent.sort(key=lambda x: x.created_at, reverse=True)
 
     avg_cashback = (
         round(balance.total_earned / total, 2) if total > 0 else 0.0

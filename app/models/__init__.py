@@ -6,6 +6,8 @@ from app.models.enums import ReceiptStatus, Gender, CashbackStatus
 from app.models.budget import Budget
 from app.models.budget_history import BudgetHistory
 from app.models.cashback import CashbackTransaction, CashbackBalance
+from app.models.referral import Referral
+from app.models.enums import ReferralStatus
 
 __all__ = [
     "User",
@@ -15,8 +17,10 @@ __all__ = [
     "ReceiptStatus",
     "Gender",
     "CashbackStatus",
+    "ReferralStatus",
     "Budget",
     "BudgetHistory",
     "CashbackTransaction",
     "CashbackBalance",
+    "Referral",
 ]

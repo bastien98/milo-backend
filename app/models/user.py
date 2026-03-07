@@ -17,6 +17,7 @@ if TYPE_CHECKING:
     from app.models.budget_history import BudgetHistory
     from app.models.cashback import CashbackTransaction, CashbackBalance
     from app.models.spin import SpinTransaction
+    from app.models.referral import Referral
 
 
 class User(Base):
@@ -65,4 +66,8 @@ class User(Base):
     )
     spin_transactions: Mapped[List["SpinTransaction"]] = relationship(
         "SpinTransaction", back_populates="user", cascade="all, delete-orphan"
+    )
+    referrals_made: Mapped[List["Referral"]] = relationship(
+        "Referral", foreign_keys="[Referral.referrer_id]",
+        back_populates="referrer", cascade="all, delete-orphan"
     )
