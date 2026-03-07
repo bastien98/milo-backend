@@ -106,6 +106,32 @@ async def get_summary(
             )
         )
 
+    # Include claimed streak rewards as recent entries
+    from app.models.streak import StreakReward
+    from app.models.enums import StreakRewardStatus
+    streak_result = await db.execute(
+        select(StreakReward).where(
+            StreakReward.user_id == current_user.id,
+            StreakReward.status == StreakRewardStatus.CLAIMED,
+        ).order_by(StreakReward.claimed_at.desc()).limit(10)
+    )
+    for sr in streak_result.scalars().all():
+        recent.append(
+            CashbackTransactionResponse(
+                id=f"streak-{sr.id}",
+                receipt_id=f"streak-{sr.id}",
+                receipt_total=0,
+                cashback_amount=sr.cash_amount,
+                effective_rate=0,
+                status=CashbackStatus.CONFIRMED,
+                created_at=sr.claimed_at or sr.created_at,
+                store_name=f"Streak Week {sr.week_number}",
+                receipt_date=None,
+                spins_awarded=sr.spins_amount,
+                is_streak_reward=True,
+            )
+        )
+
     # Sort all entries by date descending
     recent.sort(key=lambda x: x.created_at, reverse=True)
 

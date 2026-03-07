@@ -169,6 +169,19 @@ async def process_receipt_background(
                 await session.commit()
                 logger.info(f"⏱ bg_award_cashback: {time.monotonic() - t0:.3f}s")
 
+            # Step 7b: Update streak if receipt qualifies (>€50)
+            if final_total and final_total > 50:
+                try:
+                    t0 = time.monotonic()
+                    from app.services.streak_service import StreakService
+                    streak_svc = StreakService(session)
+                    await streak_svc.record_qualifying_receipt(user_id, final_total)
+                    await session.commit()
+                    logger.info(f"⏱ bg_streak_update: {time.monotonic() - t0:.3f}s")
+                except Exception as streak_err:
+                    logger.warning(f"Streak update failed (non-fatal): {streak_err}")
+                    await session.rollback()
+
             # Step 8: Complete referral if this is referee's first receipt
             try:
                 t0 = time.monotonic()

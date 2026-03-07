@@ -1,7 +1,7 @@
 from fastapi import APIRouter
 
 # Import v2-specific endpoints (using Gemini)
-from app.api.v2 import chat, receipts, periods, budgets, wallet_pass, categories, promos, cashback, spin, referral, withdrawal
+from app.api.v2 import chat, receipts, periods, budgets, wallet_pass, categories, promos, cashback, spin, referral, withdrawal, streak
 
 # Reuse v1 endpoints that don't interact with LLMs
 from app.api.v1 import health, transactions, analytics, profile
@@ -54,3 +54,6 @@ api_router.include_router(referral.router, prefix="/referral", tags=["v2 - refer
 
 # Withdrawal - cash withdrawal to bank account
 api_router.include_router(withdrawal.router, prefix="/withdrawal", tags=["v2 - withdrawal"])
+
+# Streak - weekly streak rewards
+api_router.include_router(streak.router, prefix="/streak", tags=["v2 - streak"])

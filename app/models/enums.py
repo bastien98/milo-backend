@@ -65,3 +65,13 @@ class WithdrawalStatus(str, Enum):
     APPROVED = "approved"
     REJECTED = "rejected"
     PAID_OUT = "paid_out"
+
+
+class StreakRewardStatus(str, Enum):
+    CLAIMABLE = "claimable"
+    CLAIMED = "claimed"
+
+
+class StreakRewardType(str, Enum):
+    SPINS = "spins"
+    CASH = "cash"

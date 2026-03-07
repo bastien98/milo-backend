@@ -58,6 +58,10 @@ class CashbackBalance(Base):
     total_paid_out: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
     current_balance: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
     spins_available: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
+    streak_week_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
+    streak_last_qualified_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
     updated_at: Mapped[Optional[datetime]] = mapped_column(
         DateTime(timezone=True), onupdate=func.now()
     )

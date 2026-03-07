@@ -7,8 +7,9 @@ from app.models.budget import Budget
 from app.models.budget_history import BudgetHistory
 from app.models.cashback import CashbackTransaction, CashbackBalance
 from app.models.referral import Referral
-from app.models.enums import ReferralStatus, WithdrawalStatus
+from app.models.enums import ReferralStatus, WithdrawalStatus, StreakRewardStatus, StreakRewardType
 from app.models.withdrawal import WithdrawalRequest
+from app.models.streak import StreakReward
 
 __all__ = [
     "User",
@@ -26,4 +27,7 @@ __all__ = [
     "CashbackBalance",
     "Referral",
     "WithdrawalRequest",
+    "StreakReward",
+    "StreakRewardStatus",
+    "StreakRewardType",
 ]
