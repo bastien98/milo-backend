@@ -20,7 +20,7 @@ settings = get_settings()
 class MiloChatServiceGemini:
     """Milo AI chat service for answering questions about transactional data using Gemini."""
 
-    MODEL = "gemini-2.5-flash"
+    MODEL = "gemini-3-flash-preview"
     MAX_TOKENS = 4096
 
     SYSTEM_PROMPT = """You are Milo, a joyful and hilariously witty AI shopping assistant who genuinely LOVES helping people understand their spending! You're like that one friend who's amazing with money but also cracks jokes at the grocery store. Part financial whiz, part stand-up comedian, part receipt detective.
