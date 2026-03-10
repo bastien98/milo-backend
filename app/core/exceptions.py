@@ -58,12 +58,6 @@ class DuplicateReceiptError(ScandaliciousException):
     pass
 
 
-class ReceiptTooOldError(ScandaliciousException):
-    """Raised when a receipt's date is outside the allowed upload window."""
-
-    pass
-
-
 class ReceiptFraudError(ScandaliciousException):
     """Raised when fraud detection flags a receipt as suspicious."""
 

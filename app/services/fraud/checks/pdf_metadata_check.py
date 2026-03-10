@@ -1,17 +1,18 @@
 """PDF metadata analysis for tampering indicators."""
 
 import logging
-from datetime import datetime
 from io import BytesIO
-from typing import Any, Optional
+from typing import Any
 
 from app.services.fraud.base import BaseFraudCheck
 from app.services.fraud.models import FraudSignal
 
 logger = logging.getLogger(__name__)
 
-# Editing software that suggests PDF was modified after creation
-SUSPICIOUS_PRODUCERS = {
+# Producers/creators known to indicate user-side editing or re-saving.
+# Matching is case-insensitive substring. These are BLOCKING.
+BLOCKED_PRODUCERS = {
+    # PDF editors
     "adobe acrobat pro",
     "acrobat pro",
     "adobe acrobat",
@@ -22,42 +23,89 @@ SUSPICIOUS_PRODUCERS = {
     "foxit phantompdf",
     "foxit pdf editor",
     "master pdf editor",
+    "pdfgear",
+    "pdf gear",
+    # Image editors
     "inkscape",
     "gimp",
+    # Office suites
     "libreoffice",
     "openoffice",
     "microsoft word",
     "google docs",
+    # Online PDF tools
     "canva",
     "ilovepdf",
     "smallpdf",
     "sejda",
+    # macOS re-save (Preview saves with "Quartz PDFContext" as producer)
+    "quartz pdfcontext",
+    "preview",
+    # Browser save-as / print-to-PDF
+    "skia",
+    "pdf.js",
+    "chrome",
+    "firefox",
+    "mozilla",
+    "microsoft print to pdf",
+    "edge",
+    # Mobile print services
+    "samsung print service",
 }
 
-# Legitimate POS/scanner/mobile producers
-LEGITIMATE_PRODUCERS = {
+# Producers/creators known to be legitimate receipt sources.
+# Matching is case-insensitive substring. Checked BEFORE blocklist
+# to handle ambiguity (e.g. "chromium" vs "chrome").
+WHITELISTED_PRODUCERS = {
+    # POS / thermal printers
     "epson",
     "star micronics",
     "bixolon",
     "citizen",
     "zebra",
+    # Scanner apps
+    "adobe scan",
+    "camscanner",
+    "genius scan",
+    "microsoft lens",
+    # iOS/Apple devices (share extension)
+    "ios",
+    "apple",
+    "iphone",
+    "ipad",
+    # Android devices (share extension)
+    "android",
+    # POS / receipt keywords
     "pos",
     "thermal",
     "receipt",
     "fiscal",
     "kassa",
+    # Scanner hardware
     "scansnap",
     "fujitsu",
     "canon",
     "hp scan",
-    "adobe scan",
-    "camscanner",
-    "genius scan",
-    "microsoft lens",
-    "ios",
-    "apple",
-    "iphone",
-    "ipad",
+    # Server-side PDF libraries (used by retailer backends)
+    "itext",
+    "reportlab",
+    "wkhtmltopdf",
+    "tcpdf",
+    "fpdf",
+    "mpdf",
+    "jasper",
+    "crystal reports",
+    "apache fop",
+    "pdfkit",
+    "prince",
+    "weasyprint",
+    "puppeteer",
+    "chromium",
+    "headless chrome",
+    # Enterprise backends
+    "sap",
+    "oracle",
+    "cairo",
 }
 
 
@@ -66,12 +114,46 @@ class PdfMetadataCheck(BaseFraudCheck):
 
     Runs at upload time. Inspects:
     - Producer/Creator fields for editing software
-    - CreationDate vs ModDate gap
     - Incremental updates (multiple xref sections)
-    - Linearization (unusual for receipts)
     """
 
     name = "pdf_metadata"
+
+    def _classify_producer(
+        self, producer: str, creator: str
+    ) -> tuple[str, float, bool]:
+        """Classify the PDF producer/creator as whitelisted, blocked, or unknown.
+
+        Blocklist is checked first and is authoritative — a blocked match
+        always results in a block. The only exception is the explicit
+        "chrome" / "chromium" substring collision.
+
+        Returns (flag, score, blocking):
+          - Whitelisted or empty: ("", 0.0, False)
+          - Blocked:              ("blocked_producer:<match>", 1.0, True)
+          - Unknown:              ("unknown_producer:<value>", 0.4, False)
+        """
+        combined = f"{producer} {creator}".strip()
+
+        if not combined:
+            return ("", 0.0, False)
+
+        # 1. Strict blocklist check
+        for entry in BLOCKED_PRODUCERS:
+            for field in (producer, creator):
+                if entry in field:
+                    # Explicit collision: "chrome" is a substring of "chromium" / "headless chrome"
+                    if entry == "chrome" and ("chromium" in field or "headless chrome" in field):
+                        continue
+                    return (f"blocked_producer:{entry}", 1.0, True)
+
+        # 2. Whitelist check (only runs if no blocked words found)
+        for entry in WHITELISTED_PRODUCERS:
+            if entry in producer or entry in creator:
+                return ("", 0.0, False)
+
+        unknown_value = producer if producer else creator
+        return (f"unknown_producer:{unknown_value}", 0.4, False)
 
     async def check_upload(
         self, file_content: bytes, **ctx: Any
@@ -98,48 +180,23 @@ class PdfMetadataCheck(BaseFraudCheck):
         producer = str(docinfo.get("/Producer", "")).lower()
         creator = str(docinfo.get("/Creator", "")).lower()
 
-        # 1. Check for editing software
-        for suspicious in SUSPICIOUS_PRODUCERS:
-            if suspicious in producer or suspicious in creator:
-                signals.append(
-                    FraudSignal(
-                        check_name=self.name,
-                        flag=f"editing_software_detected:{suspicious}",
-                        score=1.0,
-                        blocking=True,
-                    )
+        # 1. Producer/creator whitelist check
+        flag, score, blocking = self._classify_producer(producer, creator)
+        if flag:
+            signals.append(
+                FraudSignal(
+                    check_name=self.name,
+                    flag=flag,
+                    score=score,
+                    blocking=blocking,
                 )
-                break
+            )
+            if flag.startswith("unknown_producer"):
+                logger.warning(
+                    f"Unknown PDF producer: producer='{producer}', creator='{creator}'"
+                )
 
-        # 2. Check ModDate vs CreationDate gap
-        creation_date_raw = docinfo.get("/CreationDate")
-        mod_date_raw = docinfo.get("/ModDate")
-
-        if creation_date_raw and mod_date_raw:
-            cd = _parse_pdf_date(str(creation_date_raw))
-            md = _parse_pdf_date(str(mod_date_raw))
-            if cd and md:
-                delta = abs((md - cd).total_seconds())
-                if delta > 86400:  # >24 hours
-                    signals.append(
-                        FraudSignal(
-                            check_name=self.name,
-                            flag=f"mod_date_suspicious:delta_{int(delta)}s",
-                            score=1.0,
-                            blocking=True,
-                        )
-                    )
-                elif delta > 3600:  # >1 hour
-                    signals.append(
-                        FraudSignal(
-                            check_name=self.name,
-                            flag=f"mod_date_gap:{int(delta)}s",
-                            score=1.0,
-                            blocking=True,
-                        )
-                    )
-
-        # 3. Check for incremental updates (multiple xref sections)
+        # 2. Check for incremental updates (multiple xref sections)
         xref_count = file_content.count(b"startxref")
         if xref_count > 1:
             signals.append(
@@ -151,30 +208,5 @@ class PdfMetadataCheck(BaseFraudCheck):
                 )
             )
 
-        # 4. Check for linearization (unusual for receipts)
-        if b"/Linearized" in file_content[:1024]:
-            signals.append(
-                FraudSignal(
-                    check_name=self.name,
-                    flag="linearized",
-                    score=1.0,
-                    blocking=True,
-                )
-            )
-
         pdf.close()
         return signals
-
-
-def _parse_pdf_date(date_str: str) -> Optional[datetime]:
-    """Parse PDF date format D:YYYYMMDDHHmmSS into datetime."""
-    try:
-        clean = date_str.replace("D:", "").split("+")[0].split("-")[0].split("Z")[0]
-        for fmt in ("%Y%m%d%H%M%S", "%Y%m%d%H%M", "%Y%m%d"):
-            try:
-                return datetime.strptime(clean[: len(fmt.replace("%", ""))], fmt)
-            except ValueError:
-                continue
-    except Exception:
-        pass
-    return None

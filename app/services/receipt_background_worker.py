@@ -84,7 +84,7 @@ async def process_receipt_background(
             from app.config import get_settings
 
             bg_settings = get_settings()
-            if bg_settings.DUPLICATE_DETECTION_ENABLED:
+            if bg_settings.FRAUD_DETECTION_ENABLED:
                 t0 = time.monotonic()
                 fraud_service = FraudDetectionService()
 
@@ -98,6 +98,7 @@ async def process_receipt_background(
                     "receipt_date": extraction_result.receipt_date,
                     "total_amount": preliminary_total,
                     "item_count": item_count,
+                    "receipt_time": extraction_result.receipt_time,
                 }
 
                 # result_store collects computed values (e.g. fingerprint) from checks

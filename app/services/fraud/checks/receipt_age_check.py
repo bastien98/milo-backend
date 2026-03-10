@@ -13,7 +13,7 @@ class ReceiptAgeCheck(BaseFraudCheck):
     """Rejects receipts older than 7 days.
 
     Runs post-extraction since we need the Gemini-extracted receipt_date.
-    Controlled by RECEIPT_AGE_CHECK_ENABLED setting.
+    Controlled by FRAUD_DETECTION_ENABLED at the callsite.
     """
 
     name = "receipt_age"
@@ -21,11 +21,6 @@ class ReceiptAgeCheck(BaseFraudCheck):
     async def check_post_extraction(
         self, extraction_data: dict[str, Any], **ctx: Any
     ) -> list[FraudSignal]:
-        from app.config import get_settings
-
-        if not get_settings().RECEIPT_AGE_CHECK_ENABLED:
-            return []
-
         receipt_date: date | None = extraction_data.get("receipt_date")
 
         if receipt_date is None:

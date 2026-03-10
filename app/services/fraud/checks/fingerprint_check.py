@@ -3,7 +3,7 @@
 import hashlib
 import logging
 from datetime import date
-from typing import Any
+from typing import Any, Optional
 
 from app.services.fraud.base import BaseFraudCheck
 from app.services.fraud.models import FraudSignal
@@ -29,6 +29,7 @@ class FingerprintCheck(BaseFraudCheck):
         receipt_date: date | None = extraction_data.get("receipt_date")
         total_amount: float | None = extraction_data.get("total_amount")
         item_count: int | None = extraction_data.get("item_count")
+        receipt_time: str | None = extraction_data.get("receipt_time")
 
         # Can't compute fingerprint without all fields
         if not all([store_name, receipt_date, total_amount is not None, item_count is not None]):
@@ -39,6 +40,7 @@ class FingerprintCheck(BaseFraudCheck):
             receipt_date=receipt_date,  # type: ignore[arg-type]
             total_amount=total_amount,  # type: ignore[arg-type]
             item_count=item_count,  # type: ignore[arg-type]
+            receipt_time=receipt_time,
         )
 
         # Store fingerprint in context for the caller to persist
@@ -83,7 +85,9 @@ def compute_receipt_fingerprint(
     receipt_date: date,
     total_amount: float,
     item_count: int,
+    receipt_time: Optional[str] = None,
 ) -> str:
     """Deterministic hash from extracted receipt data."""
-    raw = f"{store_name.lower().strip()}|{receipt_date.isoformat()}|{total_amount:.2f}|{item_count}"
+    time_part = receipt_time if receipt_time else ""
+    raw = f"{store_name.lower().strip()}|{receipt_date.isoformat()}|{time_part}|{total_amount:.2f}|{item_count}"
     return hashlib.sha256(raw.encode()).hexdigest()

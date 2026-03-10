@@ -194,9 +194,10 @@ async def receipt_fraud_exception_handler(
     request: Request, exc: ReceiptFraudError
 ):
     return JSONResponse(
-        status_code=400,
+        status_code=422,
         content={
             "error": "receipt_fraud",
+            "error_code": exc.details.get("error_code", "fraud_detected"),
             "message": exc.message,
             "details": exc.details,
         },

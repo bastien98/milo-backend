@@ -75,11 +75,15 @@ async def upload_receipt(
     # PDF fraud metadata check (upload-time, lightweight)
     fraud_score = None
     fraud_flags_json = None
-    if settings.DUPLICATE_DETECTION_ENABLED:
+    if settings.FRAUD_DETECTION_ENABLED:
         fraud_service = FraudDetectionService()
         fraud_result = await fraud_service.run_upload_checks(file_content)
 
         if fraud_result.should_block:
+            logger.warning(
+                f"Upload fraud check blocked: user_id={current_user.id}, "
+                f"error_code=pdf_tampering_detected, flags={fraud_result.fraud_flags}"
+            )
             raise ReceiptFraudError(
                 "This file appears to have been modified. Please upload the original PDF.",
                 details={
@@ -97,13 +101,13 @@ async def upload_receipt(
     # applies WHERE content_hash IS NOT NULL)
     content_hash = (
         hashlib.sha256(file_content).hexdigest()
-        if settings.DUPLICATE_DETECTION_ENABLED
+        if settings.FRAUD_DETECTION_ENABLED
         else None
     )
 
     # Check for duplicate receipt (global, across all users)
     receipt_repo = ReceiptRepository(db)
-    if settings.DUPLICATE_DETECTION_ENABLED and content_hash:
+    if settings.FRAUD_DETECTION_ENABLED and content_hash:
         existing = await receipt_repo.find_by_content_hash(content_hash)
         if existing:
             raise DuplicateReceiptError(
