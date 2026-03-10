@@ -52,17 +52,18 @@ async def upload_receipt(
 
     Poll `GET /receipts/{receipt_id}/status` to track processing progress.
     """
-    # Validate content type — PDF only
+    # Validate content type — PDF and JPEG (Delhaize SuperPlus exports JPEG)
+    ALLOWED_CONTENT_TYPES = {"application/pdf", "image/jpeg"}
     content_type = file.content_type or "application/octet-stream"
-    if content_type != "application/pdf":
+    if content_type not in ALLOWED_CONTENT_TYPES:
         raise ImageValidationError(
-            f"Only PDF files are supported, got: {content_type}",
-            details={"supported_types": ["application/pdf"]},
+            f"Only PDF and JPEG files are supported, got: {content_type}",
+            details={"supported_types": ["application/pdf", "image/jpeg"]},
         )
 
     # Read file bytes — the UploadFile stream closes with the request
     file_content = await file.read()
-    filename = file.filename or "receipt.pdf"
+    filename = file.filename or ("receipt.pdf" if content_type == "application/pdf" else "receipt.jpg")
 
     # Early file size validation — reject before hashing or DB work
     MAX_UPLOAD_SIZE = 5 * 1024 * 1024  # 5MB — phone-scanned receipt PDFs are typically 100KB–2MB
@@ -72,7 +73,7 @@ async def upload_receipt(
             details={"max_size_mb": 5},
         )
 
-    # PDF fraud metadata check (upload-time, lightweight)
+    # Upload-time fraud checks (each check skips internally if file type doesn't apply)
     fraud_score = None
     fraud_flags_json = None
     if settings.FRAUD_DETECTION_ENABLED:
@@ -123,7 +124,7 @@ async def upload_receipt(
     receipt = await receipt_repo.create(
         user_id=current_user.id,
         filename=filename,
-        file_type="pdf",
+        file_type="pdf" if content_type == "application/pdf" else "jpeg",
         file_size=len(file_content),
         status=ReceiptStatus.PENDING,
         content_hash=content_hash,
@@ -154,6 +155,7 @@ async def upload_receipt(
         user_id=current_user.id,
         file_content=file_content,
         filename=filename,
+        mime_type=content_type,
     )
 
     return ReceiptUploadAcceptedResponse(

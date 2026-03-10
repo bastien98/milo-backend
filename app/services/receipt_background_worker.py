@@ -27,6 +27,7 @@ async def process_receipt_background(
     user_id: str,
     file_content: bytes,
     filename: str,
+    mime_type: str = "application/pdf",
 ) -> None:
     """Process a receipt in the background.
 
@@ -60,7 +61,7 @@ async def process_receipt_background(
             # Step 2: Extract via Gemini Vision
             t0 = time.monotonic()
             gemini_service = GeminiVisionService()
-            extraction_result = await gemini_service.extract_receipt(file_content, user_id=user_id)
+            extraction_result = await gemini_service.extract_receipt(file_content, user_id=user_id, mime_type=mime_type)
             logger.info(
                 f"⏱ bg_gemini_extraction: {time.monotonic() - t0:.3f}s - "
                 f"vendor={extraction_result.vendor_name}, "

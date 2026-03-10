@@ -158,6 +158,10 @@ class PdfMetadataCheck(BaseFraudCheck):
     async def check_upload(
         self, file_content: bytes, **ctx: Any
     ) -> list[FraudSignal]:
+        # Skip non-PDF files (e.g. JPEG uploads)
+        if not file_content.startswith(b"%PDF"):
+            return []
+
         signals: list[FraudSignal] = []
 
         try:

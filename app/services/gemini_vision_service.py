@@ -336,7 +336,7 @@ Extract all line items from this receipt.'''
     def __init__(self):
         self.client = _get_gemini_client()
 
-    async def extract_receipt(self, file_content: bytes, user_id: str) -> GeminiExtractionResult:
+    async def extract_receipt(self, file_content: bytes, user_id: str, mime_type: str = "application/pdf") -> GeminiExtractionResult:
         """Extract and normalize receipt data using Gemini Vision.
 
         Passes the PDF inline to avoid the Files API upload round-trip.
@@ -365,7 +365,7 @@ Extract all line items from this receipt.'''
         if not settings.GEMINI_API_KEY:
             raise GeminiAPIError("GEMINI_API_KEY not configured", details={"error_type": "config"})
 
-        content_part = types.Part.from_bytes(data=file_content, mime_type="application/pdf")
+        content_part = types.Part.from_bytes(data=file_content, mime_type=mime_type)
 
         response_text = None
         try:

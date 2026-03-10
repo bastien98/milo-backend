@@ -25,11 +25,13 @@ class FraudDetectionService:
             self.checks = checks
         else:
             from app.services.fraud.checks.pdf_metadata_check import PdfMetadataCheck
+            from app.services.fraud.checks.jpeg_metadata_check import JpegMetadataCheck
             from app.services.fraud.checks.receipt_age_check import ReceiptAgeCheck
             from app.services.fraud.checks.fingerprint_check import FingerprintCheck
 
             self.checks = [
                 PdfMetadataCheck(),
+                JpegMetadataCheck(),
                 ReceiptAgeCheck(),
                 FingerprintCheck(),
             ]
