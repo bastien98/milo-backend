@@ -98,6 +98,13 @@ class BudgetProgressResponse(BaseModel):
 # =============================================================================
 
 
+class CategorySpend(BaseModel):
+    """Actual spend for a single category in a past month."""
+    category: str
+    amount: float   # budget target
+    spent: float    # actual spend
+
+
 class BudgetHistoryEntry(BaseModel):
     """Schema for a single budget history entry."""
     id: str
@@ -108,6 +115,8 @@ class BudgetHistoryEntry(BaseModel):
     was_smart_budget: bool
     was_deleted: bool
     created_at: datetime
+    total_spent: float = 0.0
+    category_spend: Optional[List[CategorySpend]] = None
 
     class Config:
         from_attributes = True

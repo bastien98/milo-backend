@@ -55,6 +55,17 @@ class Settings(BaseSettings):
     # Database migrations
     USE_ALEMBIC: bool = True  # If True, skip create_all() in init_db() (Alembic handles migrations)
 
+    # itsme OIDC
+    ITSME_CLIENT_ID: str = ""
+    ITSME_CLIENT_SECRET: str = ""
+    ITSME_ENVIRONMENT: str = "e2e"  # "e2e" (sandbox) or "prd" (production)
+    ITSME_REDIRECT_URI: str = ""  # e.g. https://scandalicious-api-production.up.railway.app/api/v2/auth/itsme/callback
+    ITSME_SERVICE_CODE: str = ""  # Provided by itsme during onboarding
+
+    @property
+    def itsme_base_url(self) -> str:
+        return f"https://idp.{self.ITSME_ENVIRONMENT}.itsme.services/v2"
+
     # Apple Wallet Pass signing
     WALLET_PASS_TYPE_ID: str = "pass.com.deepmaind.milo"
     WALLET_TEAM_ID: str = ""

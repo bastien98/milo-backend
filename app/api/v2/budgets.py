@@ -1,13 +1,17 @@
+import calendar
 import logging
+from collections import defaultdict
 from datetime import date
-from dateutil.relativedelta import relativedelta
 
+from dateutil.relativedelta import relativedelta
 from fastapi import APIRouter, Depends, HTTPException, Query, status
+from sqlalchemy import select, and_
 from sqlalchemy.ext.asyncio import AsyncSession
 
 logger = logging.getLogger(__name__)
 
 from app.api.deps import get_db, get_current_db_user
+from app.models.transaction import Transaction
 from app.models.user import User
 from app.db.repositories.budget_repo import BudgetRepository
 from app.db.repositories.budget_history_repo import BudgetHistoryRepository
@@ -19,6 +23,7 @@ from app.schemas.budget import (
     BudgetNotFoundResponse,
     BudgetProgressResponse,
     CategoryAllocation,
+    CategorySpend,
     BudgetHistoryEntry,
     BudgetHistoryResponse,
 )
@@ -79,30 +84,87 @@ async def get_budget_history(
     current_user: User = Depends(get_current_db_user),
     db: AsyncSession = Depends(get_db),
 ):
-    """Get the user's budget history, ordered by month (newest first)."""
+    """Get the user's budget history with actual spend, ordered by month (newest first)."""
     history_repo = BudgetHistoryRepository(db)
     history_entries = await history_repo.get_by_user_id(current_user.id)
 
-    return BudgetHistoryResponse(
-        budget_history=[
+    if not history_entries:
+        return BudgetHistoryResponse(budget_history=[])
+
+    # Collect all months we need spend data for
+    months = [e.month for e in history_entries]
+
+    # Build date ranges and fetch all transactions in one query
+    date_ranges = []
+    for m in months:
+        year, mon = int(m[:4]), int(m[5:7])
+        first_day = date(year, mon, 1)
+        last_day = date(year, mon, calendar.monthrange(year, mon)[1])
+        date_ranges.append((m, first_day, last_day))
+
+    # Single query: all transactions across all history months
+    earliest = min(dr[1] for dr in date_ranges)
+    latest = max(dr[2] for dr in date_ranges)
+    result = await db.execute(
+        select(Transaction).where(
+            and_(
+                Transaction.user_id == current_user.id,
+                Transaction.date >= earliest,
+                Transaction.date <= latest,
+            )
+        )
+    )
+    all_txns = list(result.scalars().all())
+
+    # Group spend by month -> category
+    month_total: dict[str, float] = defaultdict(float)
+    month_cat_spend: dict[str, dict[str, float]] = defaultdict(lambda: defaultdict(float))
+    for t in all_txns:
+        if t.is_discount or t.is_deposit:
+            continue
+        txn_month = t.date.strftime("%Y-%m")
+        if txn_month in months:
+            month_total[txn_month] += t.item_price
+            month_cat_spend[txn_month][t.category] += t.item_price
+
+    entries = []
+    for entry in history_entries:
+        allocations = None
+        cat_spend_list = None
+        if entry.category_allocations:
+            allocations = [
+                CategoryAllocation(
+                    category=alloc.get("category", ""),
+                    amount=alloc.get("amount", 0),
+                )
+                for alloc in entry.category_allocations
+            ]
+            spend_map = month_cat_spend.get(entry.month, {})
+            cat_spend_list = [
+                CategorySpend(
+                    category=alloc.get("category", ""),
+                    amount=alloc.get("amount", 0),
+                    spent=round(spend_map.get(alloc.get("category", ""), 0.0), 2),
+                )
+                for alloc in entry.category_allocations
+            ]
+
+        entries.append(
             BudgetHistoryEntry(
                 id=entry.id,
                 user_id=entry.user_id,
                 monthly_amount=entry.monthly_amount,
-                category_allocations=[
-                    CategoryAllocation(category=alloc.get("category", ""), amount=alloc.get("amount", 0))
-                    for alloc in (entry.category_allocations or [])
-                ]
-                if entry.category_allocations
-                else None,
+                category_allocations=allocations,
                 month=entry.month,
                 was_smart_budget=entry.was_smart_budget,
                 was_deleted=entry.was_deleted,
                 created_at=entry.created_at,
+                total_spent=round(month_total.get(entry.month, 0.0), 2),
+                category_spend=cat_spend_list,
             )
-            for entry in history_entries
-        ]
-    )
+        )
+
+    return BudgetHistoryResponse(budget_history=entries)
 
 
 @router.post(

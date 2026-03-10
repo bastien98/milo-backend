@@ -75,3 +75,10 @@ class StreakRewardStatus(str, Enum):
 class StreakRewardType(str, Enum):
     SPINS = "spins"
     CASH = "cash"
+
+
+class LotteryDrawingStatus(str, Enum):
+    PENDING = "pending"
+    PARTICIPANTS_LOCKED = "participants_locked"
+    DRAWN = "drawn"
+    PUBLISHED = "published"

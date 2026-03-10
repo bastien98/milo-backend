@@ -80,8 +80,10 @@ async def create_or_update_profile(
         nickname=profile_data.nickname,
         gender=profile_data.gender,
         age=profile_data.age,
+        household_number=profile_data.household_number,
         language=profile_data.language,
         preferred_stores=profile_data.preferred_stores,
+        instagram_handle=profile_data.instagram_handle,
     )
 
     await db.commit()
@@ -123,8 +125,10 @@ async def update_profile(
             nickname=profile_data.nickname,
             gender=profile_data.gender,
             age=profile_data.age,
+            household_number=profile_data.household_number,
             language=profile_data.language,
             preferred_stores=profile_data.preferred_stores,
+            instagram_handle=profile_data.instagram_handle,
         )
     except ResourceNotFoundError as e:
         raise HTTPException(

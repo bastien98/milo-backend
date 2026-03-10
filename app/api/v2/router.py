@@ -1,12 +1,15 @@
 from fastapi import APIRouter
 
 # Import v2-specific endpoints (using Gemini)
-from app.api.v2 import chat, receipts, periods, budgets, wallet_pass, categories, promos, cashback, spin, referral, withdrawal, streak
+from app.api.v2 import auth, chat, receipts, periods, budgets, wallet_pass, categories, promos, cashback, spin, referral, withdrawal, streak, lottery
 
 # Reuse v1 endpoints that don't interact with LLMs
 from app.api.v1 import health, transactions, analytics, profile
 
 api_router = APIRouter()
+
+# Authentication - itsme OIDC login
+api_router.include_router(auth.router, prefix="/auth", tags=["v2 - auth"])
 
 # Health check
 api_router.include_router(health.router, tags=["v2 - health"])
@@ -57,3 +60,6 @@ api_router.include_router(withdrawal.router, prefix="/withdrawal", tags=["v2 - w
 
 # Streak - weekly streak rewards
 api_router.include_router(streak.router, prefix="/streak", tags=["v2 - streak"])
+
+# Lottery - monthly lottery drawing
+api_router.include_router(lottery.router, prefix="/lottery", tags=["v2 - lottery"])
