@@ -117,7 +117,7 @@ class LotteryRepository:
         )
         return result.scalar_one_or_none()
 
-    async def update_proof(self, drawing_id: str, user_id: str, proof_image_key: str) -> None:
+    async def declare_share(self, drawing_id: str, user_id: str) -> None:
         await self.db.execute(
             update(LotteryEntry)
             .where(
@@ -125,7 +125,6 @@ class LotteryRepository:
                 LotteryEntry.user_id == user_id,
             )
             .values(
-                proof_image_key=proof_image_key,
                 proof_status="pending_review",
             )
         )

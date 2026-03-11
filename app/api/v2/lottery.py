@@ -1,8 +1,6 @@
-import base64
 from datetime import datetime, timezone
 
-from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, status
-from fastapi.responses import Response
+from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_db, get_current_db_user
@@ -36,20 +34,12 @@ async def get_lottery_status(
     return result
 
 
-@router.post("/proof")
-async def upload_proof(
-    file: UploadFile = File(...),
+@router.post("/declare-share")
+async def declare_share(
     current_user: User = Depends(get_current_db_user),
     db: AsyncSession = Depends(get_db),
 ):
-    """Upload IG share proof screenshot. Marks user as shared pending admin review."""
-    if not file.content_type or not file.content_type.startswith("image/"):
-        raise HTTPException(status_code=400, detail="Only image files are accepted")
-
-    content = await file.read()
-    if len(content) > 5 * 1024 * 1024:
-        raise HTTPException(status_code=400, detail="File too large (max 5MB)")
-
+    """User declares they shared the IG post. Sets status to pending_review for admin verification."""
     now = datetime.now(timezone.utc)
     current_month = f"{now.year}-{now.month:02d}"
     repo = LotteryRepository(db)
@@ -58,11 +48,7 @@ async def upload_proof(
     if drawing.status != "pending":
         raise HTTPException(status_code=400, detail="Participants are already locked for this month")
 
-    # Store as base64 data URI (no S3 bucket needed — proof images are small)
-    b64 = base64.b64encode(content).decode("utf-8")
-    storage_key = f"data:{file.content_type};base64,{b64}"
-
-    await repo.update_proof(drawing.id, current_user.id, storage_key)
+    await repo.declare_share(drawing.id, current_user.id)
     await db.commit()
 
     return {"ok": True, "proof_status": "pending_review"}
@@ -244,36 +230,13 @@ async def publish_drawing(
     return drawing
 
 
-@router.get("/admin/proof/{entry_id}")
-async def get_proof_image(
-    entry_id: str,
-    db: AsyncSession = Depends(get_db),
-):
-    """Get the proof image for a lottery entry."""
-    repo = LotteryRepository(db)
-    entry = await repo.get_entry_by_id(entry_id)
-    if not entry or not entry.proof_image_key:
-        raise HTTPException(status_code=404, detail="No proof image found")
-
-    key = entry.proof_image_key
-    if key.startswith("data:"):
-        # base64 data URI — extract content type and bytes
-        # format: data:image/jpeg;base64,/9j/4AAQ...
-        header, b64data = key.split(",", 1)
-        content_type = header.split(":")[1].split(";")[0]
-        image_bytes = base64.b64decode(b64data)
-        return Response(content=image_bytes, media_type=content_type)
-
-    raise HTTPException(status_code=404, detail="Unsupported proof storage format")
-
-
 @router.post("/admin/approve-proof/{entry_id}")
 async def approve_proof(
     entry_id: str,
     data: ApproveProofRequest,
     db: AsyncSession = Depends(get_db),
 ):
-    """Approve or reject a proof image submission."""
+    """Approve or reject a user's IG share declaration after manual verification."""
     repo = LotteryRepository(db)
     entry = await repo.get_entry_by_id(entry_id)
     if not entry:
@@ -292,3 +255,77 @@ async def get_all_drawings(
     repo = LotteryRepository(db)
     drawings = await repo.get_all_drawings()
     return drawings
+
+
+@router.post("/admin/seed-test/{month}")
+async def seed_test_entries(
+    month: str,
+    db: AsyncSession = Depends(get_db),
+):
+    """Seed fake test participants for testing the full lottery flow."""
+    repo = LotteryRepository(db)
+    drawing = await repo.get_or_create_drawing(month)
+
+    if drawing.status != "pending":
+        raise HTTPException(status_code=400, detail="Drawing is not in pending state. Reset first.")
+
+    import uuid
+
+    test_participants = [
+        ("Emma De Smedt", "emma.ds"),
+        ("Lucas Peeters", "lucas_p"),
+        ("Sophie Janssen", "sophiej"),
+        ("Noah Willems", "noah.w"),
+        ("Olivia Maes", "olivia.maes"),
+        ("Liam Claes", "liam.c"),
+        ("Charlotte Dubois", "charlotte.db"),
+        ("Arthur Vermeersch", "arthur.v"),
+    ]
+
+    for name, handle in test_participants:
+        test_user_id = f"test-{uuid.uuid5(uuid.NAMESPACE_DNS, handle)}"
+        await repo.upsert_entry(
+            drawing_id=drawing.id,
+            user_id=test_user_id,
+            instagram_handle=handle,
+            display_name=name,
+            has_receipt_activity=True,
+            has_instagram_share=True,
+        )
+
+    await db.commit()
+    return {"ok": True, "seeded": len(test_participants)}
+
+
+@router.post("/admin/reset/{month}")
+async def reset_drawing(
+    month: str,
+    db: AsyncSession = Depends(get_db),
+):
+    """Reset a drawing back to pending state, removing all entries."""
+    from sqlalchemy import delete
+    from app.models.lottery import LotteryEntry
+
+    repo = LotteryRepository(db)
+    drawing = await repo.get_drawing_by_month(month)
+    if not drawing:
+        raise HTTPException(status_code=404, detail="Drawing not found")
+
+    await db.execute(
+        delete(LotteryEntry).where(LotteryEntry.drawing_id == drawing.id)
+    )
+    await repo.update_drawing(
+        drawing,
+        status="pending",
+        seed=None,
+        seed_hash=None,
+        winner_user_id=None,
+        winner_name=None,
+        winner_instagram_handle=None,
+        participant_count=0,
+        video_url=None,
+        drawn_at=None,
+        published_at=None,
+    )
+    await db.commit()
+    return {"ok": True}

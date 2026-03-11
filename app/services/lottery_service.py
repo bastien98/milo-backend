@@ -55,7 +55,6 @@ class LotteryService:
             )
         )
         entry = entry_result.scalar_one_or_none()
-        has_proof = bool(entry and entry.proof_image_key)
         proof_status = entry.proof_status if entry else None
         has_share = bool(entry and entry.has_instagram_share and proof_status == "approved")
 
@@ -80,7 +79,6 @@ class LotteryService:
             "has_instagram": has_instagram,
             "has_receipt": has_receipt,
             "has_share": has_share,
-            "has_proof": has_proof,
             "proof_status": proof_status,
             "current_month": current_month,
             "prize_amount": drawing.prize_amount_cents / 100,

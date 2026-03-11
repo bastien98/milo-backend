@@ -9,7 +9,6 @@ class LotteryStatusResponse(BaseModel):
     has_instagram: bool
     has_receipt: bool
     has_share: bool = False
-    has_proof: bool = False
     proof_status: Optional[str] = None
     current_month: str
     prize_amount: int
