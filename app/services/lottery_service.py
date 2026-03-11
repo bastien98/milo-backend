@@ -55,7 +55,9 @@ class LotteryService:
             )
         )
         entry = entry_result.scalar_one_or_none()
-        has_share = bool(entry and entry.has_instagram_share)
+        has_proof = bool(entry and entry.proof_image_key)
+        proof_status = entry.proof_status if entry else None
+        has_share = bool(entry and entry.has_instagram_share and proof_status == "approved")
 
         eligible = has_instagram and has_receipt and has_share
 
@@ -76,12 +78,86 @@ class LotteryService:
         return {
             "eligible": eligible,
             "has_instagram": has_instagram,
-            "has_receipt": has_receipt and has_share,
+            "has_receipt": has_receipt,
+            "has_share": has_share,
+            "has_proof": has_proof,
+            "proof_status": proof_status,
             "current_month": current_month,
-            "prize_amount": drawing.prize_amount_cents,
+            "prize_amount": drawing.prize_amount_cents / 100,
             "drawing_status": drawing.status,
             "last_winner": last_winner,
         }
+
+    async def refresh_entries(self, month: str) -> list:
+        """Populate/refresh lottery entries from all Gold Tier users with IG handles.
+
+        Called when admin views the participants panel so entries are up-to-date.
+        Does NOT modify entries if drawing is already locked.
+        """
+        drawing = await self.lottery_repo.get_or_create_drawing(month)
+
+        if drawing.status != "pending":
+            # Already locked — just return existing entries
+            return await self.lottery_repo.get_entries_for_drawing(drawing.id)
+
+        # Parse month for receipt check
+        year, mo = map(int, month.split("-"))
+        month_start = datetime(year, mo, 1, tzinfo=timezone.utc)
+        if mo == 12:
+            month_end = datetime(year + 1, 1, 1, tzinfo=timezone.utc)
+        else:
+            month_end = datetime(year, mo + 1, 1, tzinfo=timezone.utc)
+
+        # Get all users with profiles (show all Gold Tier users, even without IG handle)
+        users_result = await self.db.execute(
+            select(User, UserProfile)
+            .join(UserProfile, User.firebase_uid == UserProfile.user_id, isouter=True)
+        )
+        users_with_profiles = users_result.all()
+
+        for user, profile in users_with_profiles:
+            if not profile:
+                continue
+
+            # Check gold tier
+            is_gold = await check_gold_tier(self.db, user.id)
+            if not is_gold:
+                continue
+
+            # Check receipt activity this month
+            receipt_count = await self.db.execute(
+                select(func.count()).select_from(Receipt).where(
+                    Receipt.user_id == user.id,
+                    Receipt.status == ReceiptStatus.COMPLETED,
+                    Receipt.created_at >= month_start,
+                    Receipt.created_at < month_end,
+                )
+            )
+            has_receipt = (receipt_count.scalar() or 0) > 0
+
+            display_name = profile.nickname or profile.first_name or "User"
+
+            # Preserve existing share status
+            entry_result = await self.db.execute(
+                select(LotteryEntry).where(
+                    LotteryEntry.drawing_id == drawing.id,
+                    LotteryEntry.user_id == user.id,
+                )
+            )
+            existing_entry = entry_result.scalar_one_or_none()
+            has_share = bool(existing_entry and existing_entry.has_instagram_share)
+
+            await self.lottery_repo.upsert_entry(
+                drawing_id=drawing.id,
+                user_id=user.id,
+                instagram_handle=profile.instagram_handle,
+                display_name=display_name,
+                has_receipt_activity=has_receipt,
+                has_instagram_share=has_share,
+            )
+
+        await self.db.commit()
+        return await self.lottery_repo.get_entries_for_drawing(drawing.id)
 
     async def lock_participants(self, month: str) -> LotteryDrawing:
         """Lock participants for a month's drawing."""

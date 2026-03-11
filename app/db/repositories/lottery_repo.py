@@ -117,6 +117,42 @@ class LotteryRepository:
         )
         return result.scalar_one_or_none()
 
+    async def update_proof(self, drawing_id: str, user_id: str, proof_image_key: str) -> None:
+        await self.db.execute(
+            update(LotteryEntry)
+            .where(
+                LotteryEntry.drawing_id == drawing_id,
+                LotteryEntry.user_id == user_id,
+            )
+            .values(
+                proof_image_key=proof_image_key,
+                proof_status="pending_review",
+            )
+        )
+        await self.db.flush()
+
+    async def approve_proof(self, entry_id: str, approved: bool) -> None:
+        status = "approved" if approved else "rejected"
+        values: dict = {"proof_status": status}
+        if approved:
+            values["has_instagram_share"] = True
+            values["is_eligible"] = True
+        else:
+            values["has_instagram_share"] = False
+            values["is_eligible"] = False
+        await self.db.execute(
+            update(LotteryEntry)
+            .where(LotteryEntry.id == entry_id)
+            .values(**values)
+        )
+        await self.db.flush()
+
+    async def get_entry_by_id(self, entry_id: str) -> Optional[LotteryEntry]:
+        result = await self.db.execute(
+            select(LotteryEntry).where(LotteryEntry.id == entry_id)
+        )
+        return result.scalar_one_or_none()
+
     async def get_all_drawings(self) -> list[LotteryDrawing]:
         result = await self.db.execute(
             select(LotteryDrawing).order_by(LotteryDrawing.month.desc())

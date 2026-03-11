@@ -63,6 +63,8 @@ class LotteryEntry(Base):
     has_receipt_activity: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     has_instagram_share: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     is_eligible: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    proof_image_key: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+    proof_status: Mapped[Optional[str]] = mapped_column(String(20), nullable=True)  # pending_review, approved, rejected
     entry_number: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()

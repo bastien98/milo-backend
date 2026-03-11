@@ -8,6 +8,9 @@ class LotteryStatusResponse(BaseModel):
     eligible: bool
     has_instagram: bool
     has_receipt: bool
+    has_share: bool = False
+    has_proof: bool = False
+    proof_status: Optional[str] = None
     current_month: str
     prize_amount: int
     drawing_status: str
@@ -53,6 +56,8 @@ class LotteryEntryResponse(BaseModel):
     has_instagram_share: bool
     is_eligible: bool
     entry_number: Optional[int] = None
+    proof_image_key: Optional[str] = None
+    proof_status: Optional[str] = None  # pending_review, approved, rejected
 
     class Config:
         from_attributes = True
@@ -65,6 +70,10 @@ class ToggleShareRequest(BaseModel):
 
 class PublishRequest(BaseModel):
     video_url: str
+
+
+class ApproveProofRequest(BaseModel):
+    approved: bool
 
 
 class VideoPropsResponse(BaseModel):

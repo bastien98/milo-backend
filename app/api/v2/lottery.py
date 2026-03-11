@@ -1,4 +1,8 @@
-from fastapi import APIRouter, Depends, HTTPException, status
+import base64
+from datetime import datetime, timezone
+
+from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, status
+from fastapi.responses import Response
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_db, get_current_db_user
@@ -9,6 +13,7 @@ from app.schemas.lottery import (
     LotteryEntryResponse,
     ToggleShareRequest,
     PublishRequest,
+    ApproveProofRequest,
     VideoPropsResponse,
 )
 from app.services.lottery_service import LotteryService
@@ -29,6 +34,38 @@ async def get_lottery_status(
     svc = LotteryService(db)
     result = await svc.get_user_lottery_status(current_user.id, current_user.firebase_uid)
     return result
+
+
+@router.post("/proof")
+async def upload_proof(
+    file: UploadFile = File(...),
+    current_user: User = Depends(get_current_db_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Upload IG share proof screenshot. Marks user as shared pending admin review."""
+    if not file.content_type or not file.content_type.startswith("image/"):
+        raise HTTPException(status_code=400, detail="Only image files are accepted")
+
+    content = await file.read()
+    if len(content) > 5 * 1024 * 1024:
+        raise HTTPException(status_code=400, detail="File too large (max 5MB)")
+
+    now = datetime.now(timezone.utc)
+    current_month = f"{now.year}-{now.month:02d}"
+    repo = LotteryRepository(db)
+    drawing = await repo.get_or_create_drawing(current_month)
+
+    if drawing.status != "pending":
+        raise HTTPException(status_code=400, detail="Participants are already locked for this month")
+
+    # Store as base64 data URI (no S3 bucket needed — proof images are small)
+    b64 = base64.b64encode(content).decode("utf-8")
+    storage_key = f"data:{file.content_type};base64,{b64}"
+
+    await repo.update_proof(drawing.id, current_user.id, storage_key)
+    await db.commit()
+
+    return {"ok": True, "proof_status": "pending_review"}
 
 
 # ── Admin endpoints ──
@@ -63,12 +100,9 @@ async def get_entries(
     month: str,
     db: AsyncSession = Depends(get_db),
 ):
-    """Get all lottery entries for a month."""
-    repo = LotteryRepository(db)
-    drawing = await repo.get_drawing_by_month(month)
-    if not drawing:
-        return []
-    entries = await repo.get_entries_for_drawing(drawing.id)
+    """Get all lottery entries for a month, auto-populating from Gold Tier users."""
+    svc = LotteryService(db)
+    entries = await svc.refresh_entries(month)
     return entries
 
 
@@ -208,6 +242,46 @@ async def publish_drawing(
         raise HTTPException(status_code=400, detail=str(e))
     await db.commit()
     return drawing
+
+
+@router.get("/admin/proof/{entry_id}")
+async def get_proof_image(
+    entry_id: str,
+    db: AsyncSession = Depends(get_db),
+):
+    """Get the proof image for a lottery entry."""
+    repo = LotteryRepository(db)
+    entry = await repo.get_entry_by_id(entry_id)
+    if not entry or not entry.proof_image_key:
+        raise HTTPException(status_code=404, detail="No proof image found")
+
+    key = entry.proof_image_key
+    if key.startswith("data:"):
+        # base64 data URI — extract content type and bytes
+        # format: data:image/jpeg;base64,/9j/4AAQ...
+        header, b64data = key.split(",", 1)
+        content_type = header.split(":")[1].split(";")[0]
+        image_bytes = base64.b64decode(b64data)
+        return Response(content=image_bytes, media_type=content_type)
+
+    raise HTTPException(status_code=404, detail="Unsupported proof storage format")
+
+
+@router.post("/admin/approve-proof/{entry_id}")
+async def approve_proof(
+    entry_id: str,
+    data: ApproveProofRequest,
+    db: AsyncSession = Depends(get_db),
+):
+    """Approve or reject a proof image submission."""
+    repo = LotteryRepository(db)
+    entry = await repo.get_entry_by_id(entry_id)
+    if not entry:
+        raise HTTPException(status_code=404, detail="Entry not found")
+
+    await repo.approve_proof(entry_id, data.approved)
+    await db.commit()
+    return {"ok": True, "proof_status": "approved" if data.approved else "rejected"}
 
 
 @router.get("/admin/drawings", response_model=list[LotteryDrawingResponse])
