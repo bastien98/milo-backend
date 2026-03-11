@@ -61,7 +61,7 @@ def _get_gemini_client() -> genai.Client:
 class ExtractedLineItem:
     """Represents a line item extracted and normalized by Gemini Vision."""
 
-    item_name: str  # Product description text from receipt (original casing, no codes/prices)
+    item_name: str  # Product description text from receipt (ALL CAPS, no codes/prices)
     normalized_name: str  # Cleaned, semantic name (always lowercase)
     normalized_brand: Optional[str]  # Brand name only (lowercase, for semantic search)
     is_premium: bool  # True if premium/expensive brand, False if store/house brand
@@ -112,7 +112,7 @@ class GeminiExtractionResult:
 # Pydantic schemas passed as response_schema to Gemini — structurally constrains the JSON output
 # so the model cannot return a bare array instead of the expected object.
 class _LineItemSchema(PydanticBaseModel):
-    item_name: str = Field(description="Product text from receipt in original casing, without codes or prices")
+    item_name: str = Field(description="Product text from receipt in ALL CAPS, without codes or prices")
     normalized_name: str = Field(description="Lowercase canonical product name for matching")
     normalized_brand: Optional[str] = Field(default=None, description="Lowercase brand name, or null")
     is_premium: bool = Field(description="true for national/premium brands, false for house/store brands")
@@ -194,14 +194,25 @@ class GeminiVisionService:
 ## ITEM FIELD RULES
 
 ### item_name — Receipt Text Cleaning
-Copy the product text from the receipt line in ORIGINAL casing. Then:
-- KEEP: brand name, product name, variant, size/packaging info (e.g., "500g", "1,5L PET", "6x33cl")
-- REMOVE: article codes, PLU numbers, EAN/barcode numbers at the start of the line
-- REMOVE: quantity counts, unit prices, and total prices at the end of the line
+Extract the core product text from the receipt line. You must clean the string to ensure exact-matching in a database:
+
+KEEP: brand name, product name, variant, size/packaging info (e.g., "500g", "1,5L PET", "6x33cl").
+
+REMOVE: article codes, internal PLU numbers, and EAN/barcode numbers at the start of the line.
+
+REMOVE: quantity counts, weight multipliers (e.g., "0,540 kg x"), unit prices, and total prices.
+
+REMOVE: promotional symbols at the start of the text (e.g., *, +, >, P , PROMO).
+
+REMOVE: Tax/VAT indicator letters or percentages at the end of the text (e.g., " A", " B", " C", " D", " 6%", " 21%").
+
+FORMAT: Return the final cleaned string in ALL CAPS, with leading and trailing whitespace removed.
 
 Examples:
-- "A 14515 BONI BIO volkorenspaghetti 500g 1 0,99 0,99" → "BONI BIO volkorenspaghetti 500g"
+- "A 14515 BONI BIO volkorenspaghetti 500g 1 0,99 0,99" → "BONI BIO VOLKORENSPAGHETTI 500G"
 - "123456 COCA COLA ZERO 1,5L PET 2 3,58" → "COCA COLA ZERO 1,5L PET"
+- "*PROMO DANONE ACTIVIA 4X125G B" → "DANONE ACTIVIA 4X125G"
+- "0,540 kg x 5,99/kg BANANEN" → "BANANEN"
 
 ### normalized_name — Canonical Product Name
 A clean, lowercase product name for EAN matching and deduplication. Rules:
@@ -325,7 +336,7 @@ Extract all line items from this receipt.'''
     def __init__(self):
         self.client = _get_gemini_client()
 
-    async def extract_receipt(self, file_content: bytes, user_id: str) -> GeminiExtractionResult:
+    async def extract_receipt(self, file_content: bytes, user_id: str, mime_type: str = "application/pdf") -> GeminiExtractionResult:
         """Extract and normalize receipt data using Gemini Vision.
 
         Passes the PDF inline to avoid the Files API upload round-trip.
@@ -354,7 +365,7 @@ Extract all line items from this receipt.'''
         if not settings.GEMINI_API_KEY:
             raise GeminiAPIError("GEMINI_API_KEY not configured", details={"error_type": "config"})
 
-        content_part = types.Part.from_bytes(data=file_content, mime_type="application/pdf")
+        content_part = types.Part.from_bytes(data=file_content, mime_type=mime_type)
 
         response_text = None
         try:

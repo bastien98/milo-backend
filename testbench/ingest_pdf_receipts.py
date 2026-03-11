@@ -64,7 +64,6 @@ def upload_receipt(
     api_url: str,
     token: str,
     file_path: Path,
-    receipt_date: Optional[str] = None,
 ) -> dict:
     """
     Upload a single receipt PDF to the API.
@@ -73,7 +72,6 @@ def upload_receipt(
         api_url: Base API URL
         token: Firebase ID token
         file_path: Path to the PDF file
-        receipt_date: Optional date override (YYYY-MM-DD format)
 
     Returns:
         API response as dict
@@ -84,22 +82,15 @@ def upload_receipt(
         "Authorization": f"Bearer {token}",
     }
 
-    # Prepare the file
     with open(file_path, "rb") as f:
         files = {
             "file": (file_path.name, f, "application/pdf"),
         }
 
-        # Add optional receipt_date parameter
-        data = {}
-        if receipt_date:
-            data["receipt_date"] = receipt_date
-
         response = requests.post(
             upload_url,
             headers=headers,
             files=files,
-            data=data if data else None,
             timeout=120,  # 2 minute timeout for processing
         )
 
@@ -124,9 +115,6 @@ Examples:
   # Upload to local development server
   python ingest_pdf_receipts.py /path/to/receipts --env local
 
-  # Upload with a specific date override
-  python ingest_pdf_receipts.py /path/to/receipts --date 2025-01-15
-
   # Use custom API URL
   python ingest_pdf_receipts.py /path/to/receipts --api-url https://custom-api.example.com
 
@@ -150,10 +138,6 @@ Environment Variables:
         help="Custom API URL (overrides --env)",
     )
     parser.add_argument(
-        "--date",
-        help="Override receipt date for all uploads (YYYY-MM-DD format)",
-    )
-    parser.add_argument(
         "--dry-run",
         action="store_true",
         help="List files that would be uploaded without actually uploading",
@@ -174,8 +158,6 @@ Environment Variables:
     print(f"{'='*60}")
     print(f"Target API: {api_url}")
     print(f"Directory:  {args.directory}")
-    if args.date:
-        print(f"Date override: {args.date}")
     print()
 
     # Find PDF files
@@ -221,7 +203,7 @@ Environment Variables:
         print(f"[{i}/{len(pdf_files)}] Uploading: {pdf_file.name}")
 
         try:
-            result = upload_receipt(api_url, token, pdf_file, args.date)
+            result = upload_receipt(api_url, token, pdf_file)
             status_code = result["status_code"]
             response = result["response"]
 

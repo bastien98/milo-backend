@@ -46,8 +46,8 @@ class Settings(BaseSettings):
     AWS_SECRET_ACCESS_KEY: str = ""
     AWS_DEFAULT_REGION: str = "auto"
 
-    # Duplicate detection
-    DUPLICATE_DETECTION_ENABLED: bool = True
+    # Fraud detection (PDF metadata, fingerprint dedup, receipt age)
+    FRAUD_DETECTION_ENABLED: bool = True
 
     # CORS
     CORS_ORIGINS: List[str] = ["*"]

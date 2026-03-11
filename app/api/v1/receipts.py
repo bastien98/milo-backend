@@ -101,7 +101,6 @@ async def delete_receipt(
 @router.post("/upload", response_model=ReceiptUploadResponse)
 async def upload_receipt(
     file: UploadFile = File(...),
-    receipt_date: Optional[date] = Query(None, description="Override receipt date"),
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_db_user),
 ):
@@ -119,8 +118,7 @@ async def upload_receipt(
     returns `is_duplicate: true` with empty `receipt_id` and no transactions saved.
     """
     logger.info(
-        f"Receipt upload: user_id={current_user.id}, "
-        f"receipt_date_override={receipt_date}"
+        f"Receipt upload: user_id={current_user.id}"
     )
 
     receipt_repo = ReceiptRepository(db)
@@ -134,7 +132,6 @@ async def upload_receipt(
     result = await processor.process_receipt(
         user_id=current_user.id,
         file=file,
-        receipt_date_override=receipt_date,
     )
 
     logger.info(

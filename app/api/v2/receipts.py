@@ -30,7 +30,8 @@ from app.schemas.receipt import (
 from app.services.receipt_background_worker import process_receipt_background
 from app.db.repositories.receipt_repo import ReceiptRepository
 from app.db.repositories.transaction_repo import TransactionRepository
-from app.core.exceptions import ResourceNotFoundError, DuplicateReceiptError, ImageValidationError
+from app.core.exceptions import ResourceNotFoundError, DuplicateReceiptError, ImageValidationError, ReceiptFraudError
+from app.services.fraud import FraudDetectionService
 
 router = APIRouter()
 
@@ -39,7 +40,6 @@ router = APIRouter()
 async def upload_receipt(
     background_tasks: BackgroundTasks,
     file: UploadFile = File(...),
-    receipt_date: Optional[date] = Query(None, description="Override receipt date"),
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_db_user),
 ):
@@ -52,17 +52,18 @@ async def upload_receipt(
 
     Poll `GET /receipts/{receipt_id}/status` to track processing progress.
     """
-    # Validate content type — PDF only
+    # Validate content type — PDF and JPEG (Delhaize SuperPlus exports JPEG)
+    ALLOWED_CONTENT_TYPES = {"application/pdf", "image/jpeg"}
     content_type = file.content_type or "application/octet-stream"
-    if content_type != "application/pdf":
+    if content_type not in ALLOWED_CONTENT_TYPES:
         raise ImageValidationError(
-            f"Only PDF files are supported, got: {content_type}",
-            details={"supported_types": ["application/pdf"]},
+            f"Only PDF and JPEG files are supported, got: {content_type}",
+            details={"supported_types": ["application/pdf", "image/jpeg"]},
         )
 
     # Read file bytes — the UploadFile stream closes with the request
     file_content = await file.read()
-    filename = file.filename or "receipt.pdf"
+    filename = file.filename or ("receipt.pdf" if content_type == "application/pdf" else "receipt.jpg")
 
     # Early file size validation — reject before hashing or DB work
     MAX_UPLOAD_SIZE = 5 * 1024 * 1024  # 5MB — phone-scanned receipt PDFs are typically 100KB–2MB
@@ -72,18 +73,42 @@ async def upload_receipt(
             details={"max_size_mb": 5},
         )
 
+    # Upload-time fraud checks (each check skips internally if file type doesn't apply)
+    fraud_score = None
+    fraud_flags_json = None
+    if settings.FRAUD_DETECTION_ENABLED:
+        fraud_service = FraudDetectionService()
+        fraud_result = await fraud_service.run_upload_checks(file_content)
+
+        if fraud_result.should_block:
+            logger.warning(
+                f"Upload fraud check blocked: user_id={current_user.id}, "
+                f"error_code=pdf_tampering_detected, flags={fraud_result.fraud_flags}"
+            )
+            raise ReceiptFraudError(
+                "This file appears to have been modified. Please upload the original PDF.",
+                details={
+                    "error_code": "pdf_tampering_detected",
+                    "fraud_score": fraud_result.fraud_score,
+                    "fraud_flags": fraud_result.fraud_flags,
+                },
+            )
+
+        fraud_score = fraud_result.fraud_score
+        fraud_flags_json = fraud_result.fraud_flags_json
+
     # Compute content hash for duplicate detection (only when enabled — storing NULL
     # bypasses the partial unique index ix_receipts_content_hash_active which only
     # applies WHERE content_hash IS NOT NULL)
     content_hash = (
         hashlib.sha256(file_content).hexdigest()
-        if settings.DUPLICATE_DETECTION_ENABLED
+        if settings.FRAUD_DETECTION_ENABLED
         else None
     )
 
     # Check for duplicate receipt (global, across all users)
     receipt_repo = ReceiptRepository(db)
-    if settings.DUPLICATE_DETECTION_ENABLED and content_hash:
+    if settings.FRAUD_DETECTION_ENABLED and content_hash:
         existing = await receipt_repo.find_by_content_hash(content_hash)
         if existing:
             raise DuplicateReceiptError(
@@ -99,10 +124,12 @@ async def upload_receipt(
     receipt = await receipt_repo.create(
         user_id=current_user.id,
         filename=filename,
-        file_type="pdf",
+        file_type="pdf" if content_type == "application/pdf" else "jpeg",
         file_size=len(file_content),
         status=ReceiptStatus.PENDING,
         content_hash=content_hash,
+        fraud_score=fraud_score,
+        fraud_flags=fraud_flags_json,
     )
 
     # Commit DB — catch IntegrityError from the unique partial index on content_hash
@@ -128,7 +155,7 @@ async def upload_receipt(
         user_id=current_user.id,
         file_content=file_content,
         filename=filename,
-        receipt_date_override=receipt_date,
+        mime_type=content_type,
     )
 
     return ReceiptUploadAcceptedResponse(

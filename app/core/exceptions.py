@@ -58,3 +58,9 @@ class DuplicateReceiptError(ScandaliciousException):
     pass
 
 
+class ReceiptFraudError(ScandaliciousException):
+    """Raised when fraud detection flags a receipt as suspicious."""
+
+    pass
+
+

@@ -20,6 +20,7 @@ from app.core.exceptions import (
     ResourceNotFoundError,
     PermissionDeniedError,
     DuplicateReceiptError,
+    ReceiptFraudError,
 )
 from app.api.v2.router import api_router as api_router_v2
 from app.db.session import init_db
@@ -182,6 +183,21 @@ async def duplicate_receipt_exception_handler(
         status_code=409,
         content={
             "error": "duplicate_receipt",
+            "message": exc.message,
+            "details": exc.details,
+        },
+    )
+
+
+@app.exception_handler(ReceiptFraudError)
+async def receipt_fraud_exception_handler(
+    request: Request, exc: ReceiptFraudError
+):
+    return JSONResponse(
+        status_code=422,
+        content={
+            "error": "receipt_fraud",
+            "error_code": exc.details.get("error_code", "fraud_detected"),
             "message": exc.message,
             "details": exc.details,
         },
