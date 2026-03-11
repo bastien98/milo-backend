@@ -30,6 +30,7 @@ class LotteryDrawing(Base):
     winner_name: Mapped[Optional[str]] = mapped_column(String, nullable=True)
     winner_instagram_handle: Mapped[Optional[str]] = mapped_column(String, nullable=True)
     participant_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    post_url: Mapped[Optional[str]] = mapped_column(String, nullable=True)
     video_url: Mapped[Optional[str]] = mapped_column(String, nullable=True)
     instagram_post_id: Mapped[Optional[str]] = mapped_column(String, nullable=True)
     drawn_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)

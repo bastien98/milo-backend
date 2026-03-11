@@ -80,6 +80,7 @@ class LotteryService:
             "has_receipt": has_receipt,
             "has_share": has_share,
             "proof_status": proof_status,
+            "post_url": drawing.post_url,
             "current_month": current_month,
             "prize_amount": drawing.prize_amount_cents / 100,
             "drawing_status": drawing.status,

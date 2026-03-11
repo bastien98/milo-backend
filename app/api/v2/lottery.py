@@ -12,6 +12,7 @@ from app.schemas.lottery import (
     ToggleShareRequest,
     PublishRequest,
     ApproveProofRequest,
+    SetPostUrlRequest,
     VideoPropsResponse,
 )
 from app.services.lottery_service import LotteryService
@@ -55,6 +56,20 @@ async def declare_share(
 
 
 # ── Admin endpoints ──
+
+@router.post("/admin/set-post-url/{month}", response_model=LotteryDrawingResponse)
+async def set_post_url(
+    month: str,
+    data: SetPostUrlRequest,
+    db: AsyncSession = Depends(get_db),
+):
+    """Set the Instagram post URL for a month's drawing."""
+    repo = LotteryRepository(db)
+    drawing = await repo.get_or_create_drawing(month)
+    drawing = await repo.update_drawing(drawing, post_url=data.post_url)
+    await db.commit()
+    return drawing
+
 
 @router.post("/admin/drawing/{month}", response_model=LotteryDrawingResponse)
 async def get_or_create_drawing(

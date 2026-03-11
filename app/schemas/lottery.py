@@ -10,6 +10,7 @@ class LotteryStatusResponse(BaseModel):
     has_receipt: bool
     has_share: bool = False
     proof_status: Optional[str] = None
+    post_url: Optional[str] = None
     current_month: str
     prize_amount: int
     drawing_status: str
@@ -36,6 +37,7 @@ class LotteryDrawingResponse(BaseModel):
     winner_name: Optional[str] = None
     winner_instagram_handle: Optional[str] = None
     participant_count: int
+    post_url: Optional[str] = None
     video_url: Optional[str] = None
     drawn_at: Optional[datetime] = None
     published_at: Optional[datetime] = None
@@ -73,6 +75,10 @@ class PublishRequest(BaseModel):
 
 class ApproveProofRequest(BaseModel):
     approved: bool
+
+
+class SetPostUrlRequest(BaseModel):
+    post_url: str
 
 
 class VideoPropsResponse(BaseModel):
