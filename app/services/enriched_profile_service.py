@@ -178,7 +178,7 @@ def _build_shopping_habits(
     )
 
     # Premium ratio
-    items_with_brand = [t for t in transactions if t.normalized_brand]
+    items_with_brand = [t for t in transactions if t.normalized_brand and not t.is_discount and not t.is_deposit]
     premium_count = sum(1 for t in items_with_brand if t.is_premium)
     premium_ratio = round(premium_count / len(items_with_brand), 2) if items_with_brand else 0
 
@@ -194,7 +194,7 @@ def _build_shopping_habits(
     # Basket size
     receipt_item_counts: dict[str, int] = defaultdict(int)
     for t in transactions:
-        if t.receipt_id:
+        if t.receipt_id and not t.is_discount and not t.is_deposit:
             receipt_item_counts[t.receipt_id] += 1
     typical_basket = (
         round(sum(receipt_item_counts.values()) / len(receipt_item_counts), 1)
@@ -203,7 +203,12 @@ def _build_shopping_habits(
     )
 
     # Preferred shopping days (day-of-week distribution, days above 10%)
-    dow_counts = Counter(t.date.strftime("%A") for t in transactions)
+    # Deduplicate to one entry per receipt/day to avoid weighting by basket size
+    seen_receipt_days: set = set()
+    for t in transactions:
+        key = (t.receipt_id, t.date) if t.receipt_id else (None, t.date)
+        seen_receipt_days.add(key)
+    dow_counts = Counter(d.strftime("%A") for _, d in seen_receipt_days)
     total_dow = sum(dow_counts.values())
     preferred_shopping_days = sorted(
         [
@@ -632,7 +637,8 @@ def _build_promo_interest_items(
             if brand_counts:
                 top_brand = max(brand_counts, key=brand_counts.get)  # type: ignore[arg-type]
                 top_brand_count = brand_counts[top_brand]
-                brand_ratio = top_brand_count / data["count"]
+                total_branded = sum(brand_counts.values())
+                brand_ratio = top_brand_count / total_branded
                 if brand_ratio >= 0.8:
                     brand_loyal.append((trip_count, entry.copy()))
                 elif len(brand_counts) >= 2:
