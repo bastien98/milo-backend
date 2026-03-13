@@ -27,6 +27,7 @@ class UserProfile(Base):
         SQLEnum(Gender, native_enum=False), nullable=True
     )
     age: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    household_number: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
     language: Mapped[Optional[Language]] = mapped_column(
         SQLEnum(Language, native_enum=False), nullable=True
     )
@@ -35,6 +36,19 @@ class UserProfile(Base):
     referred_by_code: Mapped[Optional[str]] = mapped_column(String(10), nullable=True)
     iban: Mapped[Optional[str]] = mapped_column(String, nullable=True)
     iban_last4: Mapped[Optional[str]] = mapped_column(String(4), nullable=True)
+
+    # Geo data (populated from itsme verified address)
+    street_address: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+    postal_code: Mapped[Optional[str]] = mapped_column(String(20), nullable=True)
+    city: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+    country: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+
+    # itsme identity link
+    itsme_sub: Mapped[Optional[str]] = mapped_column(String, unique=True, nullable=True, index=True)
+
+    # Social media
+    instagram_handle: Mapped[Optional[str]] = mapped_column(String(30), nullable=True, index=True)
+
     profile_completed: Mapped[bool] = mapped_column(Boolean, default=False)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()

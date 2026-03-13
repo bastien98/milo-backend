@@ -26,8 +26,14 @@ class UserProfileRepository:
         nickname: Optional[str] = None,
         gender: Optional[Gender] = None,
         age: Optional[int] = None,
+        household_number: Optional[int] = None,
         language: Optional[Language] = None,
         preferred_stores: Optional[List[str]] = None,
+        street_address: Optional[str] = None,
+        postal_code: Optional[str] = None,
+        city: Optional[str] = None,
+        country: Optional[str] = None,
+        itsme_sub: Optional[str] = None,
     ) -> UserProfile:
         """Create a new user profile."""
         # Determine if profile is completed (new fields: nickname, gender, age, language)
@@ -40,8 +46,14 @@ class UserProfileRepository:
             nickname=nickname,
             gender=gender,
             age=age,
+            household_number=household_number,
             language=language,
             preferred_stores=preferred_stores,
+            street_address=street_address,
+            postal_code=postal_code,
+            city=city,
+            country=country,
+            itsme_sub=itsme_sub,
             profile_completed=profile_completed,
         )
         self.db.add(profile)
@@ -57,8 +69,10 @@ class UserProfileRepository:
         nickname: Optional[str] = None,
         gender: Optional[Gender] = None,
         age: Optional[int] = None,
+        household_number: Optional[int] = None,
         language: Optional[Language] = None,
         preferred_stores: Optional[List[str]] = None,
+        instagram_handle: Optional[str] = None,
     ) -> UserProfile:
         """Update an existing user profile."""
         # Update only provided fields
@@ -72,10 +86,14 @@ class UserProfileRepository:
             profile.gender = gender
         if age is not None:
             profile.age = age
+        if household_number is not None:
+            profile.household_number = household_number
         if language is not None:
             profile.language = language
         if preferred_stores is not None:
             profile.preferred_stores = preferred_stores
+        if instagram_handle is not None:
+            profile.instagram_handle = instagram_handle
 
         # Update profile_completed status (new fields)
         profile.profile_completed = all([

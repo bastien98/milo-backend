@@ -25,15 +25,15 @@ class ProfileService:
         nickname: Optional[str] = None,
         gender: Optional[Gender] = None,
         age: Optional[int] = None,
+        household_number: Optional[int] = None,
         language: Optional[Language] = None,
         preferred_stores: Optional[List[str]] = None,
+        instagram_handle: Optional[str] = None,
     ) -> UserProfile:
         """Create or update user profile (POST operation)."""
-        # Check if profile exists
         existing_profile = await self.profile_repo.get_by_user_id(user_id)
 
         if existing_profile:
-            # Update existing profile
             return await self.profile_repo.update(
                 profile=existing_profile,
                 first_name=first_name,
@@ -41,11 +41,12 @@ class ProfileService:
                 nickname=nickname,
                 gender=gender,
                 age=age,
+                household_number=household_number,
                 language=language,
                 preferred_stores=preferred_stores,
+                instagram_handle=instagram_handle,
             )
         else:
-            # Create new profile
             return await self.profile_repo.create(
                 user_id=user_id,
                 first_name=first_name,
@@ -53,6 +54,7 @@ class ProfileService:
                 nickname=nickname,
                 gender=gender,
                 age=age,
+                household_number=household_number,
                 language=language,
                 preferred_stores=preferred_stores,
             )
@@ -65,11 +67,12 @@ class ProfileService:
         nickname: Optional[str] = None,
         gender: Optional[Gender] = None,
         age: Optional[int] = None,
+        household_number: Optional[int] = None,
         language: Optional[Language] = None,
         preferred_stores: Optional[List[str]] = None,
+        instagram_handle: Optional[str] = None,
     ) -> UserProfile:
         """Update existing user profile (PUT operation)."""
-        # Get existing profile
         existing_profile = await self.profile_repo.get_by_user_id(user_id)
 
         if not existing_profile:
@@ -79,7 +82,6 @@ class ProfileService:
                 resource_id=user_id,
             )
 
-        # Update profile with provided fields
         return await self.profile_repo.update(
             profile=existing_profile,
             first_name=first_name,
@@ -87,8 +89,10 @@ class ProfileService:
             nickname=nickname,
             gender=gender,
             age=age,
+            household_number=household_number,
             language=language,
             preferred_stores=preferred_stores,
+            instagram_handle=instagram_handle,
         )
 
     async def delete_profile(self, user_id: str) -> None:
