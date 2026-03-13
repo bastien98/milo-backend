@@ -1,3 +1,4 @@
+import uuid
 from typing import Optional
 
 from sqlalchemy import select, func, update
@@ -6,7 +7,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from app.models.cashback import CashbackTransaction, CashbackBalance
-from app.models.enums import CashbackStatus
+from app.models.enums import CashbackStatus, SpinType
 
 
 class CashbackRepository:
@@ -18,8 +19,17 @@ class CashbackRepository:
         user_id: str,
         receipt_id: str,
         receipt_total: float,
-        cashback_amount: float,
-        effective_rate: float,
+        # New points fields
+        points_total: int = 0,
+        fixed_points: int = 0,
+        grote_kar_points: int = 0,
+        kickstart_bonus_points: int = 0,
+        spin_type: Optional[SpinType] = None,
+        is_kickstart: bool = False,
+        is_streak_saver: bool = False,
+        # Legacy fields (kept for compat)
+        cashback_amount: float = 0.0,
+        effective_rate: float = 0.0,
         spins_awarded: int = 0,
         status: CashbackStatus = CashbackStatus.PENDING,
     ) -> CashbackTransaction:
@@ -27,6 +37,13 @@ class CashbackRepository:
             user_id=user_id,
             receipt_id=receipt_id,
             receipt_total=receipt_total,
+            points_total=points_total,
+            fixed_points=fixed_points,
+            grote_kar_points=grote_kar_points,
+            kickstart_bonus_points=kickstart_bonus_points,
+            spin_type=spin_type,
+            is_kickstart=is_kickstart,
+            is_streak_saver=is_streak_saver,
             cashback_amount=cashback_amount,
             effective_rate=effective_rate,
             spins_awarded=spins_awarded,
@@ -37,7 +54,6 @@ class CashbackRepository:
         return txn
 
     async def confirm_transaction(self, receipt_id: str) -> None:
-        """Mark a PENDING transaction as CONFIRMED."""
         await self.db.execute(
             update(CashbackTransaction)
             .where(CashbackTransaction.receipt_id == receipt_id)
@@ -58,13 +74,11 @@ class CashbackRepository:
     async def get_user_cashback_transactions(
         self, user_id: str, page: int = 1, page_size: int = 20
     ) -> tuple[list[CashbackTransaction], int]:
-        # Count total
         count_result = await self.db.execute(
             select(func.count()).where(CashbackTransaction.user_id == user_id)
         )
         total = count_result.scalar() or 0
 
-        # Fetch paginated, newest first — eagerly load receipt to avoid N+1
         offset = (page - 1) * page_size
         result = await self.db.execute(
             select(CashbackTransaction)
@@ -88,22 +102,101 @@ class CashbackRepository:
                 total_earned=0.0,
                 total_paid_out=0.0,
                 current_balance=0.0,
+                points_balance=0,
+                total_points_earned=0,
+                total_points_paid_out=0,
+                standard_spins=0,
+                premium_spins=0,
             )
             self.db.add(balance)
             await self.db.flush()
         return balance
 
-    async def upsert_balance_increment(
-        self, user_id: str, cashback_amount: float
-    ) -> None:
-        """Insert or atomically increment balance in a single statement."""
-        import uuid
+    async def upsert_points_increment(self, user_id: str, points: int) -> None:
+        """Insert or atomically increment points balance in a single statement."""
+        stmt = pg_insert(CashbackBalance).values(
+            id=str(uuid.uuid4()),
+            user_id=user_id,
+            points_balance=points,
+            total_points_earned=points,
+            total_points_paid_out=0,
+            standard_spins=0,
+            premium_spins=0,
+            total_earned=0.0,
+            total_paid_out=0.0,
+            current_balance=0.0,
+        )
+        stmt = stmt.on_conflict_do_update(
+            index_elements=["user_id"],
+            set_={
+                "points_balance": CashbackBalance.points_balance + points,
+                "total_points_earned": CashbackBalance.total_points_earned + points,
+            },
+        )
+        await self.db.execute(stmt)
+        await self.db.flush()
+
+    async def add_standard_spins(self, user_id: str, spins: int) -> None:
+        if spins <= 0:
+            return
+        await self.get_or_create_balance(user_id)
+        await self.db.execute(
+            update(CashbackBalance)
+            .where(CashbackBalance.user_id == user_id)
+            .values(standard_spins=CashbackBalance.standard_spins + spins)
+        )
+        await self.db.flush()
+
+    async def add_premium_spins(self, user_id: str, spins: int) -> None:
+        if spins <= 0:
+            return
+        await self.get_or_create_balance(user_id)
+        await self.db.execute(
+            update(CashbackBalance)
+            .where(CashbackBalance.user_id == user_id)
+            .values(premium_spins=CashbackBalance.premium_spins + spins)
+        )
+        await self.db.flush()
+
+    async def consume_standard_spin(self, user_id: str) -> bool:
+        result = await self.db.execute(
+            update(CashbackBalance)
+            .where(
+                CashbackBalance.user_id == user_id,
+                CashbackBalance.standard_spins > 0,
+            )
+            .values(standard_spins=CashbackBalance.standard_spins - 1)
+        )
+        await self.db.flush()
+        return result.rowcount > 0
+
+    async def consume_premium_spin(self, user_id: str) -> bool:
+        result = await self.db.execute(
+            update(CashbackBalance)
+            .where(
+                CashbackBalance.user_id == user_id,
+                CashbackBalance.premium_spins > 0,
+            )
+            .values(premium_spins=CashbackBalance.premium_spins - 1)
+        )
+        await self.db.flush()
+        return result.rowcount > 0
+
+    # ── Legacy methods kept for backward compat ──────────────────────────
+
+    async def upsert_balance_increment(self, user_id: str, cashback_amount: float) -> None:
+        """Legacy euro balance increment. Kept for backward compat."""
         stmt = pg_insert(CashbackBalance).values(
             id=str(uuid.uuid4()),
             user_id=user_id,
             total_earned=cashback_amount,
             total_paid_out=0.0,
             current_balance=cashback_amount,
+            points_balance=0,
+            total_points_earned=0,
+            total_points_paid_out=0,
+            standard_spins=0,
+            premium_spins=0,
         )
         stmt = stmt.on_conflict_do_update(
             index_elements=["user_id"],
@@ -116,26 +209,9 @@ class CashbackRepository:
         await self.db.flush()
 
     async def add_spins(self, user_id: str, spins: int) -> None:
-        """Atomically add spins to user's balance."""
-        if spins <= 0:
-            return
-        await self.get_or_create_balance(user_id)
-        await self.db.execute(
-            update(CashbackBalance)
-            .where(CashbackBalance.user_id == user_id)
-            .values(spins_available=CashbackBalance.spins_available + spins)
-        )
-        await self.db.flush()
+        """Legacy: add standard spins."""
+        await self.add_standard_spins(user_id, spins)
 
     async def consume_spin(self, user_id: str) -> bool:
-        """Atomically consume 1 spin. Returns False if no spins available."""
-        result = await self.db.execute(
-            update(CashbackBalance)
-            .where(
-                CashbackBalance.user_id == user_id,
-                CashbackBalance.spins_available > 0,
-            )
-            .values(spins_available=CashbackBalance.spins_available - 1)
-        )
-        await self.db.flush()
-        return result.rowcount > 0
+        """Legacy: consume a standard spin."""
+        return await self.consume_standard_spin(user_id)

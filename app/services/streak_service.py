@@ -1,150 +1,181 @@
+"""
+Streak service for the Milo Points system.
+
+Two-level streak model based on calendar weeks:
+
+Level 1 (first month cycle, 4 weeks):
+  Week 1: nothing
+  Week 2: +1 Standard Spin
+  Week 3: +150 fixed pts
+  Week 4: +1 Premium Spin + 50 fixed pts  (climax)
+
+Level 2 (continuous streak, month 2+):
+  Week 1: +150 pts
+  Week 2: +1 Standard Spin + 100 pts
+  Week 3: +1 Standard Spin + 150 pts
+  Week 4: +1 Premium Spin + 200 pts  (climax)
+
+After completing Level 1 week 4 and scanning the next week without a break,
+the streak advances to Level 2. Completing Level 2 week 4 restarts the Level 2 cycle.
+
+Break rule: miss 2+ ISO weeks -> streak resets to Level 1 week 0.
+"""
 import logging
 import uuid
-from datetime import datetime, timezone, timedelta
+from datetime import datetime, timezone
 
-from sqlalchemy import select, delete
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.cashback import CashbackBalance
 from app.models.streak import StreakReward
-from app.models.enums import StreakRewardStatus, StreakRewardType
+from app.models.enums import StreakRewardStatus, StreakRewardType, SpinType
 
 logger = logging.getLogger(__name__)
+
+LEVEL_1 = 1
+LEVEL_2 = 2
+
+
+def reward_for_week(week_in_cycle: int, streak_level: int) -> dict:
+    """Return the reward for the given cycle position (1-4) at the given streak level.
+
+    Returns dict: {type, spins, spin_type, points}
+    """
+    if week_in_cycle <= 0:
+        return {"type": "none", "spins": 0, "spin_type": None, "points": 0}
+
+    cycle_week = ((week_in_cycle - 1) % 4) + 1  # normalize to 1-4
+
+    if streak_level == LEVEL_1:
+        schedule = {
+            1: {"type": "none",   "spins": 0, "spin_type": None,              "points": 0},
+            2: {"type": "spins",  "spins": 1, "spin_type": SpinType.STANDARD, "points": 0},
+            3: {"type": "points", "spins": 0, "spin_type": None,              "points": 150},
+            4: {"type": "mixed",  "spins": 1, "spin_type": SpinType.PREMIUM,  "points": 50},
+        }
+    else:  # LEVEL_2
+        schedule = {
+            1: {"type": "points", "spins": 0, "spin_type": None,              "points": 150},
+            2: {"type": "mixed",  "spins": 1, "spin_type": SpinType.STANDARD, "points": 100},
+            3: {"type": "mixed",  "spins": 1, "spin_type": SpinType.STANDARD, "points": 150},
+            4: {"type": "mixed",  "spins": 1, "spin_type": SpinType.PREMIUM,  "points": 200},
+        }
+
+    return schedule[cycle_week]
+
+
+def _label_for_reward(reward: dict) -> str:
+    if reward["type"] == "none":
+        return "Geen beloning"
+    parts = []
+    if reward["spins"]:
+        spin_name = "Premium Spin" if reward["spin_type"] == SpinType.PREMIUM else "Standaard Spin"
+        parts.append(f"1 {spin_name}")
+    if reward["points"]:
+        parts.append(f"{reward['points']} pts")
+    return " + ".join(parts) if parts else "Geen beloning"
 
 
 class StreakService:
     def __init__(self, db: AsyncSession):
         self.db = db
 
-    # ------------------------------------------------------------------ #
-    # Reward schedule (pure function)
-    # ------------------------------------------------------------------ #
-
-    @staticmethod
-    def reward_for_week(week: int) -> dict:
-        """Return the reward for a given streak week number.
-
-        Schedule:
-          Weeks 1-3:  1 spin/week   | Week 4:  EUR 1
-          Weeks 5-7:  2 spins/week  | Week 8:  EUR 1
-          Weeks 9-11: 3 spins/week  | Week 12: EUR 1
-          Week 13+:   3 spins/week, EUR 1 every 4th week
-        """
-        if week <= 0:
-            return {"type": "spins", "spins": 0, "cash": 0.0}
-        if week % 4 == 0:
-            return {"type": "cash", "spins": 0, "cash": 1.0}
-        # Spins escalate: cycle 0 -> 1 spin, cycle 1 -> 2 spins, cycle 2+ -> 3 spins
-        cycle = min((week - 1) // 4, 2)
-        return {"type": "spins", "spins": cycle + 1, "cash": 0.0}
-
-    @staticmethod
-    def _label_for_reward(reward: dict) -> str:
-        if reward["type"] == "cash":
-            return "€1"
-        spins = reward["spins"]
-        return f"{spins} spin{'s' if spins > 1 else ''}"
-
-    # ------------------------------------------------------------------ #
-    # Public API
-    # ------------------------------------------------------------------ #
-
     async def get_streak_status(self, user_id: str) -> dict:
-        """Return current streak state for the user."""
         balance = await self._get_or_create_balance(user_id)
-
-        # Check for streak break before returning status
         await self._check_streak_break(balance)
 
         week_count = balance.streak_week_count
+        streak_level = balance.streak_level
+        cycle_week = ((week_count - 1) % 4) + 1 if week_count > 0 else 0
 
         # Build 4-entry current cycle
-        cycle_start = (week_count // 4) * 4 + 1 if week_count % 4 != 0 else max((week_count - 3), 1)
-        if week_count == 0:
-            cycle_start = 1
-
+        cycle_start_abs = week_count - (cycle_week - 1) if week_count > 0 else 1
         current_cycle = []
         for i in range(4):
-            w = cycle_start + i
-            reward = self.reward_for_week(w)
+            abs_week = cycle_start_abs + i
+            cycle_pos = i + 1
+            reward = reward_for_week(cycle_pos, streak_level)
             current_cycle.append({
-                "week": w,
-                "label": self._label_for_reward(reward),
+                "week": abs_week,
+                "cycle_position": cycle_pos,
+                "label": _label_for_reward(reward),
                 "reward_type": reward["type"],
-                "completed": w <= week_count,
+                "completed": abs_week <= week_count,
             })
 
-        # Check for claimable reward
         claimable = await self._get_claimable_reward(user_id)
 
-        # Determine at-risk status
         is_at_risk = False
         if balance.streak_last_qualified_at and week_count > 0:
             now = datetime.now(timezone.utc)
-            last = balance.streak_last_qualified_at
-            # At risk if we're in a new ISO week and haven't qualified yet
-            last_iso = last.isocalendar()
+            last_iso = balance.streak_last_qualified_at.isocalendar()
             now_iso = now.isocalendar()
             if (now_iso[0], now_iso[1]) != (last_iso[0], last_iso[1]):
                 is_at_risk = True
 
         return {
             "week_count": week_count,
+            "streak_level": streak_level,
             "current_cycle": current_cycle,
             "claimable_reward": claimable,
             "is_at_risk": is_at_risk,
         }
 
-    async def record_qualifying_receipt(self, user_id: str, receipt_total: float, *, force: bool = False) -> None:
-        """Called after a receipt >€50 is processed. Advances streak if not already qualified this week.
-
-        Args:
-            force: If True, bypass amount check and ISO week duplicate guard (for test mode).
-        """
-        if not force and receipt_total <= 50:
-            return
-
+    async def record_qualifying_receipt(
+        self, user_id: str, receipt_total: float = 0.0, *, force: bool = False
+    ) -> None:
+        """Called after a receipt is processed. All receipts qualify for streak (no minimum)."""
         balance = await self._get_or_create_balance(user_id)
 
         if not force:
-            # Check for streak break first
             await self._check_streak_break(balance)
 
         now = datetime.now(timezone.utc)
         now_iso = now.isocalendar()
 
-        # Check if already qualified this ISO week (skip in force/test mode)
         if not force and balance.streak_last_qualified_at:
             last_iso = balance.streak_last_qualified_at.isocalendar()
             if (now_iso[0], now_iso[1]) == (last_iso[0], last_iso[1]):
                 logger.info(f"User {user_id} already qualified this week, skipping streak advance")
                 return
 
-        # Advance streak
         balance.streak_week_count += 1
         balance.streak_last_qualified_at = now
-        week = balance.streak_week_count
+        week_count = balance.streak_week_count
 
-        # Create claimable reward
-        reward = self.reward_for_week(week)
-        streak_reward = StreakReward(
-            id=str(uuid.uuid4()),
-            user_id=user_id,
-            week_number=week,
-            reward_type=StreakRewardType(reward["type"]),
-            spins_amount=reward["spins"],
-            cash_amount=reward["cash"],
-            status=StreakRewardStatus.CLAIMABLE,
-        )
-        self.db.add(streak_reward)
+        cycle_week = ((week_count - 1) % 4) + 1  # 1-4
+        is_completing_level1_cycle = (balance.streak_level == LEVEL_1 and cycle_week == 4)
+
+        reward = reward_for_week(cycle_week, balance.streak_level)
+
+        if reward["type"] != "none":
+            reward_type = StreakRewardType.SPINS if reward["spins"] else StreakRewardType.POINTS
+            streak_reward = StreakReward(
+                id=str(uuid.uuid4()),
+                user_id=user_id,
+                week_number=week_count,
+                reward_type=reward_type,
+                spins_amount=reward["spins"],
+                cash_amount=0.0,
+                points_amount=reward["points"],
+                spin_type=reward["spin_type"],
+                streak_level=balance.streak_level,
+                status=StreakRewardStatus.CLAIMABLE,
+            )
+            self.db.add(streak_reward)
+
+        if is_completing_level1_cycle:
+            balance.streak_level = LEVEL_2
+            logger.info(f"User {user_id} advanced to Level 2 streak!")
 
         logger.info(
-            f"Streak advanced for user {user_id}: week {week}, "
-            f"reward={reward['type']} (spins={reward['spins']}, cash={reward['cash']})"
+            f"Streak advanced: user={user_id}, week={week_count}, "
+            f"level={balance.streak_level}, cycle_week={cycle_week}"
         )
 
     async def claim_reward(self, user_id: str) -> dict:
-        """Claim the oldest claimable streak reward. Credits wallet or spins."""
+        """Claim the oldest claimable streak reward."""
         result = await self.db.execute(
             select(StreakReward)
             .where(
@@ -161,47 +192,49 @@ class StreakService:
                 "success": False,
                 "reward_type": "",
                 "spins_credited": 0,
-                "cash_credited": 0.0,
-                "new_balance": 0.0,
-                "new_spins_available": 0,
+                "spin_type": None,
+                "points_credited": 0,
+                "new_points_balance": 0,
+                "new_standard_spins": 0,
+                "new_premium_spins": 0,
             }
 
-        # Mark as claimed
         reward.status = StreakRewardStatus.CLAIMED
         reward.claimed_at = datetime.now(timezone.utc)
 
-        # Credit the balance
         balance = await self._get_or_create_balance(user_id)
 
-        if reward.reward_type == StreakRewardType.CASH:
-            balance.current_balance += reward.cash_amount
-            balance.total_earned += reward.cash_amount
-        else:
-            balance.spins_available += reward.spins_amount
+        if reward.spins_amount > 0 and reward.spin_type:
+            if reward.spin_type == SpinType.STANDARD:
+                balance.standard_spins += reward.spins_amount
+            else:
+                balance.premium_spins += reward.spins_amount
+
+        if reward.points_amount > 0:
+            balance.points_balance += reward.points_amount
+            balance.total_points_earned += reward.points_amount
 
         logger.info(
-            f"Streak reward claimed for user {user_id}: week {reward.week_number}, "
-            f"type={reward.reward_type.value}, spins={reward.spins_amount}, cash={reward.cash_amount}"
+            f"Streak reward claimed: user={user_id}, week={reward.week_number}, "
+            f"level={reward.streak_level}, spins={reward.spins_amount}, pts={reward.points_amount}"
         )
 
         return {
             "success": True,
             "reward_type": reward.reward_type.value,
-            "spins_credited": reward.spins_amount if reward.reward_type == StreakRewardType.SPINS else 0,
-            "cash_credited": reward.cash_amount if reward.reward_type == StreakRewardType.CASH else 0.0,
-            "new_balance": balance.current_balance,
-            "new_spins_available": balance.spins_available,
+            "spins_credited": reward.spins_amount,
+            "spin_type": reward.spin_type.value if reward.spin_type else None,
+            "points_credited": reward.points_amount,
+            "new_points_balance": balance.points_balance,
+            "new_standard_spins": balance.standard_spins,
+            "new_premium_spins": balance.premium_spins,
         }
 
-    # ------------------------------------------------------------------ #
-    # Test helpers
-    # ------------------------------------------------------------------ #
+    # ── Test helpers ────────────────────────────────────────────────────────
 
-    async def test_set_week(self, user_id: str, week: int) -> None:
-        """Test mode: set streak to a specific week and create a claimable reward."""
+    async def test_set_week(self, user_id: str, week: int, streak_level: int = 1) -> None:
         balance = await self._get_or_create_balance(user_id)
 
-        # Clear any existing claimable rewards
         result = await self.db.execute(
             select(StreakReward).where(
                 StreakReward.user_id == user_id,
@@ -212,28 +245,34 @@ class StreakService:
             await self.db.delete(r)
 
         balance.streak_week_count = week
-        balance.streak_last_qualified_at = datetime.now(timezone.utc)
+        balance.streak_level = streak_level
+        balance.streak_last_qualified_at = datetime.now(timezone.utc) if week > 0 else None
 
         if week > 0:
-            # Create a claimable reward for the target week
-            reward = self.reward_for_week(week)
-            streak_reward = StreakReward(
-                id=str(uuid.uuid4()),
-                user_id=user_id,
-                week_number=week,
-                reward_type=StreakRewardType(reward["type"]),
-                spins_amount=reward["spins"],
-                cash_amount=reward["cash"],
-                status=StreakRewardStatus.CLAIMABLE,
-            )
-            self.db.add(streak_reward)
+            cycle_week = ((week - 1) % 4) + 1
+            reward = reward_for_week(cycle_week, streak_level)
+            if reward["type"] != "none":
+                reward_type = StreakRewardType.SPINS if reward["spins"] else StreakRewardType.POINTS
+                streak_reward = StreakReward(
+                    id=str(uuid.uuid4()),
+                    user_id=user_id,
+                    week_number=week,
+                    reward_type=reward_type,
+                    spins_amount=reward["spins"],
+                    cash_amount=0.0,
+                    points_amount=reward["points"],
+                    spin_type=reward["spin_type"],
+                    streak_level=streak_level,
+                    status=StreakRewardStatus.CLAIMABLE,
+                )
+                self.db.add(streak_reward)
 
-        logger.info(f"Test: streak set to week {week} for user {user_id}")
+        logger.info(f"Test: streak set to week={week}, level={streak_level} for user {user_id}")
 
     async def test_reset(self, user_id: str) -> int:
-        """Test mode: reset streak to 0 and delete all streak rewards."""
         balance = await self._get_or_create_balance(user_id)
         balance.streak_week_count = 0
+        balance.streak_level = LEVEL_1
         balance.streak_last_qualified_at = None
 
         result = await self.db.execute(
@@ -247,9 +286,7 @@ class StreakService:
         logger.info(f"Test: streak reset for user {user_id}, deleted {count} rewards")
         return count
 
-    # ------------------------------------------------------------------ #
-    # Private helpers
-    # ------------------------------------------------------------------ #
+    # ── Private helpers ─────────────────────────────────────────────────────
 
     async def _get_or_create_balance(self, user_id: str) -> CashbackBalance:
         result = await self.db.execute(
@@ -266,7 +303,7 @@ class StreakService:
         return balance
 
     async def _check_streak_break(self, balance: CashbackBalance) -> None:
-        """Reset streak if user missed a full ISO week (with 1-day Monday grace)."""
+        """Reset streak if user missed 2+ ISO weeks."""
         if balance.streak_week_count == 0 or balance.streak_last_qualified_at is None:
             return
 
@@ -276,44 +313,36 @@ class StreakService:
         last_iso = last.isocalendar()
         now_iso = now.isocalendar()
 
-        # Same week — no break
         if (now_iso[0], now_iso[1]) == (last_iso[0], last_iso[1]):
             return
 
-        # Calculate week gap
-        # ISO weeks: year * 52 + week (approximate, handles year boundary)
         last_week_num = last_iso[0] * 53 + last_iso[1]
         now_week_num = now_iso[0] * 53 + now_iso[1]
         week_gap = now_week_num - last_week_num
 
         if week_gap == 1:
-            # One week gap — check Monday grace (today is Monday = weekday 0)
-            if now.weekday() == 0:
-                # It's Monday, grace period still active
-                return
-            # Past Monday — if gap is exactly 1 week, streak is at risk but not broken yet
-            # The streak only breaks when we're 2+ weeks behind
+            # One week gap — streak is at risk but not broken
             return
 
         if week_gap >= 2:
-            # Missed a full week — streak is broken
             logger.info(
                 f"Streak broken for user {balance.user_id}: "
-                f"week_gap={week_gap}, resetting from {balance.streak_week_count}"
+                f"week_gap={week_gap}, resetting from week={balance.streak_week_count}, "
+                f"level={balance.streak_level}"
             )
             balance.streak_week_count = 0
+            balance.streak_level = LEVEL_1
             balance.streak_last_qualified_at = None
 
-            # Also expire any unclaimed rewards
             result = await self.db.execute(
                 select(StreakReward).where(
                     StreakReward.user_id == balance.user_id,
                     StreakReward.status == StreakRewardStatus.CLAIMABLE,
                 )
             )
-            for reward in result.scalars().all():
-                reward.status = StreakRewardStatus.CLAIMED
-                reward.claimed_at = datetime.now(timezone.utc)
+            for r in result.scalars().all():
+                r.status = StreakRewardStatus.CLAIMED
+                r.claimed_at = datetime.now(timezone.utc)
 
     async def _get_claimable_reward(self, user_id: str) -> dict | None:
         result = await self.db.execute(
@@ -334,5 +363,7 @@ class StreakService:
             "week_number": reward.week_number,
             "reward_type": reward.reward_type.value,
             "spins_amount": reward.spins_amount,
-            "cash_amount": reward.cash_amount,
+            "spin_type": reward.spin_type.value if reward.spin_type else None,
+            "points_amount": reward.points_amount,
+            "streak_level": reward.streak_level,
         }

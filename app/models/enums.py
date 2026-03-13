@@ -75,6 +75,18 @@ class StreakRewardStatus(str, Enum):
 class StreakRewardType(str, Enum):
     SPINS = "spins"
     CASH = "cash"
+    POINTS = "points"
+
+
+class TierLevel(str, Enum):
+    BRONZE = "bronze"   # < 4 tickets/month
+    SILVER = "silver"   # 4–9 tickets/month
+    GOLD = "gold"       # 10+ tickets/month
+
+
+class SpinType(str, Enum):
+    STANDARD = "standard"   # EV ~100 pts
+    PREMIUM = "premium"     # EV ~200 pts
 
 
 class LotteryDrawingStatus(str, Enum):

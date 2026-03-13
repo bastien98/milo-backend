@@ -3,6 +3,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_db, get_current_db_user
 from app.models.user import User
+from app.models.enums import SpinType
 from app.services.spin_service import SpinService
 from app.schemas.spin import (
     SpinRequest,
@@ -17,13 +18,16 @@ router = APIRouter()
 
 @router.get("/config", response_model=SpinWheelConfigResponse)
 async def get_wheel_config(
+    spin_type: str = "standard",
     current_user: User = Depends(get_current_db_user),
 ):
     """Get the wheel segment configuration for rendering."""
-    segments = SpinService.get_wheel_config()
+    stype = SpinType.PREMIUM if spin_type == "premium" else SpinType.STANDARD
+    segments = SpinService.get_wheel_config(stype)
     return SpinWheelConfigResponse(
         segments=[SpinSegmentResponse(**s) for s in segments],
         total_segments=len(segments),
+        spin_type=spin_type,
     )
 
 
@@ -35,28 +39,38 @@ async def spin_wheel(
 ):
     """
     Spin the prize wheel. The outcome is determined server-side.
-    The frontend should only use the returned segment_index for animation.
+    The frontend uses the returned segment_index for animation.
     """
     svc = SpinService(db)
-    outcome, new_balance, spins_delta = await svc.execute_spin(
-        user_id=current_user.id,
-        has_double_next=body.has_double_next,
-        is_respin=body.is_respin,
-        force_segment=body.force_segment,
-    )
+    spin_type = SpinType.PREMIUM if body.spin_type == "premium" else SpinType.STANDARD
+
+    try:
+        outcome, points_balance, std_spins, prem_spins = await svc.execute_spin(
+            user_id=current_user.id,
+            spin_type=spin_type,
+            is_respin=body.is_respin,
+            force_segment=body.force_segment,
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+    await db.commit()
 
     return SpinResultResponse(
         segment_index=outcome.segment.index,
         segment_label=outcome.segment.label,
         segment_type=outcome.segment.segment_type,
-        cash_value=outcome.cash_value,
+        points_value=outcome.points_value,
         is_jackpot=outcome.segment.is_jackpot,
-        is_doubled=outcome.is_doubled,
         mystery_reveal_value=outcome.mystery_reveal_value,
         grants_free_spin=outcome.grants_free_spin,
-        grants_double_next=outcome.grants_double_next,
-        new_balance=new_balance,
-        spins_remaining=spins_delta,
+        spin_type=spin_type.value,
+        new_points_balance=points_balance,
+        standard_spins_remaining=std_spins,
+        premium_spins_remaining=prem_spins,
+        cash_value=round(outcome.points_value / 1000, 4),
+        new_balance=round(points_balance / 1000, 4),
+        spins_remaining=std_spins + prem_spins,
     )
 
 
@@ -73,10 +87,11 @@ async def get_spin_history(
         SpinHistoryResponse(
             segment_label=s.segment_label,
             segment_type=s.segment_type,
-            cash_value=s.cash_value,
+            points_value=s.points_value,
             is_jackpot=s.is_jackpot,
-            is_doubled=s.is_doubled,
+            spin_type=s.spin_type.value if s.spin_type else "standard",
             created_at=s.created_at,
+            cash_value=s.cash_value,
         )
         for s in spins
     ]
