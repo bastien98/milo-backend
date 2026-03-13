@@ -170,7 +170,7 @@ def upgrade() -> None:
     op.execute("""
         UPDATE streak_rewards SET
             points_amount = ROUND(cash_amount * 1000)::integer,
-            spin_type     = CASE WHEN spins_amount > 0 THEN 'standard' ELSE NULL END,
+            spin_type     = CASE WHEN spins_amount > 0 THEN 'standard'::spintype ELSE NULL END,
             streak_level  = 1
     """)
 
