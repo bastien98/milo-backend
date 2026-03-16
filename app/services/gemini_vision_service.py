@@ -84,6 +84,8 @@ class ExtractedLineItem:
     dp_product_variant: Optional[str]  # flavor/style/sub-type (zero, bruin, paprika)
     dp_article_code: Optional[str]  # Article/PLU/barcode code from receipt
     dp_is_bio: bool  # True if organic (bio/biologisch/biologique)
+    dp_packaging_type: Optional[str]  # Container format: blik, fles, pet, zak, pot, etc.
+    dp_product_name_no_brand: Optional[str]  # Product name without brand, with variant (e.g., "pils", "cola zero")
 
     @property
     def lookup_key(self) -> str:
@@ -133,6 +135,8 @@ class _LineItemSchema(PydanticBaseModel):
     dp_product_variant: Optional[str] = Field(default=None, description="Flavor/sub-type in lowercase, or null")
     dp_article_code: Optional[str] = Field(default=None, description="Article/PLU/barcode from receipt, or null")
     dp_is_bio: bool = Field(description="true if organic/bio product")
+    dp_packaging_type: Optional[str] = Field(default=None, description="Container format lowercase: blik, fles, pet, zak, pot, doos, pak, brik, tube, spray, kuip, bakje, rol. null for loose/unpackaged")
+    dp_product_name_no_brand: Optional[str] = Field(default=None, description="Product name WITHOUT brand, lowercase, with variant/flavour. E.g., 'jupiler pils' → 'pils', 'coca-cola zero' → 'cola zero', 'boni volle melk' → 'volle melk'. null for discount/deposit lines")
 
 
 class _ReceiptSchema(PydanticBaseModel):
@@ -330,6 +334,20 @@ dp_pack_unit: unit as printed, lowercase: "cl","ml","l","g","kg". Do NOT convert
 dp_product_variant: flavor/sub-type, lowercase → "zero","bruin","paprika","pils". null if base product
 dp_article_code: article/PLU/EAN from receipt → "ART 123456","PLU 4011". null if not visible
 dp_is_bio: BIO/BIOLOGISCH/BIOLOGIQUE/ORGANIC in text → true, else false
+dp_packaging_type: container/packaging format, lowercase single word
+- Drinks: "blik" (can), "fles" (glass bottle), "pet" (plastic bottle), "brik" (tetra pak)
+- Food: "pot" (jar), "zak" (bag), "doos" (box), "pak" (carton), "kuip" (tub), "bakje" (tray/punnet)
+- Household: "fles" (bottle), "spray", "tube", "rol" (roll)
+- null for loose/unpackaged items (fruit, vegetables, bakery)
+dp_product_name_no_brand: product name WITHOUT brand, lowercase, with variant/flavour included
+- REMOVE: brand name, quantities, packaging types, receipt codes
+- KEEP: product type, variant, flavour
+- "JUPILER PILS 6X33CL PET" → "pils"
+- "COCA COLA ZERO 1,5L PET" → "cola zero"
+- "BONI VOLLE MELK 1L" → "volle melk"
+- "LAY'S CHIPS PAPRIKA 200G" → "chips paprika"
+- "BANANEN 1KG" → "bananen"
+- For discount/deposit lines: null
 
 Extract all line items from this receipt.'''
 
@@ -567,6 +585,18 @@ Extract all line items from this receipt.'''
                 if not dp_article_code:
                     dp_article_code = None
 
+            dp_packaging_type = item.get("dp_packaging_type")
+            if dp_packaging_type:
+                dp_packaging_type = dp_packaging_type.lower().strip()
+                if not dp_packaging_type:
+                    dp_packaging_type = None
+
+            dp_product_name_no_brand = item.get("dp_product_name_no_brand")
+            if dp_product_name_no_brand:
+                dp_product_name_no_brand = dp_product_name_no_brand.lower().strip()
+                if not dp_product_name_no_brand:
+                    dp_product_name_no_brand = None
+
             line_items.append(
                 ExtractedLineItem(
                     item_name=item.get("item_name", ""),
@@ -591,6 +621,8 @@ Extract all line items from this receipt.'''
                     dp_product_variant=dp_product_variant,
                     dp_article_code=dp_article_code,
                     dp_is_bio=bool(item.get("dp_is_bio", False)),
+                    dp_packaging_type=dp_packaging_type,
+                    dp_product_name_no_brand=dp_product_name_no_brand,
                 )
             )
 

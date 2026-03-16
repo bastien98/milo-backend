@@ -1,0 +1,73 @@
+store_id: "intermarche"
+display_name: "Intermarché"
+language: "fr"
+bilingual_dedup: false
+
+validity_format: >
+  "Valable du mercredi DD/MM au mardi DD/MM"
+
+store_brands:
+  - name: "top budget"
+    description: "Budget/economy brand"
+  - name: "pâturages"
+    description: "Dairy house brand"
+  - name: "chabrior"
+    description: "Biscuits/cereals house brand"
+  - name: "monique ranou"
+    description: "Charcuterie house brand"
+
+promo_mechanisms:
+  - label: "Prix Choc"
+    aliases: []
+    description: "Shock price / deep discount"
+  - label: "Carte fidélité"
+    aliases: []
+    description: "Loyalty card price — extract as promo_price"
+  - label: "1+1 gratuit"
+    aliases: []
+    description: "Buy one get one free. promo_price = price of one item"
+  - label: "-30%"
+    aliases: []
+    description: "Percentage discount (also -25%, -20%, -40%, etc.)"
+  - label: "X pour €Y"
+    aliases: []
+    description: "Multi-buy deal (set promo_price to per-unit price €Y/X)"
+  - label: "2ème à -50%"
+    aliases: []
+    description: "Second item at 50% off"
+
+normalized_name_examples:
+  - input: "Jupiler Pils Canettes 6x33cl"
+    output: "pils"
+  - input: "Top Budget Lait Entier 1L"
+    output: "lait entier"
+  - input: "Coca-Cola Zero 1,5L PET"
+    output: "cola zero"
+  - input: "Pâturages Beurre Doux 250g"
+    output: "beurre doux"
+
+content_examples:
+  - input: "6x33cl"
+    pack_size: 6
+    content_value: 33
+    content_unit: "cl"
+  - input: "1L"
+    pack_size: 1
+    content_value: 1
+    content_unit: "l"
+  - input: "250g"
+    pack_size: 1
+    content_value: 250
+    content_unit: "g"
+
+price_rules:
+  original_price: "nullable"
+  promo_price: "nullable"
+
+normalized_name_guidance: >
+  Intermarché folders are primarily in French. Keep the French product name.
+
+price_calculation_table: null
+extra_rules:
+  - "Intermarché folders are primarily in French — use French product names in normalized_name"
+validation_checklist: []

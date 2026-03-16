@@ -1,0 +1,69 @@
+store_id: "delhaize"
+display_name: "Delhaize"
+language: "nl_fr"
+bilingual_dedup: true
+
+validity_format: >
+  "Geldig van donderdag DD/MM tot woensdag DD/MM" or
+  "Valable du jeudi DD/MM au mercredi DD/MM"
+
+store_brands:
+  - name: "delhaize"
+    description: "Standard Delhaize house brand"
+  - name: "365"
+    description: "Budget/economy brand (cheapest tier)"
+
+promo_mechanisms:
+  - label: "SuperPlus"
+    aliases: []
+    description: "Delhaize loyalty card discount — extract with the card price"
+  - label: "NutriBoost"
+    aliases: []
+    description: "Health-focused promotional campaign"
+  - label: "1+1 gratis"
+    aliases: ["1+1 gratuit"]
+    description: "Buy one get one free. promo_price = price of one item"
+  - label: "2e aan -50%"
+    aliases: ["2ème à -50%"]
+    description: "Second item at 50% off"
+  - label: "-30%"
+    aliases: []
+    description: "Percentage discount (also -25%, -20%, -40%, etc.)"
+  - label: "X voor €Y"
+    aliases: ["X pour €Y"]
+    description: "Multi-buy deal (set promo_price to per-unit price €Y/X)"
+
+normalized_name_examples:
+  - input: "Jupiler Pils Blikken 24x25cl"
+    output: "pils"
+  - input: "Delhaize Verse Soep Tomaat 1L"
+    output: "verse soep tomaat"
+  - input: "365 Spaghetti 500g"
+    output: "spaghetti"
+  - input: "Coca-Cola Zero 1,5L PET"
+    output: "cola zero"
+  - input: "Danone Activia Vanille 4x125g"
+    output: "yoghurt vanille"
+
+content_examples:
+  - input: "24x25cl"
+    pack_size: 24
+    content_value: 25
+    content_unit: "cl"
+  - input: "1L"
+    pack_size: 1
+    content_value: 1
+    content_unit: "l"
+  - input: "4x125g"
+    pack_size: 4
+    content_value: 125
+    content_unit: "g"
+
+price_rules:
+  original_price: "nullable"
+  promo_price: "nullable"
+
+normalized_name_guidance: null
+price_calculation_table: null
+extra_rules: []
+validation_checklist: []

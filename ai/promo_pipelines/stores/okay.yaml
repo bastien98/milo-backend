@@ -1,0 +1,54 @@
+store_id: "okay"
+display_name: "OKay"
+language: "nl_fr"
+bilingual_dedup: true
+
+validity_format: >
+  "Geldig van DD/MM tot DD/MM" or "Valable du DD/MM au DD/MM"
+
+store_brands:
+  - name: "boni"
+    description: "Standard store brand (mid-range, shared with Colruyt Group)"
+  - name: "everyday"
+    description: "Budget/economy brand (shared with Colruyt Group)"
+
+promo_mechanisms:
+  - label: "1+1 gratis"
+    aliases: ["1+1 gratuit"]
+    description: "Buy one get one free. promo_price = price of one item"
+  - label: "2e aan halve prijs"
+    aliases: ["2ème à moitié prix"]
+    description: "Second item at half price"
+  - label: "-30%"
+    aliases: []
+    description: "Percentage discount (also -25%, -20%, etc.)"
+  - label: "X voor €Y"
+    aliases: ["X pour €Y"]
+    description: "Multi-buy deal (set promo_price to per-unit price €Y/X)"
+
+normalized_name_examples:
+  - input: "Jupiler Pils Blikken 6x33cl"
+    output: "pils"
+  - input: "Boni Halfvolle Melk 1L"
+    output: "halfvolle melk"
+  - input: "Everyday Toiletpapier 12st"
+    output: "toiletpapier"
+
+content_examples:
+  - input: "6x33cl"
+    pack_size: 6
+    content_value: 33
+    content_unit: "cl"
+  - input: "1L"
+    pack_size: 1
+    content_value: 1
+    content_unit: "l"
+
+price_rules:
+  original_price: "nullable"
+  promo_price: "nullable"
+
+normalized_name_guidance: null
+price_calculation_table: null
+extra_rules: []
+validation_checklist: []

@@ -369,11 +369,18 @@ class GeminiPromoError(Exception):
 # ---------------------------------------------------------------------------
 
 def _search_promos_for_item(pc: Pinecone, index, item: dict) -> list[dict]:
-    """Search Pinecone for promotions matching a single promo interest item."""
+    """Search Pinecone for promotions matching a single promo interest item.
+
+    Two search modes:
+    - Brand-loyal: query includes brand (via normalized_name) to find
+      promos for the user's preferred brand.
+    - Non-brand-loyal: query uses product_name_no_brand (brand stripped)
+      to find the best deal across all brands.
+    """
     normalized_name = item["normalized_name"]
+    product_name_no_brand = item.get("product_name_no_brand")
     granular_category = item.get("granular_category")
     interest_category = item.get("interest_category")
-    brands = item.get("brands", [])
 
     if granular_category:
         filter_dict = {"granular_category": {"$eq": granular_category}}
@@ -382,13 +389,17 @@ def _search_promos_for_item(pc: Pinecone, index, item: dict) -> list[dict]:
 
     cat_suffix = ""
     if granular_category and granular_category != "Other":
-        cat_suffix = f" ({granular_category})"
+        cat_suffix = f" [{granular_category}]"
 
-    # Build query texts
-    if interest_category == "brand_loyal" and brands:
-        query_texts = [f"{brand} {normalized_name}{cat_suffix}" for brand in brands]
-    else:
+    # Build query texts — two modes
+    if interest_category == "brand_loyal":
+        # Include brand — match specific brand's promos
+        # normalized_name already contains brand (e.g., "jupiler pils")
         query_texts = [f"{normalized_name}{cat_suffix}"]
+    else:
+        # Exclude brand — match promos across all brands
+        search_name = product_name_no_brand or normalized_name
+        query_texts = [f"{search_name}{cat_suffix}"]
 
     # Search + rerank across all queries
     seen_ids: set[str] = set()
@@ -493,16 +504,23 @@ def _is_valid_promo(promo: dict) -> bool:
 
 
 def _build_promo_dict(fields: dict, score: float) -> dict:
+    # Support both old field name ("brand") and new ("normalized_brand")
+    brand = fields.get("normalized_brand") or fields.get("brand", "")
     return {
         "relevance_score": round(score, 4),
         "normalized_name": fields.get("normalized_name", ""),
         "original_description": fields.get("original_description", ""),
-        "brand": fields.get("brand", ""),
+        "brand": brand,
+        "is_premium": fields.get("is_premium", False),
+        "packaging_type": fields.get("packaging_type", ""),
         "granular_category": fields.get("granular_category", ""),
         "parent_category": fields.get("parent_category", ""),
         "original_price": fields.get("original_price"),
         "promo_price": fields.get("promo_price"),
         "promo_mechanism": fields.get("promo_mechanism", ""),
+        "pack_size": fields.get("pack_size"),
+        "content_value": fields.get("content_value"),
+        "content_unit": fields.get("content_unit", ""),
         "unit_info": fields.get("unit_info", ""),
         "validity_start": fields.get("validity_start", ""),
         "validity_end": fields.get("validity_end", ""),

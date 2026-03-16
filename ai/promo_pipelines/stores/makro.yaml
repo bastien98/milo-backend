@@ -1,0 +1,57 @@
+store_id: "makro"
+display_name: "Makro"
+language: "nl_fr"
+bilingual_dedup: true
+
+validity_format: >
+  "Geldig van DD/MM tot DD/MM" or "Valable du DD/MM au DD/MM"
+
+store_brands:
+  - name: "aro"
+    description: "Makro house brand (professional/bulk)"
+
+promo_mechanisms:
+  - label: "-30%"
+    aliases: []
+    description: "Percentage discount (also -25%, -20%, -40%, -50%, etc.)"
+  - label: "1+1 gratis"
+    aliases: ["1+1 gratuit"]
+    description: "Buy one get one free. promo_price = price of one item"
+  - label: "X voor €Y"
+    aliases: ["X pour €Y"]
+    description: "Multi-buy deal (set promo_price to per-unit price €Y/X)"
+  - label: "Bulk Deal"
+    aliases: []
+    description: "Bulk/professional pricing deal"
+
+normalized_name_examples:
+  - input: "Jupiler Pils Blikken 24x25cl"
+    output: "pils"
+  - input: "Aro Keukenrol 32st"
+    output: "keukenrol"
+  - input: "Coca-Cola Zero 6x1,5L PET"
+    output: "cola zero"
+
+content_examples:
+  - input: "24x25cl"
+    pack_size: 24
+    content_value: 25
+    content_unit: "cl"
+  - input: "6x1,5L"
+    pack_size: 6
+    content_value: 1.5
+    content_unit: "l"
+
+price_rules:
+  original_price: "nullable"
+  promo_price: "nullable"
+
+normalized_name_guidance: >
+  Makro sells in bulk/professional quantities. Pack sizes may be larger than consumer retail.
+  Extract the actual pack size and content values as shown.
+
+price_calculation_table: null
+extra_rules:
+  - "Makro folders include both food and non-food (office, restaurant supplies) — extract all consumer-relevant items"
+  - "Makro prices may be shown excl. BTW (VAT) — extract the price as shown, do not recalculate"
+validation_checklist: []

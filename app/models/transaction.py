@@ -61,6 +61,8 @@ class Transaction(Base):
     dp_product_variant: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
     dp_article_code: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)
     dp_is_bio: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    dp_packaging_type: Mapped[Optional[str]] = mapped_column(String(20), nullable=True)
+    dp_product_name_no_brand: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
 
     # SKU lookup key (composite: normalized_name|pack_qty|pack_size|pack_unit|variant|is_bio)
     lookup_key: Mapped[Optional[str]] = mapped_column(String(255), nullable=True, index=True)

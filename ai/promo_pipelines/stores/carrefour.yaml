@@ -1,0 +1,81 @@
+store_id: "carrefour"
+display_name: "Carrefour"
+language: "nl_fr"
+bilingual_dedup: true
+
+validity_format: >
+  "Geldig van DD/MM tot DD/MM" or "Valable du DD/MM au DD/MM"
+
+store_brands:
+  - name: "carrefour"
+    description: "Standard Carrefour house brand"
+  - name: "carrefour bio"
+    description: "Organic house brand"
+  - name: "carrefour classic"
+    description: "Mid-range house brand"
+  - name: "carrefour extra"
+    description: "Premium house brand"
+  - name: "simpl"
+    description: "Budget/economy brand (cheapest tier)"
+  - name: "carrefour sensation"
+    description: "Indulgence/premium line"
+  - name: "carrefour original"
+    description: "Quality house brand line"
+
+promo_mechanisms:
+  - label: "Bonus Card"
+    aliases: ["Carte Bonus"]
+    description: "Carrefour loyalty card price — extract the card price as promo_price"
+  - label: "Prix Choc"
+    aliases: ["Stuntprijs"]
+    description: "Shock price / stunt deal — deep discount"
+  - label: "1+1 gratis"
+    aliases: ["1+1 gratuit"]
+    description: "Buy one get one free. promo_price = price of one item"
+  - label: "2e aan -50%"
+    aliases: ["2ème à -50%"]
+    description: "Second item at 50% off"
+  - label: "-30%"
+    aliases: []
+    description: "Percentage discount (also -25%, -20%, -40%, etc.)"
+  - label: "X voor €Y"
+    aliases: ["X pour €Y"]
+    description: "Multi-buy deal (set promo_price to per-unit price €Y/X)"
+  - label: "Extra"
+    aliases: []
+    description: "Carrefour Extra promotional highlight"
+
+normalized_name_examples:
+  - input: "Jupiler Pils Blikken 24x25cl"
+    output: "pils"
+  - input: "Carrefour Bio Volle Melk 1L"
+    output: "volle melk"
+  - input: "Simpl Spaghetti 500g"
+    output: "spaghetti"
+  - input: "Coca-Cola Zero 1,5L PET"
+    output: "cola zero"
+  - input: "Lay's Chips Paprika 250g"
+    output: "chips paprika"
+
+content_examples:
+  - input: "24x25cl"
+    pack_size: 24
+    content_value: 25
+    content_unit: "cl"
+  - input: "500g"
+    pack_size: 1
+    content_value: 500
+    content_unit: "g"
+  - input: "1,5L"
+    pack_size: 1
+    content_value: 1.5
+    content_unit: "l"
+
+price_rules:
+  original_price: "nullable"
+  promo_price: "nullable"
+
+normalized_name_guidance: null
+price_calculation_table: null
+extra_rules: []
+validation_checklist: []

@@ -478,6 +478,7 @@ def _build_promo_interest_items(
             "categories": set(),
             "granular_categories": set(),
             "dates": [],
+            "product_names_no_brand": Counter(),
         }
     )
 
@@ -510,6 +511,8 @@ def _build_promo_interest_items(
         if t.granular_category:
             item_data[name_lower]["granular_categories"].add(t.granular_category)
         item_data[name_lower]["dates"].append(t.date)
+        if t.dp_product_name_no_brand:
+            item_data[name_lower]["product_names_no_brand"][t.dp_product_name_no_brand] += 1
 
     # Precompute cross-item metrics for relative tags
     all_receipt_ids = {t.receipt_id for t in transactions if t.receipt_id}
@@ -611,6 +614,7 @@ def _build_promo_interest_items(
 
         entry = {
             "normalized_name": name,
+            "product_name_no_brand": data["product_names_no_brand"].most_common(1)[0][0] if data["product_names_no_brand"] else None,
             "brands": sorted(data["brands"]) if data["brands"] else [],
             "store_name": primary_store,
             "granular_category": next(iter(data["granular_categories"]), None),

@@ -188,6 +188,8 @@ async def process_receipt_background(
                     dp_product_variant=item.dp_product_variant,
                     dp_article_code=item.dp_article_code,
                     dp_is_bio=item.dp_is_bio,
+                    dp_packaging_type=item.dp_packaging_type,
+                    dp_product_name_no_brand=item.dp_product_name_no_brand,
                     lookup_key=item.lookup_key,
                 )
                 for item in extraction_result.line_items
