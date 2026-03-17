@@ -1,4 +1,8 @@
-"""Quick test for the promo recommendation service (no auth needed)."""
+"""Manual dev tool: test promo candidate generation against production DB.
+
+WARNING: This script connects directly to the production Railway database.
+It is NOT a CI test — run it manually for local debugging only.
+"""
 
 import asyncio
 import json
@@ -22,26 +26,31 @@ os.environ["DATABASE_URL"] = (
 from app.db.session import async_session_maker
 # Import all models so SQLAlchemy can resolve relationships
 from app.models import user, receipt, transaction, user_profile, budget, budget_ai_insight, budget_history, user_enriched_profile  # noqa
-from app.services.promo_service import PromoService
+from jobs.promo_candidate_generation import PromoCandidateGenerationService
 
 USER_ID = os.environ.get("TEST_USER_ID", "c9b6bc31-d05a-4ab4-97fc-f40ff5fe6f67")
 
 
 async def main():
-    print(f"Testing promo recommendations for user: {USER_ID}\n")
+    print(f"Testing promo candidate generation for user: {USER_ID}\n")
 
     async with async_session_maker() as db:
-        service = PromoService(db)
-        result = await service.get_recommendations(USER_ID)
+        service = PromoCandidateGenerationService(db)
+        result = await service.build_weekly_candidates(USER_ID)
 
-    print(json.dumps(result, indent=2, ensure_ascii=False))
+    if result is None:
+        print("No candidates generated (no interest items or no matches).")
+        return
+
+    print(json.dumps(result["candidates"][:5], indent=2, ensure_ascii=False))
 
     # Quick summary
     print(f"\n{'='*50}")
-    print(f"Weekly savings: €{result.get('weekly_savings', 0):.2f}")
-    print(f"Deals found: {result.get('deal_count', 0)}")
-    for i, pick in enumerate(result.get("top_picks", []), 1):
-        print(f"  {i}. {pick.get('brand')} {pick.get('product_name')} — €{pick.get('promo_price', 0):.2f} (save €{pick.get('savings', 0):.2f}) at {pick.get('store')}")
+    print(f"Total candidates: {result['total_matches']}")
+    print(f"Interest items: {result['interest_item_count']}")
+    print(f"Closing nudge: {result['closing_nudge']}")
+    for i, item in enumerate(result["candidates"][:3], 1):
+        print(f"  {i}. {item.get('brand')} {item.get('product_name')} — €{item.get('promo_price', 0):.2f} (save €{item.get('savings', 0):.2f}) at {item.get('store_name')}")
 
 
 if __name__ == "__main__":

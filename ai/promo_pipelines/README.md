@@ -77,7 +77,7 @@ Both `--clear-index` and `--nuke-index` require you to type `yes` to confirm bef
 | Spar | `spar.yaml` | NL/FR | Colruyt Group operated |
 | Delhaize | `delhaize.yaml` | NL/FR | SuperPlus loyalty promos |
 | Proxy Delhaize | `proxy_delhaize.yaml` | NL/FR | Same mechanisms as Delhaize |
-| Carrefour | `carrefour.yaml` | NL/FR | Bonus Card / Prix Choc |
+| Carrefour Hyper | `carrefour_hyper.yaml` | NL/FR | Bonus Card / Prix Choc |
 | Carrefour Market | `carrefour_market.yaml` | NL/FR | Market-scope promos |
 | Aldi | `aldi.yaml` | NL/FR | Weekly + themed specials |
 | Lidl | `lidl.yaml` | NL/FR | Stunt deals, Lidl Plus |
@@ -111,7 +111,7 @@ ai/promo_pipelines/promo_folders/
 ├── delhaize/
 ├── aldi/
 ├── albert_heijn/
-├── carrefour/
+├── carrefour_hyper/
 ├── carrefour_market/
 ├── intermarche/
 ├── jumbo/
@@ -324,7 +324,7 @@ ai/promo_pipelines/
 │   ├── spar.yaml
 │   ├── delhaize.yaml
 │   ├── proxy_delhaize.yaml
-│   ├── carrefour.yaml
+│   ├── carrefour_hyper.yaml
 │   ├── carrefour_market.yaml
 │   ├── aldi.yaml
 │   ├── lidl.yaml

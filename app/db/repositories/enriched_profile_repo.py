@@ -17,6 +17,10 @@ class EnrichedProfileRepository:
         )
         return result.scalar_one_or_none()
 
+    async def list_user_ids(self) -> list[str]:
+        result = await self.db.execute(select(UserEnrichedProfile.user_id))
+        return [row[0] for row in result.all()]
+
     async def upsert(
         self,
         user_id: str,

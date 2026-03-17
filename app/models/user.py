@@ -19,6 +19,8 @@ if TYPE_CHECKING:
     from app.models.spin import SpinTransaction
     from app.models.referral import Referral
     from app.models.withdrawal import WithdrawalRequest
+    from app.models.promo_weekly_candidates import PromoWeeklyCandidates
+    from app.models.promo_report_event import PromoReportEvent
 
 
 class User(Base):
@@ -74,4 +76,10 @@ class User(Base):
     )
     withdrawal_requests: Mapped[List["WithdrawalRequest"]] = relationship(
         "WithdrawalRequest", back_populates="user", cascade="all, delete-orphan"
+    )
+    promo_weekly_candidates: Mapped[List["PromoWeeklyCandidates"]] = relationship(
+        "PromoWeeklyCandidates", back_populates="user", cascade="all, delete-orphan"
+    )
+    promo_report_events: Mapped[List["PromoReportEvent"]] = relationship(
+        "PromoReportEvent", back_populates="user", cascade="all, delete-orphan"
     )

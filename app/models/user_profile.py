@@ -31,7 +31,7 @@ class UserProfile(Base):
     language: Mapped[Optional[Language]] = mapped_column(
         SQLEnum(Language, native_enum=False), nullable=True
     )
-    preferred_stores: Mapped[Optional[list]] = mapped_column(JSONB, nullable=True)
+    preferred_stores: Mapped[list] = mapped_column(JSONB, nullable=False, server_default="[]")
     referral_code: Mapped[Optional[str]] = mapped_column(String(10), unique=True, nullable=True, index=True)
     referred_by_code: Mapped[Optional[str]] = mapped_column(String(10), nullable=True)
     iban: Mapped[Optional[str]] = mapped_column(String, nullable=True)

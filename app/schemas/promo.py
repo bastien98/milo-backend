@@ -1,8 +1,11 @@
-from typing import Optional, List
+from typing import Any, Optional, List
 from pydantic import BaseModel
+
+from app.models.enums import PromoReportEventType, PromoReportStatus
 
 
 class PromoTopPick(BaseModel):
+    item_key: Optional[str] = None
     brand: str
     product_name: str
     emoji: str
@@ -20,6 +23,7 @@ class PromoTopPick(BaseModel):
 
 
 class PromoStoreItem(BaseModel):
+    item_key: Optional[str] = None
     brand: str
     product_name: str
     emoji: str
@@ -73,23 +77,55 @@ class PromoWeek(BaseModel):
     start: str
     end: str
     label: str
+    iso_year: int
+    iso_week: int
 
 
-class GeminiPromoOutput(BaseModel):
-    """Schema passed to Gemini response_schema to enforce structured output.
+class GeminiItemAnnotation(BaseModel):
+    """Per-item AI annotation returned by Gemini."""
 
-    Does NOT include promo_week (computed server-side).
+    item_key: str
+    reason: str
+
+
+class GeminiSmartSwitchCandidate(BaseModel):
+    """Pre-computed smart switch suggestion from Gemini."""
+
+    from_brand: str
+    to_brand: str
+    emoji: str
+    product_type: str
+    savings: float
+    mechanism: str
+    store_name: str
+    reason: str
+
+
+class GeminiStoreTip(BaseModel):
+    """Per-store personalized tip from Gemini."""
+
+    store_name: str
+    tip: str
+
+
+class GeminiCandidateOutput(BaseModel):
+    """Schema passed to Gemini response_schema for per-item candidate annotations.
+
+    Gemini annotates individual items rather than producing a full report.
+    Assembly into the final response happens server-side at serve time.
     """
 
-    weekly_savings: float
-    deal_count: int
-    top_picks: List[PromoTopPick]
-    stores: List[PromoStore]
-    smart_switch: Optional[PromoSmartSwitch] = None
-    summary: PromoSummary
+    item_annotations: List[GeminiItemAnnotation]
+    store_tips: List[GeminiStoreTip]
+    smart_switch_candidates: List[GeminiSmartSwitchCandidate]
+    closing_nudge: str
 
 
 class PromoRecommendationResponse(BaseModel):
+    report_id: Optional[str] = None
+    report_status: PromoReportStatus
+    message: str
+    generated_at: Optional[str] = None
     weekly_savings: float
     deal_count: int
     promo_week: PromoWeek
@@ -97,3 +133,11 @@ class PromoRecommendationResponse(BaseModel):
     stores: List[PromoStore]
     smart_switch: Optional[PromoSmartSwitch] = None
     summary: PromoSummary
+
+
+class PromoReportEventCreate(BaseModel):
+    report_id: str
+    event_type: PromoReportEventType
+    item_key: Optional[str] = None
+    store_name: Optional[str] = None
+    metadata: Optional[dict[str, Any]] = None

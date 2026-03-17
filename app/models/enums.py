@@ -82,3 +82,18 @@ class LotteryDrawingStatus(str, Enum):
     PARTICIPANTS_LOCKED = "participants_locked"
     DRAWN = "drawn"
     PUBLISHED = "published"
+
+
+class PromoReportStatus(str, Enum):
+    READY = "ready"
+    NO_ENRICHED_PROFILE = "no_enriched_profile"
+    NO_REPORT_AVAILABLE = "no_report_available"
+
+
+class PromoReportEventType(str, Enum):
+    REPORT_VIEWED = "report_viewed"
+    DEAL_OPENED = "deal_opened"
+    FOLDER_OPENED = "folder_opened"
+    STORE_SECTION_OPENED = "store_section_opened"
+    FEEDBACK_POSITIVE = "feedback_positive"
+    FEEDBACK_NEGATIVE = "feedback_negative"

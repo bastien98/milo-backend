@@ -1,11 +1,12 @@
-"""Promo recommendation service.
+"""Offline promo candidate generation service.
 
 Retrieves the user's enriched profile, searches Pinecone for matching
 promotions, reranks for relevance, and generates personalized
-recommendations via Gemini.
+candidate annotations via Gemini.
 """
 
 import asyncio
+import hashlib
 import json
 import logging
 import time
@@ -17,11 +18,16 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from sqlalchemy import select
 
+from app.core.promo_reports import (
+    build_empty_promo_response,
+    compute_promo_week as shared_compute_promo_week,
+    current_brussels_date as shared_current_brussels_date,
+)
 from app.config import get_settings
 from app.db.repositories.enriched_profile_repo import EnrichedProfileRepository
+from app.models.enums import Language, PromoReportStatus
 from app.models.user import User
 from app.models.user_profile import UserProfile
-from app.models.enums import Language
 
 logger = logging.getLogger(__name__)
 
@@ -32,15 +38,12 @@ RERANK_SCORE_THRESHOLD = 0.55
 
 SYSTEM_PROMPT = """\
 You are the user's personal promo hunter inside a Belgian grocery savings app called Scandelicious.
-Your job is to analyze matched promotions against the user's shopping habits and return a structured JSON response.
+Your job is to annotate matched promotions with personalized text based on the user's shopping habits.
 
 ## HARD RULES — never break these
 - ONLY reference promotions explicitly present in the provided data. Never invent, guess, or speculate about deals.
-- Skip items with zero matching promos silently.
-- Every deal must include: brand name, product, exact prices, promo mechanism, store, and validity dates.
+- item_key values: copy EXACTLY from the promo data. Never invent or alter them.
 - Keep Belgian promo terms as-is: "1+1 Gratis", "-50%", "2+1 Gratis", "Rode Prijzen", etc. — do NOT translate them.
-- Use Belgian-style dates: "DD/MM" format (e.g., "09/02").
-- All prices are in EUR (numeric values, no € symbol in JSON numbers).
 
 ## UNDERSTANDING USER METRICS
 Each interest item includes a `metrics` block with the user's purchase history:
@@ -58,7 +61,7 @@ Items marked [CATEGORY FALLBACK] represent broader category interests — person
 - Second person ("you"). Confident, punchy, warm. Short sentences.
 - No corporate speak. No filler. No apologies.
 
-## EMOJI GUIDE — use in `emoji` fields
+## EMOJI GUIDE — use in `emoji` fields for smart_switch_candidates
 🧊 Drinks (tea, soda, water, juice)
 🥛 Dairy (milk, yoghurt, skyr, cheese)
 🐟 Fish & Seafood
@@ -74,110 +77,51 @@ Items marked [CATEGORY FALLBACK] represent broader category interests — person
 🍫 Sweets & Chocolate
 🍺 Alcohol
 
-## STORE COLORS — use in `store_color` fields
-🟦 Carrefour Hypermarkt
-🟧 Colruyt
-🟩 Delhaize
-🟨 Albert Heijn
-🟪 Lidl
-🟥 Aldi
-⬜ Other stores
-
 ## OUTPUT — return ONLY a JSON object with this exact structure:
 
 {
-  "weekly_savings": <number: total EUR savings across all deals>,
-  "deal_count": <number: total deals found>,
-
-  "top_picks": [
-    // Up to 3 best deals, ranked by combination of savings amount and relevance to user habits.
-    // Prioritize: (1) highest absolute savings, (2) items with high restock_urgency, (3) items bought frequently.
+  "item_annotations": [
+    // One annotation per matched promo item. Include ALL items from the matched promotions data.
     {
-      "brand": "<string>",
-      "product_name": "<string: clean product name>",
-      "emoji": "<string: category emoji>",
-      "store": "<string: retailer name>",
-      "original_price": <number>,
-      "promo_price": <number>,
-      "savings": <number>,
-      "discount_percentage": <integer: rounded percentage discount, e.g. 50 for half price, calculated as round((1 - promo_price/original_price) * 100)>,
-      "mechanism": "<string: e.g. '1+1 Gratis', '-30%'>",
-      "validity_start": "<string: DD/MM — from promo data>",
-      "validity_end": "<string: DD/MM>",
-      "reason": "<string: one sentence linking deal to user's buying pattern with concrete numbers>",
-      "page_number": "<integer or null: pass through EXACTLY from promo data, must be integer not float>",
-      "promo_folder_url": "<string or null: pass through EXACTLY from promo data>"
+      "item_key": "<string: copy EXACTLY from promo data>",
+      "reason": "<string: one sentence linking this deal to the user's buying pattern with concrete numbers>"
     }
   ],
 
-  "stores": [
-    // One object per store that has deals. Ordered by total_savings descending.
+  "store_tips": [
+    // One tip per store that has matched promotions.
     {
-      "store_name": "<string>",
-      "store_color": "<string: emoji from store colors above>",
-      "total_savings": <number>,
-      "validity_end": "<string: DD/MM — latest validity_end across items>",
-      "items": [
-        {
-          "brand": "<string>",
-          "product_name": "<string>",
-          "emoji": "<string: category emoji>",
-          "original_price": <number>,
-          "promo_price": <number>,
-          "savings": <number>,
-          "discount_percentage": <integer: rounded percentage discount>,
-          "mechanism": "<string>",
-          "validity_start": "<string: DD/MM — from promo data>",
-          "validity_end": "<string: DD/MM — from promo data>",
-          "page_number": "<integer or null: pass through EXACTLY from promo data, must be integer not float>",
-          "promo_folder_url": "<string or null: pass through EXACTLY from promo data>"
-        }
-      ],
+      "store_name": "<string: retailer name>",
       "tip": "<string: one personalized tip for this store trip, referencing user's habits>"
     }
   ],
 
-  "smart_switch": <null or {
-    // Suggest swapping ONE premium brand for a cheaper alternative on promo.
-    // Only include if savings are meaningful. null if no good switch exists.
-    "from_brand": "<string: brand they currently buy>",
-    "to_brand": "<string: cheaper alternative on promo>",
-    "emoji": "<string: category emoji>",
-    "product_type": "<string: what kind of product>",
-    "savings": <number>,
-    "mechanism": "<string: promo mechanism + store>",
-    "reason": "<string: one sentence explaining why the switch makes sense>"
-  }>,
+  "smart_switch_candidates": [
+    // 0-3 brand swap suggestions. Only include if savings are meaningful. Empty array if no good switches.
+    {
+      "from_brand": "<string: brand they currently buy>",
+      "to_brand": "<string: cheaper alternative on promo>",
+      "emoji": "<string: category emoji>",
+      "product_type": "<string: what kind of product>",
+      "savings": <number>,
+      "mechanism": "<string: promo mechanism + store>",
+      "store_name": "<string: retailer where the alternative is on promo>",
+      "reason": "<string: one sentence explaining why the switch makes sense>"
+    }
+  ],
 
-  "summary": {
-    "total_items": <number>,
-    "total_savings": <number>,
-    "stores_breakdown": [
-      // Same order as stores array
-      {"store": "<string>", "items": <number>, "savings": <number>}
-    ],
-    "best_value_store": "<string: store with highest total savings>",
-    "best_value_savings": <number>,
-    "best_value_items": <number>,
-    "closing_nudge": "<string: one short line referencing their profile — a product they buy often that might get a deal soon, or a spending trend>"
-  }
+  "closing_nudge": "<string: one short line referencing their profile — a product they buy often or a spending trend>"
 }
 
 ## IMPORTANT RULES FOR JSON
-- Each deal should appear ONCE — either in top_picks OR in a store's items, not both.
-  Top picks are the hero deals shown prominently. Store items are the remaining deals.
-- No items without confirmed promos in the data.
+- item_annotations must cover every promo item from the matched promotions. Use the item_key exactly as provided.
+- store_tips: one entry per unique store in the matched promotions.
+- smart_switch_candidates: only suggest switches between brands where a cheaper alternative is currently on promo.
 - All numeric values must be actual numbers (not strings).
-- weekly_savings must equal the sum of all individual deal savings.
-- summary.total_savings must equal weekly_savings.
-- page_number and promo_folder_url: copy these VERBATIM from the promo data. Never modify, invent, or omit them. Use null if not present in the source data.
-- page_number must be an integer (e.g. 13), never a float (e.g. 13.0).
-- discount_percentage: always calculate as round((1 - promo_price/original_price) * 100). Must be an integer.
-- validity_start and validity_end: copy from promo data in DD/MM format. Include on EVERY deal (top_picks and store items).
 - Respond with ONLY valid JSON. No markdown, no code blocks, no extra text."""
 
 
-class PromoService:
+class PromoCandidateGenerationService:
     def __init__(self, db: AsyncSession):
         self.db = db
         self.settings = get_settings()
@@ -195,38 +139,66 @@ class PromoService:
             return row[0], row[1]
         return None, None
 
-    async def get_recommendations(self, user_id: str) -> dict:
-        """Full pipeline: fetch profile -> search Pinecone -> filter by stores -> generate via LLM."""
-        # Step 1: Fetch enriched profile
-        profile = await self._fetch_enriched_profile(user_id)
+    async def build_weekly_candidates(
+        self,
+        user_id: str,
+        report_date: Optional[date] = None,
+    ) -> Optional[dict]:
+        """Build a weekly candidate pool: search all stores, annotate with Gemini.
 
+        Returns a dict with:
+          - candidates: list of candidate item dicts (all stores, with AI annotations)
+          - closing_nudge: str
+          - smart_switch_candidates: list of smart switch dicts
+          - store_tips: dict of store_name -> tip
+          - interest_item_count: int
+          - total_matches: int
+          - profile: enriched profile dict (for metadata)
+
+        Returns None if the user has no interest items or no matches.
+        """
+        report_date = report_date or _current_brussels_date()
+        report_date_epoch = _date_to_epoch(report_date.isoformat())
+
+        profile = await self._fetch_enriched_profile(user_id)
         interest_items = profile.get("promo_interest_items", [])
         if not interest_items:
-            return self._empty_response()
+            return None
 
-        # Fetch user's language and store preferences
-        language, preferred_stores = await self._fetch_user_profile_prefs(user_id)
+        language, _preferred_stores = await self._fetch_user_profile_prefs(user_id)
+        # Search ALL stores — no filtering by preferred_stores
+        promo_results = await self._search_all_promos(interest_items, report_date_epoch)
 
-        # Step 2: Search Pinecone (sync SDK, run in thread pool)
-        promo_results = await self._search_all_promos(interest_items)
+        if not any(promo_results.values()):
+            return None
 
-        # Step 3: Filter by preferred stores (if set)
-        if preferred_stores:
-            store_set = {s.lower() for s in preferred_stores}
-            filtered_results: dict[str, list[dict]] = {}
-            for item_name, promos in promo_results.items():
-                filtered = [
-                    p for p in promos
-                    if p.get("source_retailer", "").lower() in store_set
-                ]
-                filtered_results[item_name] = filtered
-            promo_results = filtered_results
+        # Build flat list of candidate items from Pinecone results
+        candidates = _build_candidate_items(promo_results, interest_items)
+        if not candidates:
+            return None
 
-        # Step 4: Generate LLM recommendations
-        recommendations = await self._generate_recommendations(
-            profile, promo_results, language=language, preferred_stores=preferred_stores
+        # Get AI annotations from Gemini
+        annotations = await self._generate_annotations(
+            profile, promo_results, language=language
         )
-        return recommendations
+
+        # Merge annotations onto candidates
+        _merge_annotations(candidates, annotations)
+
+        # Build store_tips dict
+        store_tips = {}
+        for st in annotations.get("store_tips", []):
+            store_tips[st["store_name"]] = st["tip"]
+
+        return {
+            "candidates": candidates,
+            "closing_nudge": annotations.get("closing_nudge", ""),
+            "smart_switch_candidates": annotations.get("smart_switch_candidates", []),
+            "store_tips": store_tips,
+            "interest_item_count": len(interest_items),
+            "total_matches": len(candidates),
+            "profile": profile,
+        }
 
     async def _fetch_enriched_profile(self, user_id: str) -> dict:
         """Fetch the user's enriched profile from the database."""
@@ -245,7 +217,11 @@ class PromoService:
             "receipts_analyzed": ep.receipts_analyzed,
         }
 
-    async def _search_all_promos(self, interest_items: list[dict]) -> dict[str, list[dict]]:
+    async def _search_all_promos(
+        self,
+        interest_items: list[dict],
+        report_date_epoch: int,
+    ) -> dict[str, list[dict]]:
         """Search Pinecone for promotions matching each interest item."""
         pc = Pinecone(api_key=self.settings.PINECONE_API_KEY)
         index = pc.Index(host=self.settings.PINECONE_INDEX_HOST)
@@ -255,7 +231,11 @@ class PromoService:
         for item in interest_items:
             name = item["normalized_name"]
             promos = await asyncio.to_thread(
-                _search_promos_for_item, pc, index, item
+                _search_promos_for_item,
+                pc,
+                index,
+                item,
+                report_date_epoch,
             )
             all_results[name] = promos
 
@@ -269,32 +249,26 @@ class PromoService:
 
         return all_results
 
-    async def _generate_recommendations(
+    async def _generate_annotations(
         self, profile: dict, promo_results: dict[str, list[dict]],
         language: Optional[Language] = None,
-        preferred_stores: Optional[List[str]] = None,
     ) -> dict:
-        """Send profile + matched promos to Gemini for recommendation generation."""
+        """Send profile + matched promos to Gemini for per-item annotation."""
         user_message = _build_llm_context(profile, promo_results)
         raw_response = await asyncio.to_thread(
-            self._call_gemini, user_message, 1, language, preferred_stores
+            self._call_gemini, user_message, 1, language
         )
-        return _parse_llm_response(raw_response)
+        return _parse_annotation_response(raw_response)
 
     def _call_gemini(
         self, user_message: str, attempt: int = 1,
         language: Optional[Language] = None,
-        preferred_stores: Optional[List[str]] = None,
     ) -> str:
         from google import genai
         from google.genai import types
-        from app.schemas.promo import GeminiPromoOutput
+        from app.schemas.promo import GeminiCandidateOutput
 
-        # Build language-aware system prompt
         system_prompt = SYSTEM_PROMPT
-        if preferred_stores:
-            stores_list = ", ".join(preferred_stores)
-            system_prompt += f"\n\nSTORE FILTER: The user has selected these stores: {stores_list}. ONLY include deals from these stores. Do NOT include deals from any other stores."
         if language and language.value == "nl":
             system_prompt += "\n\nCRITICAL LANGUAGE RULE: ALL text fields (reason, tip, closing_nudge, smart_switch reason) MUST be written in Flemish Dutch (Vlaams Nederlands). Use natural Belgian Dutch. Keep promo mechanisms in their original form (1+1 Gratis, -50%, etc). Product names and brand names stay as-is. Only the descriptive/personalized text fields must be in Dutch."
         elif language and language.value == "fr":
@@ -309,14 +283,13 @@ class PromoService:
                 max_output_tokens=16384,
                 temperature=0.7,
                 response_mime_type="application/json",
-                response_schema=GeminiPromoOutput,
+                response_schema=GeminiCandidateOutput,
             ),
         )
         if response.text is None:
             logger.warning(f"Gemini returned None text. Candidates: {response.candidates}")
             raise GeminiPromoError("Gemini returned empty response — likely blocked by safety filters")
 
-        # Verify JSON is parseable; retry once if truncated
         raw = response.text.strip()
         try:
             json.loads(raw)
@@ -324,30 +297,10 @@ class PromoService:
             if attempt < 2:
                 logger.warning(f"Gemini returned truncated JSON (attempt {attempt}), retrying...")
                 time.sleep(1)
-                return self._call_gemini(user_message, attempt + 1, language, preferred_stores)
+                return self._call_gemini(user_message, attempt + 1, language)
             logger.warning(f"Gemini returned truncated JSON on final attempt")
 
         return response.text
-
-    @staticmethod
-    def _empty_response() -> dict:
-        return {
-            "weekly_savings": 0,
-            "deal_count": 0,
-            "promo_week": _compute_promo_week(),
-            "top_picks": [],
-            "stores": [],
-            "smart_switch": None,
-            "summary": {
-                "total_items": 0,
-                "total_savings": 0,
-                "stores_breakdown": [],
-                "best_value_store": None,
-                "best_value_savings": 0,
-                "best_value_items": 0,
-                "closing_nudge": "We need more receipt data to find you deals. Keep scanning!",
-            },
-        }
 
 
 # ---------------------------------------------------------------------------
@@ -368,7 +321,12 @@ class GeminiPromoError(Exception):
 # Pinecone helpers (synchronous — called via asyncio.to_thread)
 # ---------------------------------------------------------------------------
 
-def _search_promos_for_item(pc: Pinecone, index, item: dict) -> list[dict]:
+def _search_promos_for_item(
+    pc: Pinecone,
+    index,
+    item: dict,
+    report_date_epoch: int,
+) -> list[dict]:
     """Search Pinecone for promotions matching a single promo interest item.
 
     Two search modes:
@@ -382,10 +340,8 @@ def _search_promos_for_item(pc: Pinecone, index, item: dict) -> list[dict]:
     granular_category = item.get("granular_category")
     interest_category = item.get("interest_category")
 
-    if granular_category:
-        filter_dict = {"granular_category": {"$eq": granular_category}}
-    else:
-        filter_dict = None
+    filter_dict = _build_active_filter(granular_category, report_date_epoch)
+    fallback_filter = _build_active_filter(None, report_date_epoch)
 
     cat_suffix = ""
     if granular_category and granular_category != "Other":
@@ -410,7 +366,7 @@ def _search_promos_for_item(pc: Pinecone, index, item: dict) -> list[dict]:
 
         # Fallback without category filter
         if not hits and granular_category:
-            hits = _pinecone_search_and_rerank(index, query_text, filter_dict=None)
+            hits = _pinecone_search_and_rerank(index, query_text, filter_dict=fallback_filter)
 
         for hit in hits:
             hit_id = hit.get("_id", "")
@@ -426,7 +382,7 @@ def _search_promos_for_item(pc: Pinecone, index, item: dict) -> list[dict]:
         score = hit.get("_score", 0)
         if score >= RERANK_SCORE_THRESHOLD:
             promo = _build_promo_dict(hit.get("fields", {}), score)
-            if _is_valid_promo(promo):
+            if _is_display_eligible_promo(promo, report_date_epoch):
                 relevant.append(promo)
 
     # Fallback: broader category search
@@ -440,7 +396,7 @@ def _search_promos_for_item(pc: Pinecone, index, item: dict) -> list[dict]:
                 score = hit.get("_score", 0)
                 if score >= RERANK_SCORE_THRESHOLD:
                     promo = _build_promo_dict(hit.get("fields", {}), score)
-                    if _is_valid_promo(promo):
+                    if _is_display_eligible_promo(promo, report_date_epoch):
                         relevant.append(promo)
             relevant = relevant[:RERANK_TOP_N]
 
@@ -487,27 +443,72 @@ def _pinecone_search_and_rerank(
             return []
 
 
-def _is_valid_promo(promo: dict) -> bool:
-    original = promo.get("original_price")
-    promo_price = promo.get("promo_price")
-    if original is not None and promo_price is not None:
-        try:
-            orig_float = float(original)
-            promo_float = float(promo_price)
-            if orig_float <= 0:
-                return False
-            if promo_float > orig_float:
-                return False
-        except (ValueError, TypeError):
-            pass
+def _build_active_filter(
+    granular_category: Optional[str],
+    report_date_epoch: int,
+) -> dict:
+    clauses: list[dict[str, Any]] = [
+        {"validity_start_epoch": {"$lte": report_date_epoch}},
+        {"validity_end_epoch": {"$gte": report_date_epoch}},
+    ]
+    if granular_category:
+        clauses.append({"granular_category": {"$eq": granular_category}})
+    return {"$and": clauses}
+
+
+def _is_display_eligible_promo(promo: dict, report_date_epoch: int) -> bool:
+    product_label = (promo.get("original_description") or promo.get("normalized_name") or "").strip()
+    mechanism = (promo.get("promo_mechanism") or "").strip()
+    retailer = (promo.get("source_retailer") or "").strip()
+    if not product_label or not mechanism or not retailer:
+        return False
+
+    if not promo.get("validity_start") or not promo.get("validity_end"):
+        return False
+
+    try:
+        original = float(promo["original_price"])
+        promo_price = float(promo["promo_price"])
+        validity_start_epoch = int(promo["validity_start_epoch"])
+        validity_end_epoch = int(promo["validity_end_epoch"])
+    except (KeyError, TypeError, ValueError):
+        return False
+
+    if original <= 0 or promo_price <= 0:
+        return False
+    if promo_price > original:
+        return False
+    if validity_start_epoch > validity_end_epoch:
+        return False
+    if report_date_epoch < validity_start_epoch or report_date_epoch > validity_end_epoch:
+        return False
+
     return True
+
+
+def _build_item_key(fields: dict) -> str:
+    original_price = _coerce_price(fields.get("original_price"))
+    promo_price = _coerce_price(fields.get("promo_price"))
+    raw = "|".join(
+        [
+            (fields.get("normalized_name") or fields.get("original_description") or "").strip().lower(),
+            (fields.get("source_retailer") or "").strip().lower(),
+            (fields.get("promo_mechanism") or "").strip().lower(),
+            f"{original_price:.2f}",
+            f"{promo_price:.2f}",
+            str(fields.get("validity_start") or ""),
+            str(fields.get("validity_end") or ""),
+        ]
+    )
+    return hashlib.sha256(raw.encode("utf-8")).hexdigest()[:24]
 
 
 def _build_promo_dict(fields: dict, score: float) -> dict:
     # Support both old field name ("brand") and new ("normalized_brand")
     brand = fields.get("normalized_brand") or fields.get("brand", "")
-    return {
+    promo = {
         "relevance_score": round(score, 4),
+        "item_key": _build_item_key(fields),
         "normalized_name": fields.get("normalized_name", ""),
         "original_description": fields.get("original_description", ""),
         "brand": brand,
@@ -524,10 +525,22 @@ def _build_promo_dict(fields: dict, score: float) -> dict:
         "unit_info": fields.get("unit_info", ""),
         "validity_start": fields.get("validity_start", ""),
         "validity_end": fields.get("validity_end", ""),
+        "validity_start_epoch": fields.get("validity_start_epoch"),
+        "validity_end_epoch": fields.get("validity_end_epoch"),
         "source_retailer": fields.get("source_retailer", ""),
         "page_number": fields.get("page_number"),
         "promo_folder_url": fields.get("promo_folder_url"),
     }
+    return promo
+
+
+def _coerce_price(value: Any) -> float:
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return 0.0
+
+
 
 
 def _extract_hits(results) -> list[dict]:
@@ -709,6 +722,7 @@ def _build_llm_context(profile: dict, promo_results: dict[str, list[dict]]) -> s
             parts.append(
                 f"- {p.get('brand', '?')} · "
                 f"{p.get('original_description', p.get('normalized_name', '?'))}\n"
+                f"  item_key={p.get('item_key', '?')}\n"
                 f"  €{p.get('original_price', '?')} → €{p.get('promo_price', '?')}"
                 f"{savings_str} | {p.get('promo_mechanism', '?')}\n"
                 f"  {p.get('source_retailer', '?')} | {p.get('unit_info') or '?'} | "
@@ -725,69 +739,155 @@ def _build_llm_context(profile: dict, promo_results: dict[str, list[dict]]) -> s
     return "\n".join(parts)
 
 
-def _repair_truncated_json(raw: str) -> str | None:
-    """Attempt to repair truncated JSON by closing open brackets/braces."""
-    # Strip any trailing incomplete string (unterminated "...")
-    import re
-    s = raw.rstrip()
+# ---------------------------------------------------------------------------
+# Candidate building helpers
+# ---------------------------------------------------------------------------
 
-    # Remove trailing incomplete key-value or string
-    # If we're mid-string, close it
-    quote_count = s.count('"') - s.count('\\"')
-    if quote_count % 2 == 1:
-        # Odd quotes = unterminated string, close it
-        s += '"'
+# Category → emoji mapping (deterministic, no LLM needed)
+_CATEGORY_EMOJI_MAP = {
+    "drinks": "🧊", "tea": "🧊", "soda": "🧊", "water": "🧊", "juice": "🧊",
+    "dairy": "🥛", "milk": "🥛", "yoghurt": "🥛", "skyr": "🥛",
+    "fish": "🐟", "seafood": "🐟",
+    "meat": "🍗", "poultry": "🍗",
+    "pasta": "🍝", "rice": "🍝", "meals": "🍝",
+    "frozen": "🍕",
+    "fruit": "🍎",
+    "vegetables": "🥬", "salad": "🥬",
+    "nuts": "🥜", "snacks": "🥜",
+    "bread": "🍞", "bakery": "🍞",
+    "household": "🧴", "personal care": "🧴",
+    "cheese": "🧀",
+    "sweets": "🍫", "chocolate": "🍫",
+    "alcohol": "🍺", "beer": "🍺", "wine": "🍺",
+}
 
-    # Remove trailing comma if present
-    s = re.sub(r',\s*$', '', s)
+_STORE_COLOR_MAP = {
+    "carrefour hypermarkt": "🟦", "carrefour hyper": "🟦", "carrefour market": "🟦",
+    "colruyt": "🟧",
+    "delhaize": "🟩", "proxy delhaize": "🟩",
+    "albert heijn": "🟨",
+    "lidl": "🟪",
+    "aldi": "🟥",
+    "okay": "🟧",
+    "spar": "⬜",
+    "intermarché": "⬜", "intermarche": "⬜",
+    "jumbo": "⬜",
+    "makro": "⬜",
+}
 
-    # Count open vs close brackets
-    stack = []
-    in_string = False
-    escape = False
-    for ch in s:
-        if escape:
-            escape = False
+
+def _get_emoji_for_category(granular_category: str, parent_category: str) -> str:
+    """Deterministic emoji lookup based on category."""
+    for cat in (granular_category, parent_category):
+        if not cat:
             continue
-        if ch == '\\' and in_string:
-            escape = True
-            continue
-        if ch == '"':
-            in_string = not in_string
-            continue
-        if in_string:
-            continue
-        if ch in ('{', '['):
-            stack.append(ch)
-        elif ch == '}':
-            if stack and stack[-1] == '{':
-                stack.pop()
-        elif ch == ']':
-            if stack and stack[-1] == '[':
-                stack.pop()
-
-    # Close remaining open brackets
-    closers = {'[': ']', '{': '}'}
-    for opener in reversed(stack):
-        s += closers[opener]
-
-    try:
-        json.loads(s)
-        return s
-    except json.JSONDecodeError:
-        return None
+        cat_lower = cat.lower()
+        for keyword, emoji in _CATEGORY_EMOJI_MAP.items():
+            if keyword in cat_lower:
+                return emoji
+    return "🛒"
 
 
-def _parse_llm_response(raw_response: str) -> dict:
-    """Parse Gemini's structured JSON output and apply server-side fixups.
+def _get_store_color(store_name: str) -> str:
+    """Deterministic store color emoji lookup."""
+    return _STORE_COLOR_MAP.get(store_name.lower(), "⬜")
 
-    With response_schema enforced, Gemini guarantees valid JSON matching
-    GeminiPromoOutput. We still apply fixups for page_number (int coercion)
-    and discount_percentage (server-side recalculation for accuracy).
+
+def _build_candidate_items(
+    promo_results: dict[str, list[dict]],
+    interest_items: list[dict],
+) -> list[dict]:
+    """Build flat list of candidate items from Pinecone promo results.
+
+    Each candidate is a self-contained dict with all data needed for
+    serve-time assembly (prices, dates, store, emoji, etc.).
     """
+    # Build interest metrics lookup by normalized_name
+    interest_metrics = {}
+    for item in interest_items:
+        name = item.get("normalized_name", "")
+        metrics = item.get("metrics", {})
+        interest_metrics[name] = {
+            "restock_urgency": metrics.get("restock_urgency"),
+            "purchase_frequency_days": metrics.get("purchase_frequency_days"),
+            "avg_unit_price": metrics.get("avg_unit_price"),
+        }
+
+    seen_keys: set[str] = set()
+    candidates: list[dict] = []
+
+    for item_name, promos in promo_results.items():
+        item_metrics = interest_metrics.get(item_name, {})
+        for promo in promos:
+            item_key = promo.get("item_key", "")
+            if not item_key or item_key in seen_keys:
+                continue
+            seen_keys.add(item_key)
+
+            original_price = _coerce_price(promo.get("original_price"))
+            promo_price = _coerce_price(promo.get("promo_price"))
+            savings = round(original_price - promo_price, 2)
+            discount_pct = round((1 - promo_price / original_price) * 100) if original_price > 0 else 0
+
+            # Coerce page_number to int
+            page_number = promo.get("page_number")
+            if page_number is not None:
+                try:
+                    page_number = int(page_number)
+                except (ValueError, TypeError):
+                    page_number = None
+
+            store_name = promo.get("source_retailer", "")
+            granular_category = promo.get("granular_category", "")
+            parent_category = promo.get("parent_category", "")
+
+            candidates.append({
+                "item_key": item_key,
+                "brand": promo.get("brand", ""),
+                "product_name": (
+                    promo.get("original_description")
+                    or promo.get("normalized_name", "")
+                ).strip(),
+                "emoji": _get_emoji_for_category(granular_category, parent_category),
+                "original_price": original_price,
+                "promo_price": promo_price,
+                "savings": savings,
+                "discount_percentage": discount_pct,
+                "mechanism": promo.get("promo_mechanism", ""),
+                "validity_start": promo.get("validity_start", ""),
+                "validity_end": promo.get("validity_end", ""),
+                "page_number": page_number,
+                "promo_folder_url": promo.get("promo_folder_url"),
+                "store_name": store_name,
+                "store_color": _get_store_color(store_name),
+                "granular_category": granular_category,
+                "restock_urgency": item_metrics.get("restock_urgency"),
+                "purchase_frequency_days": item_metrics.get("purchase_frequency_days"),
+                "avg_unit_price": item_metrics.get("avg_unit_price"),
+                "reason": "",  # filled by Gemini annotation
+            })
+
+    return candidates
+
+
+def _merge_annotations(candidates: list[dict], annotations: dict) -> None:
+    """Merge Gemini's per-item annotations (reason) onto candidate items in-place."""
+    annotation_map = {
+        a["item_key"]: a["reason"]
+        for a in annotations.get("item_annotations", [])
+        if a.get("item_key")
+    }
+    for candidate in candidates:
+        reason = annotation_map.get(candidate["item_key"], "")
+        if reason:
+            candidate["reason"] = reason
+
+
+def _parse_annotation_response(raw_response: str) -> dict:
+    """Parse Gemini's per-item annotation JSON output."""
     import re
     from pydantic import ValidationError
-    from app.schemas.promo import GeminiPromoOutput
+    from app.schemas.promo import GeminiCandidateOutput
 
     clean = raw_response.strip()
     if clean.startswith("```"):
@@ -796,101 +896,47 @@ def _parse_llm_response(raw_response: str) -> dict:
             clean = clean[4:]
         clean = clean.strip()
 
-    # Safety net: strip trailing commas
     clean = re.sub(r',\s*([}\]])', r'\1', clean)
 
-    # Parse and validate through Pydantic schema
     try:
-        validated = GeminiPromoOutput.model_validate_json(clean)
+        validated = GeminiCandidateOutput.model_validate_json(clean)
         data = validated.model_dump()
     except (ValidationError, ValueError) as e:
-        logger.warning(f"Pydantic validation failed, falling back to loose parse: {e}")
+        logger.warning(f"Pydantic validation of annotations failed, falling back to loose parse: {e}")
         try:
             data = json.loads(clean, strict=False)
         except json.JSONDecodeError as e2:
-            logger.warning(f"JSON parse failed: {e2}, attempting truncation repair...")
-            repaired = _repair_truncated_json(clean)
-            if repaired:
-                try:
-                    data = json.loads(repaired, strict=False)
-                    logger.info("Truncated JSON repaired successfully")
-                except json.JSONDecodeError as e3:
-                    logger.error(f"Failed to parse even repaired JSON: {e3}")
-                    logger.error(f"Raw response (first 500 chars): {raw_response[:500]}")
-                    return _empty_fallback()
-            else:
-                logger.error(f"JSON repair failed. Raw (first 500 chars): {raw_response[:500]}")
-                return _empty_fallback()
-
-    # Cap top_picks at 3
-    data["top_picks"] = data.get("top_picks", [])[:3]
-
-    # Server-side fixups: page_number -> int, discount_percentage recalculation
-    for pick in data.get("top_picks", []):
-        _fix_page_number(pick)
-        _ensure_discount_percentage(pick)
-
-    for store in data.get("stores", []):
-        for item in store.get("items", []):
-            _fix_page_number(item)
-            _ensure_discount_percentage(item)
-
-    # Add promo_week context (computed server-side, not by LLM)
-    data["promo_week"] = _compute_promo_week()
+            logger.error(f"Annotation JSON parse failed: {e2}")
+            logger.error(f"Raw response (first 500 chars): {raw_response[:500]}")
+            return _empty_annotation_fallback()
 
     return data
 
 
-def _empty_fallback() -> dict:
-    """Minimal valid response when LLM output can't be parsed."""
+def _empty_annotation_fallback() -> dict:
+    """Minimal valid annotation response when LLM output can't be parsed."""
     return {
-        "weekly_savings": 0,
-        "deal_count": 0,
-        "promo_week": _compute_promo_week(),
-        "top_picks": [],
-        "stores": [],
-        "smart_switch": None,
-        "summary": {
-            "total_items": 0,
-            "total_savings": 0,
-            "stores_breakdown": [],
-            "best_value_store": None,
-            "best_value_savings": 0,
-            "best_value_items": 0,
-            "closing_nudge": "Could not generate recommendations — try again later.",
-        },
+        "item_annotations": [],
+        "store_tips": [],
+        "smart_switch_candidates": [],
+        "closing_nudge": "",
     }
 
 
-def _fix_page_number(item: dict) -> None:
-    """Coerce page_number to int (Pinecone stores it as float)."""
-    pn = item.get("page_number")
-    if pn is not None:
-        try:
-            item["page_number"] = int(pn)
-        except (ValueError, TypeError):
-            item["page_number"] = None
-    else:
-        item["page_number"] = None
 
 
-def _ensure_discount_percentage(item: dict) -> None:
-    """Compute discount_percentage if LLM didn't provide it or got it wrong."""
-    orig = item.get("original_price", 0)
-    promo = item.get("promo_price", 0)
-    if orig and orig > 0 and promo is not None:
-        item["discount_percentage"] = round((1 - promo / orig) * 100)
-    else:
-        item.setdefault("discount_percentage", 0)
+def _current_brussels_date() -> date:
+    return shared_current_brussels_date()
 
 
-def _compute_promo_week() -> dict:
-    """Return the current promo week (Mon-Sun) as start/end/label."""
-    today = date.today()
-    monday = today - timedelta(days=today.weekday())
-    sunday = monday + timedelta(days=6)
-    return {
-        "start": monday.strftime("%d/%m"),
-        "end": sunday.strftime("%d/%m"),
-        "label": f"Week {today.isocalendar()[1]}",
-    }
+def _date_to_epoch(date_str: Optional[str]) -> int:
+    if not date_str:
+        return 0
+    try:
+        return int(date_str.replace("-", ""))
+    except (TypeError, ValueError, AttributeError):
+        return 0
+
+
+def _compute_promo_week(report_date: Optional[date] = None) -> dict:
+    return shared_compute_promo_week(report_date)

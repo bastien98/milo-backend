@@ -257,6 +257,8 @@ def parse_promo_items(
     """Parse Gemini structured output into validated PromoItem list."""
     validity_start = data.get("validity_start")
     validity_end = data.get("validity_end")
+    if not validity_start or not validity_end:
+        raise ValueError("Promo folder extraction is missing validity_start or validity_end")
     items = []
 
     for raw in data.get("items", []):
@@ -314,7 +316,7 @@ def parse_promo_items(
                 parent_category=parent,
                 original_price=_parse_price(raw.get("original_price")),
                 promo_price=_parse_price(raw.get("promo_price")),
-                promo_mechanism=raw.get("promo_mechanism") or "Price Reduction",
+                promo_mechanism=(raw.get("promo_mechanism") or None),
                 pack_size=_parse_int(raw.get("pack_size")),
                 content_value=_parse_float(raw.get("content_value")),
                 content_unit=content_unit,
@@ -390,11 +392,11 @@ def generate_record_id(item: PromoItem) -> str:
 def _date_to_epoch(date_str: Optional[str]) -> int:
     """Convert YYYY-MM-DD to YYYYMMDD integer for Pinecone numeric filtering."""
     if not date_str:
-        return 0
+        raise ValueError("Missing required validity date")
     try:
         return int(date_str.replace("-", ""))
-    except (ValueError, AttributeError):
-        return 0
+    except (ValueError, AttributeError) as exc:
+        raise ValueError(f"Invalid validity date: {date_str}") from exc
 
 
 def delete_retailer_promos(index, retailer: str, validity_start: str, validity_end: str) -> int:
@@ -506,31 +508,48 @@ def upsert_to_pinecone(items: list[PromoItem], batch_size: int = 50, auto_delete
 
     records = []
     for item in items:
+        if not item.validity_start or not item.validity_end:
+            raise ValueError(
+                f"Promo item '{item.normalized_name}' is missing validity window and cannot be indexed"
+            )
+
         record = {
             "_id": generate_record_id(item),
             "text": build_embedding_text(item),
             "normalized_name": item.normalized_name,
-            "normalized_brand": item.normalized_brand or "",
             "is_premium": item.is_premium,
-            "packaging_type": item.packaging_type or "",
             "original_description": item.original_description,
             "granular_category": item.granular_category,
             "parent_category": item.parent_category,
-            "original_price": item.original_price if item.original_price is not None else 0.0,
-            "promo_price": item.promo_price if item.promo_price is not None else 0.0,
-            "promo_mechanism": item.promo_mechanism or "",
-            "pack_size": item.pack_size if item.pack_size is not None else 0,
-            "content_value": item.content_value if item.content_value is not None else 0.0,
-            "content_unit": item.content_unit or "",
-            "unit_info": item.unit_info or "",
-            "validity_start": item.validity_start or "",
-            "validity_end": item.validity_end or "",
+            "validity_start": item.validity_start,
+            "validity_end": item.validity_end,
+            "validity_start_epoch": _date_to_epoch(item.validity_start),
             "validity_end_epoch": _date_to_epoch(item.validity_end),
             "source_retailer": item.source_retailer,
             "source_type": item.source_type,
-            "page_number": item.page_number if item.page_number is not None else 0,
-            "promo_folder_url": item.promo_folder_url or "",
         }
+        if item.normalized_brand:
+            record["normalized_brand"] = item.normalized_brand
+        if item.packaging_type:
+            record["packaging_type"] = item.packaging_type
+        if item.original_price is not None:
+            record["original_price"] = item.original_price
+        if item.promo_price is not None:
+            record["promo_price"] = item.promo_price
+        if item.promo_mechanism:
+            record["promo_mechanism"] = item.promo_mechanism
+        if item.pack_size is not None:
+            record["pack_size"] = item.pack_size
+        if item.content_value is not None:
+            record["content_value"] = item.content_value
+        if item.content_unit:
+            record["content_unit"] = item.content_unit
+        if item.unit_info:
+            record["unit_info"] = item.unit_info
+        if item.page_number is not None:
+            record["page_number"] = item.page_number
+        if item.promo_folder_url:
+            record["promo_folder_url"] = item.promo_folder_url
         records.append(record)
 
     total_upserted = 0
