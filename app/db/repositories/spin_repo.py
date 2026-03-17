@@ -1,7 +1,10 @@
+from typing import Optional
+
 from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.spin import SpinTransaction, SpinBudget
+from app.models.enums import SpinType
 
 
 class SpinRepository:
@@ -17,6 +20,8 @@ class SpinRepository:
         cash_value: float,
         is_jackpot: bool,
         is_doubled: bool,
+        points_value: int = 0,
+        spin_type: Optional[SpinType] = None,
     ) -> SpinTransaction:
         txn = SpinTransaction(
             user_id=user_id,
@@ -26,6 +31,8 @@ class SpinRepository:
             cash_value=cash_value,
             is_jackpot=is_jackpot,
             is_doubled=is_doubled,
+            points_value=points_value,
+            spin_type=spin_type,
         )
         self.db.add(txn)
         await self.db.flush()

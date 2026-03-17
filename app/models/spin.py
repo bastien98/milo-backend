@@ -2,11 +2,12 @@ import uuid
 from datetime import datetime
 from typing import TYPE_CHECKING, Optional
 
-from sqlalchemy import String, DateTime, Float, Integer, Boolean, ForeignKey
+from sqlalchemy import String, DateTime, Float, Integer, Boolean, ForeignKey, Enum as SAEnum
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from sqlalchemy.sql import func
 
 from app.db.base import Base
+from app.models.enums import SpinType
 
 if TYPE_CHECKING:
     from app.models.user import User
@@ -23,10 +24,16 @@ class SpinTransaction(Base):
     )
     segment_index: Mapped[int] = mapped_column(Integer, nullable=False)
     segment_label: Mapped[str] = mapped_column(String, nullable=False)
-    segment_type: Mapped[str] = mapped_column(String, nullable=False)  # cash, mystery, try_again, double_next, jackpot
-    cash_value: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
+    segment_type: Mapped[str] = mapped_column(String, nullable=False)  # cash, mystery, try_again, jackpot
+    cash_value: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)  # kept for legacy/compat
+    points_value: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
     is_jackpot: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     is_doubled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    spin_type: Mapped[Optional[SpinType]] = mapped_column(
+        SAEnum(SpinType, name="spintype", values_callable=lambda e: [m.value for m in e],
+               create_constraint=False),
+        nullable=True,
+    )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
     )

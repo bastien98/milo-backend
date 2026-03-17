@@ -26,6 +26,7 @@ async def get_streak_status(
     """Get the user's current streak status."""
     svc = StreakService(db)
     data = await svc.get_streak_status(current_user.id)
+    await db.commit()
 
     claimable = None
     if data["claimable_reward"]:
@@ -33,6 +34,7 @@ async def get_streak_status(
 
     return StreakStatusResponse(
         week_count=data["week_count"],
+        streak_level=data["streak_level"],
         current_cycle=[StreakCycleEntry(**e) for e in data["current_cycle"]],
         claimable_reward=claimable,
         is_at_risk=data["is_at_risk"],
@@ -52,10 +54,20 @@ async def claim_streak_reward(
     if not result["success"]:
         raise HTTPException(status_code=404, detail="No claimable streak reward found")
 
-    return StreakClaimResponse(**result)
+    return StreakClaimResponse(
+        success=result["success"],
+        reward_type=result["reward_type"],
+        spins_credited=result["spins_credited"],
+        spin_type=result["spin_type"],
+        points_credited=result["points_credited"],
+        new_points_balance=result["new_points_balance"],
+        new_standard_spins=result["new_standard_spins"],
+        new_premium_spins=result["new_premium_spins"],
+        new_spins_available=result["new_standard_spins"] + result["new_premium_spins"],
+    )
 
 
-# ────────────────── Test endpoints ──────────────────
+# ── Test endpoints ─────────────────────────────────────────────────────────
 
 
 @router.post("/test/advance")
@@ -77,14 +89,15 @@ async def test_advance_streak(
 @router.post("/test/set-week")
 async def test_set_week(
     week: int = Query(..., ge=0, description="Week number to set"),
+    streak_level: int = Query(1, ge=1, le=2, description="Streak level (1 or 2)"),
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_db_user),
 ):
-    """Test mode: set streak to a specific week and create a claimable reward for it."""
+    """Test mode: set streak to a specific week and level."""
     if not TEST_MODE:
         raise HTTPException(status_code=403, detail="Test mode is not enabled")
     svc = StreakService(db)
-    await svc.test_set_week(current_user.id, week)
+    await svc.test_set_week(current_user.id, week, streak_level)
     await db.commit()
     data = await svc.get_streak_status(current_user.id)
     return data
@@ -95,7 +108,7 @@ async def test_reset_streak(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_db_user),
 ):
-    """Test mode: reset streak to 0 and delete all streak rewards."""
+    """Test mode: reset streak to 0."""
     if not TEST_MODE:
         raise HTTPException(status_code=403, detail="Test mode is not enabled")
     svc = StreakService(db)

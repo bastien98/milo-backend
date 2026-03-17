@@ -7,7 +7,7 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 from sqlalchemy.sql import func
 
 from app.db.base import Base
-from app.models.enums import StreakRewardStatus, StreakRewardType
+from app.models.enums import StreakRewardStatus, StreakRewardType, SpinType
 
 
 class StreakReward(Base):
@@ -26,7 +26,14 @@ class StreakReward(Base):
         nullable=False,
     )
     spins_amount: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
-    cash_amount: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
+    cash_amount: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)  # kept for legacy
+    points_amount: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
+    spin_type: Mapped[Optional[SpinType]] = mapped_column(
+        SAEnum(SpinType, name="spintype", values_callable=lambda e: [m.value for m in e],
+               create_constraint=False),
+        nullable=True,
+    )
+    streak_level: Mapped[int] = mapped_column(Integer, nullable=False, default=1, server_default="1")
     status: Mapped[StreakRewardStatus] = mapped_column(
         SAEnum(StreakRewardStatus, name="streakrewardstatus",
                values_callable=lambda e: [m.value for m in e]),

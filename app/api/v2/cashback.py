@@ -6,22 +6,45 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_db, get_current_db_user
 from app.models.referral import Referral
-from app.models.enums import CashbackStatus, ReferralStatus
+from app.models.enums import CashbackStatus, SpinType
 from app.models.user import User
 from app.services.cashback_service import CashbackService
-from app.services.gold_tier_service import check_gold_tier
+from app.services.kickstart_service import get_kickstart_progress
+from app.services.tier_service import get_user_tier
 from app.services.referral_service import REWARD_EUROS, REWARD_SPINS
 from app.schemas.cashback import (
     CashbackBalanceResponse,
     CashbackSummaryResponse,
     CashbackHistoryResponse,
     CashbackTransactionResponse,
-    CashbackCalculationPreview,
-    CashbackSegment,
     CashbackClaimResponse,
+    KickstartProgressResponse,
+    POINTS_PER_EURO,
 )
 
 router = APIRouter()
+
+REFERRAL_REWARD_POINTS = round(REWARD_EUROS * POINTS_PER_EURO)
+
+
+def _build_balance_response(balance, tier, kickstart_prog) -> CashbackBalanceResponse:
+    euro_value = round(balance.points_balance / POINTS_PER_EURO, 2)
+    return CashbackBalanceResponse(
+        points_balance=balance.points_balance,
+        total_points_earned=balance.total_points_earned,
+        total_points_paid_out=balance.total_points_paid_out,
+        standard_spins=balance.standard_spins,
+        premium_spins=balance.premium_spins,
+        tier_level=tier.value,
+        kickstart_progress=KickstartProgressResponse(**kickstart_prog),
+        euro_value=euro_value,
+        can_withdraw=balance.points_balance >= 10000,
+        is_gold_tier=(tier.value == "gold"),
+        spins_available=balance.standard_spins + balance.premium_spins,
+        current_balance=euro_value,
+        total_earned=round(balance.total_points_earned / POINTS_PER_EURO, 2),
+        total_paid_out=round(balance.total_points_paid_out / POINTS_PER_EURO, 2),
+    )
 
 
 @router.get("/balance", response_model=CashbackBalanceResponse)
@@ -29,13 +52,13 @@ async def get_balance(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_db_user),
 ):
-    """Get the user's current cashback wallet balance."""
+    """Get the user's current Milo Points wallet balance."""
     svc = CashbackService(db)
     balance = await svc.get_balance(current_user.id)
-    is_gold = await check_gold_tier(db, current_user.id)
-    resp = CashbackBalanceResponse.model_validate(balance)
-    resp.is_gold_tier = is_gold
-    return resp
+    tier = await get_user_tier(db, balance)
+    kickstart_prog = get_kickstart_progress(balance)
+    await db.commit()
+    return _build_balance_response(balance, tier, kickstart_prog)
 
 
 @router.get("/summary", response_model=CashbackSummaryResponse)
@@ -45,14 +68,14 @@ async def get_summary(
 ):
     """Get cashback summary: balance, recent transactions, and stats."""
     svc = CashbackService(db)
-
     balance = await svc.get_balance(current_user.id)
-    is_gold = await check_gold_tier(db, current_user.id)
+    tier = await get_user_tier(db, balance)
+    kickstart_prog = get_kickstart_progress(balance)
+
     transactions, total = await svc.get_transaction_history(
         current_user.id, page=1, page_size=10
     )
 
-    # Build response — only include claimed (CONFIRMED/PAID_OUT) transactions
     recent = []
     for txn in transactions:
         if txn.status not in (CashbackStatus.CONFIRMED, CashbackStatus.PAID_OUT):
@@ -63,50 +86,47 @@ async def get_summary(
                 id=txn.id,
                 receipt_id=txn.receipt_id,
                 receipt_total=txn.receipt_total,
-                cashback_amount=txn.cashback_amount,
-                effective_rate=txn.effective_rate,
+                points_total=txn.points_total,
+                fixed_points=txn.fixed_points,
+                grote_kar_points=txn.grote_kar_points,
+                kickstart_bonus_points=txn.kickstart_bonus_points,
+                spin_type=txn.spin_type.value if txn.spin_type else None,
+                is_kickstart=txn.is_kickstart,
+                is_streak_saver=txn.is_streak_saver,
                 status=txn.status,
                 created_at=txn.created_at,
                 store_name=receipt.store_name if receipt else None,
                 receipt_date=receipt.receipt_date if receipt else None,
-                spins_awarded=txn.spins_awarded,
+                cashback_amount=round(txn.points_total / POINTS_PER_EURO, 2),
             )
         )
 
-    # Include claimed referral rewards as recent entries
+    # Claimed referral rewards
     referral_result = await db.execute(
         select(Referral).where(
             or_(
-                and_(
-                    Referral.referrer_id == current_user.id,
-                    Referral.referrer_reward_claimed == True,
-                ),
-                and_(
-                    Referral.referee_id == current_user.id,
-                    Referral.referee_reward_claimed == True,
-                ),
+                and_(Referral.referrer_id == current_user.id, Referral.referrer_reward_claimed == True),
+                and_(Referral.referee_id == current_user.id, Referral.referee_reward_claimed == True),
             )
         ).order_by(Referral.completed_at.desc())
     )
-    claimed_referrals = referral_result.scalars().all()
-    for ref in claimed_referrals:
+    for ref in referral_result.scalars().all():
         recent.append(
             CashbackTransactionResponse(
                 id=f"referral-{ref.id}",
                 receipt_id=f"referral-{ref.id}",
                 receipt_total=0,
-                cashback_amount=REWARD_EUROS,
-                effective_rate=0,
+                points_total=REFERRAL_REWARD_POINTS,
                 status=CashbackStatus.CONFIRMED,
                 created_at=ref.completed_at or ref.created_at,
                 store_name="Referral Bonus",
-                receipt_date=None,
+                cashback_amount=REWARD_EUROS,
                 spins_awarded=REWARD_SPINS,
                 is_referral_reward=True,
             )
         )
 
-    # Include claimed streak rewards as recent entries
+    # Claimed streak rewards
     from app.models.streak import StreakReward
     from app.models.enums import StreakRewardStatus
     streak_result = await db.execute(
@@ -121,33 +141,30 @@ async def get_summary(
                 id=f"streak-{sr.id}",
                 receipt_id=f"streak-{sr.id}",
                 receipt_total=0,
-                cashback_amount=sr.cash_amount,
-                effective_rate=0,
+                points_total=sr.points_amount,
                 status=CashbackStatus.CONFIRMED,
                 created_at=sr.claimed_at or sr.created_at,
-                store_name=f"Streak Week {sr.week_number}",
-                receipt_date=None,
+                store_name=f"Streak Week {sr.week_number} (Level {sr.streak_level})",
                 spins_awarded=sr.spins_amount,
                 is_streak_reward=True,
             )
         )
 
-    # Sort all entries by date descending
     recent.sort(key=lambda x: x.created_at, reverse=True)
 
-    avg_cashback = (
-        round(balance.total_earned / total, 2) if total > 0 else 0.0
-    )
-
-    balance_resp = CashbackBalanceResponse.model_validate(balance)
-    balance_resp.is_gold_tier = is_gold
+    avg_points = round(balance.total_points_earned / total, 0) if total > 0 else 0.0
+    balance_resp = _build_balance_response(balance, tier, kickstart_prog)
+    await db.commit()
 
     return CashbackSummaryResponse(
         balance=balance_resp,
         recent_transactions=recent,
-        avg_cashback_per_receipt=avg_cashback,
+        avg_points_per_receipt=avg_points,
+        total_receipts_with_rewards=total,
+        tier_level=tier.value,
+        avg_cashback_per_receipt=round(avg_points / POINTS_PER_EURO, 4),
         total_receipts_with_cashback=total,
-        is_gold_tier=is_gold,
+        is_gold_tier=(tier.value == "gold"),
     )
 
 
@@ -158,7 +175,6 @@ async def get_history(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_db_user),
 ):
-    """Get paginated cashback transaction history."""
     svc = CashbackService(db)
     transactions, total = await svc.get_transaction_history(
         current_user.id, page=page, page_size=page_size
@@ -172,41 +188,25 @@ async def get_history(
                 id=txn.id,
                 receipt_id=txn.receipt_id,
                 receipt_total=txn.receipt_total,
-                cashback_amount=txn.cashback_amount,
-                effective_rate=txn.effective_rate,
+                points_total=txn.points_total,
+                fixed_points=txn.fixed_points,
+                grote_kar_points=txn.grote_kar_points,
+                kickstart_bonus_points=txn.kickstart_bonus_points,
+                spin_type=txn.spin_type.value if txn.spin_type else None,
+                is_kickstart=txn.is_kickstart,
+                is_streak_saver=txn.is_streak_saver,
                 status=txn.status,
                 created_at=txn.created_at,
                 store_name=receipt.store_name if receipt else None,
                 receipt_date=receipt.receipt_date if receipt else None,
-                spins_awarded=txn.spins_awarded,
+                cashback_amount=round(txn.points_total / POINTS_PER_EURO, 2),
             )
         )
 
     total_pages = ceil(total / page_size) if total > 0 else 1
-
     return CashbackHistoryResponse(
-        transactions=items,
-        total=total,
-        page=page,
-        page_size=page_size,
-        total_pages=total_pages,
-    )
-
-
-@router.get("/preview", response_model=CashbackCalculationPreview)
-async def preview_cashback(
-    amount: float = Query(..., gt=0, description="Receipt total to preview"),
-    current_user: User = Depends(get_current_db_user),
-):
-    """Preview cashback calculation for a given receipt amount."""
-    cashback_amount, effective_rate = CashbackService.calculate_cashback(amount)
-    segments = CashbackService.calculate_cashback_segments(amount)
-
-    return CashbackCalculationPreview(
-        receipt_total=amount,
-        cashback_amount=cashback_amount,
-        effective_rate=effective_rate,
-        segments=[CashbackSegment(**s) for s in segments],
+        transactions=items, total=total, page=page,
+        page_size=page_size, total_pages=total_pages,
     )
 
 
@@ -216,20 +216,22 @@ async def claim_cashback(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_db_user),
 ):
-    """Confirm a pending cashback reward and credit it to the user's wallet.
-
-    Called when the user taps 'Tap to claim' in the app. Idempotent — safe to
-    call multiple times for the same receipt.
-    """
+    """Confirm a pending reward and credit it to the user's points wallet. Idempotent."""
     svc = CashbackService(db)
     txn = await svc.claim_cashback(current_user.id, receipt_id)
     if txn is None:
-        raise HTTPException(status_code=404, detail="No cashback transaction found for this receipt")
+        raise HTTPException(status_code=404, detail="No transaction found for this receipt")
 
     balance = await svc.get_balance(current_user.id)
+    await db.commit()
+
+    euro_value = round(balance.points_balance / POINTS_PER_EURO, 2)
     return CashbackClaimResponse(
         receipt_id=receipt_id,
-        cashback_amount=txn.cashback_amount,
-        spins_awarded=txn.spins_awarded,
-        new_balance=balance.current_balance,
+        points_total=txn.points_total,
+        spin_type=txn.spin_type.value if txn.spin_type else None,
+        new_points_balance=balance.points_balance,
+        euro_value=euro_value,
+        cashback_amount=round(txn.points_total / POINTS_PER_EURO, 2),
+        new_balance=euro_value,
     )
