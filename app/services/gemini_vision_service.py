@@ -30,6 +30,8 @@ from app.core.stores import STORES_PROMPT_LIST
 settings = get_settings()
 logger = logging.getLogger(__name__)
 
+
+
 # Deterministic unit conversion: raw receipt unit → (target unit, multiplier)
 # Liquids normalize to ml, solids normalize to g.
 _UNIT_CONVERSIONS: dict[str, tuple[str, float]] = {
@@ -78,14 +80,14 @@ class ExtractedLineItem:
     price_per_unit_measure: Optional[float]  # price per kg/liter
     # Data Platform fields (dp_) — for EAN matching & Pinecone vector search
     dp_expanded_description: Optional[str]  # Full product text for vector search embedding
+    dp_product_name_no_brand: Optional[str]  # Product name without brand, with variant (e.g., "pils", "cola zero")
+    dp_packaging_type: Optional[str]  # Container format: blik, fles, pet, zak, pot, etc.
     dp_pack_quantity: Optional[int]  # Multi-pack count (6 from "6x33cl"), 1 for singles
     dp_pack_size: Optional[float]  # TOTAL pack size in ml or g (matches Daltix pack_size)
     dp_pack_unit: Optional[str]  # "ml" or "g" (matches Daltix pack_unit)
     dp_product_variant: Optional[str]  # flavor/style/sub-type (zero, bruin, paprika)
     dp_article_code: Optional[str]  # Article/PLU/barcode code from receipt
     dp_is_bio: bool  # True if organic (bio/biologisch/biologique)
-    dp_packaging_type: Optional[str]  # Container format: blik, fles, pet, zak, pot, etc.
-    dp_product_name_no_brand: Optional[str]  # Product name without brand, with variant (e.g., "pils", "cola zero")
 
     @property
     def lookup_key(self) -> str:
@@ -129,14 +131,14 @@ class _LineItemSchema(PydanticBaseModel):
     weight_or_volume: Optional[float] = Field(default=None, description="Measured quantity as float, or null")
     price_per_unit_measure: Optional[float] = Field(default=None, description="Per-kg or per-liter price as float, or null")
     dp_expanded_description: Optional[str] = Field(default=None, description="Full product text in lowercase for search, or null")
+    dp_product_name_no_brand: Optional[str] = Field(default=None, description="Product name WITHOUT brand, lowercase, with variant/flavour. E.g., 'jupiler pils' → 'pils', 'coca-cola zero' → 'cola zero', 'boni volle melk' → 'volle melk'. null for discount/deposit lines")
+    dp_packaging_type: Optional[str] = Field(default=None, description="Container format lowercase: blik, fles, pet, zak, pot, doos, pak, brik, tube, spray, kuip, bakje, rol. null for loose/unpackaged items or discount/deposit lines")
     dp_pack_quantity: Optional[int] = Field(default=None, description="Multi-pack count, 1 for singles")
     dp_per_item_size: Optional[float] = Field(default=None, description="Size of ONE item as printed on receipt. '6X33CL'→33, '1,5L'→1.5, '500g'→500. Do NOT multiply by pack quantity")
     dp_pack_unit: Optional[str] = Field(default=None, description="Unit as printed on receipt, lowercase: 'cl', 'ml', 'l', 'g', 'kg'. Do NOT convert units")
     dp_product_variant: Optional[str] = Field(default=None, description="Flavor/sub-type in lowercase, or null")
     dp_article_code: Optional[str] = Field(default=None, description="Article/PLU/barcode from receipt, or null")
     dp_is_bio: bool = Field(description="true if organic/bio product")
-    dp_packaging_type: Optional[str] = Field(default=None, description="Container format lowercase: blik, fles, pet, zak, pot, doos, pak, brik, tube, spray, kuip, bakje, rol. null for loose/unpackaged")
-    dp_product_name_no_brand: Optional[str] = Field(default=None, description="Product name WITHOUT brand, lowercase, with variant/flavour. E.g., 'jupiler pils' → 'pils', 'coca-cola zero' → 'cola zero', 'boni volle melk' → 'volle melk'. null for discount/deposit lines")
 
 
 class _ReceiptSchema(PydanticBaseModel):
@@ -328,26 +330,14 @@ Standard packaged items → null | null | null
 Populate for product lines only. null for discount/deposit lines.
 
 dp_expanded_description: full product text, lowercase → "jupiler pils 6x33cl pet"
+dp_product_name_no_brand: product name WITHOUT brand, quantities, or packaging — lowercase, keep variant/flavour only → "JUPILER PILS 6X33CL PET"→"pils", "COCA COLA ZERO 1,5L PET"→"cola zero", "BONI VOLLE MELK 1L"→"volle melk", "LAY'S CHIPS PAPRIKA 200G"→"chips paprika", "BANANEN 1KG"→"bananen", "BONI LIMONADE ORANGE 50CL"→"limonade orange", "BONI CHOCO AS 250G"→"choco". null for discount/deposit lines
+dp_packaging_type: container format, lowercase single word → "blik" (can), "fles" (glass bottle), "pet" (plastic bottle), "brik" (tetra pak), "pot" (jar), "zak" (bag), "doos" (box), "pak" (carton), "kuip" (tub), "bakje" (tray/punnet), "spray", "tube", "rol" (roll). null for loose/unpackaged or discount/deposit lines
 dp_pack_quantity: multi-pack count → "6X33CL"→6, "4x125g"→4, single→1
 dp_per_item_size: ONE item size, raw number, do NOT multiply by pack qty → "6X33CL"→33, "1,5L"→1.5, "500g"→500
 dp_pack_unit: unit as printed, lowercase: "cl","ml","l","g","kg". Do NOT convert units
 dp_product_variant: flavor/sub-type, lowercase → "zero","bruin","paprika","pils". null if base product
 dp_article_code: article/PLU/EAN from receipt → "ART 123456","PLU 4011". null if not visible
 dp_is_bio: BIO/BIOLOGISCH/BIOLOGIQUE/ORGANIC in text → true, else false
-dp_packaging_type: container/packaging format, lowercase single word
-- Drinks: "blik" (can), "fles" (glass bottle), "pet" (plastic bottle), "brik" (tetra pak)
-- Food: "pot" (jar), "zak" (bag), "doos" (box), "pak" (carton), "kuip" (tub), "bakje" (tray/punnet)
-- Household: "fles" (bottle), "spray", "tube", "rol" (roll)
-- null for loose/unpackaged items (fruit, vegetables, bakery)
-dp_product_name_no_brand: product name WITHOUT brand, lowercase, with variant/flavour included
-- REMOVE: brand name, quantities, packaging types, receipt codes
-- KEEP: product type, variant, flavour
-- "JUPILER PILS 6X33CL PET" → "pils"
-- "COCA COLA ZERO 1,5L PET" → "cola zero"
-- "BONI VOLLE MELK 1L" → "volle melk"
-- "LAY'S CHIPS PAPRIKA 200G" → "chips paprika"
-- "BANANEN 1KG" → "bananen"
-- For discount/deposit lines: null
 
 Extract all line items from this receipt.'''
 

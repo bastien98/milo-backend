@@ -182,6 +182,8 @@ class TransactionRepository:
                 "dp_product_variant": txn.dp_product_variant,
                 "dp_article_code": txn.dp_article_code,
                 "dp_is_bio": txn.dp_is_bio,
+                "dp_packaging_type": txn.dp_packaging_type,
+                "dp_product_name_no_brand": txn.dp_product_name_no_brand,
                 "lookup_key": txn.lookup_key,
             }
             for txn in transactions

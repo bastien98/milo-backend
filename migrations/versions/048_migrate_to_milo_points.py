@@ -21,8 +21,8 @@ from sqlalchemy.dialects import postgresql
 
 
 # revision identifiers
-revision = '044'
-down_revision = '043_add_post_url'
+revision = '048_migrate_to_milo_points'
+down_revision = '047_promo_candidates_and_preferred_stores'
 branch_labels = None
 depends_on = None
 

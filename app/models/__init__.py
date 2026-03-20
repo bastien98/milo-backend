@@ -10,6 +10,7 @@ from app.models.referral import Referral
 from app.models.enums import ReferralStatus, WithdrawalStatus, StreakRewardStatus, StreakRewardType
 from app.models.withdrawal import WithdrawalRequest
 from app.models.streak import StreakReward
+from app.models.spin import SpinTransaction
 from app.models.promo_weekly_candidates import PromoWeeklyCandidates
 from app.models.promo_report_event import PromoReportEvent
 from app.models.enums import PromoReportStatus, PromoReportEventType
@@ -33,6 +34,7 @@ __all__ = [
     "StreakReward",
     "StreakRewardStatus",
     "StreakRewardType",
+    "SpinTransaction",
     "PromoWeeklyCandidates",
     "PromoReportEvent",
     "PromoReportStatus",

@@ -54,27 +54,34 @@ async def generate_candidates_for_users(
     created = 0
     skipped = 0
     failed = 0
+    sem = asyncio.Semaphore(5)
 
-    for current_user_id in user_ids:
-        async with async_session_maker() as session:
-            generator = WeeklyPromoCandidateGenerator(session)
-            try:
-                _, was_created = await generator.generate_weekly_candidates(
-                    current_user_id,
-                    report_date=report_date,
-                    replace_existing=replace_existing,
-                )
-                await session.commit()
-                if was_created:
-                    created += 1
-                    logger.info("Generated weekly promo candidates for user %s", current_user_id)
-                else:
-                    skipped += 1
-                    logger.info("Skipped existing weekly promo candidates for user %s", current_user_id)
-            except Exception:
-                await session.rollback()
-                failed += 1
-                logger.exception("Failed to generate weekly promo candidates for user %s", current_user_id)
+    async def _process_user(current_user_id: str) -> str:
+        async with sem:
+            async with async_session_maker() as session:
+                generator = WeeklyPromoCandidateGenerator(session)
+                try:
+                    _, was_created = await generator.generate_weekly_candidates(
+                        current_user_id,
+                        report_date=report_date,
+                        replace_existing=replace_existing,
+                    )
+                    await session.commit()
+                    if was_created:
+                        logger.info("Generated weekly promo candidates for user %s", current_user_id)
+                        return "created"
+                    else:
+                        logger.info("Skipped existing weekly promo candidates for user %s", current_user_id)
+                        return "skipped"
+                except Exception:
+                    await session.rollback()
+                    logger.exception("Failed to generate weekly promo candidates for user %s", current_user_id)
+                    return "failed"
+
+    results = await asyncio.gather(*[_process_user(uid) for uid in user_ids])
+    created = results.count("created")
+    skipped = results.count("skipped")
+    failed = results.count("failed")
 
     logger.info(
         "Done: %s generated, %s skipped, %s failed",

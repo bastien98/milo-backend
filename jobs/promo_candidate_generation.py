@@ -126,6 +126,8 @@ class PromoCandidateGenerationService:
         self.db = db
         self.settings = get_settings()
         self.enriched_repo = EnrichedProfileRepository(db)
+        self._pc = Pinecone(api_key=self.settings.PINECONE_API_KEY)
+        self._pinecone_index = self._pc.Index(host=self.settings.PINECONE_INDEX_HOST)
 
     async def _fetch_user_profile_prefs(self, user_id: str) -> tuple[Optional[Language], Optional[List[str]]]:
         """Fetch the user's language and preferred stores from their profile."""
@@ -223,31 +225,29 @@ class PromoCandidateGenerationService:
         report_date_epoch: int,
     ) -> dict[str, list[dict]]:
         """Search Pinecone for promotions matching each interest item."""
-        pc = Pinecone(api_key=self.settings.PINECONE_API_KEY)
-        index = pc.Index(host=self.settings.PINECONE_INDEX_HOST)
+        sem = asyncio.Semaphore(5)
 
-        all_results: dict[str, list[dict]] = {}
-
-        for item in interest_items:
+        async def _search_one(item: dict) -> tuple[str, list[dict]]:
             name = item["normalized_name"]
-            promos = await asyncio.to_thread(
-                _search_promos_for_item,
-                pc,
-                index,
-                item,
-                report_date_epoch,
-            )
-            all_results[name] = promos
-
+            async with sem:
+                promos = await asyncio.to_thread(
+                    _search_promos_for_item,
+                    self._pc,
+                    self._pinecone_index,
+                    item,
+                    report_date_epoch,
+                )
             if promos:
                 logger.info(
                     f"Promo search '{name}': {len(promos)} matches "
                     f"(scores: {[p['relevance_score'] for p in promos]})"
                 )
-            # Small delay to avoid rate limits
-            await asyncio.sleep(0.2)
+            return name, promos
 
-        return all_results
+        results = await asyncio.gather(
+            *[_search_one(item) for item in interest_items]
+        )
+        return dict(results)
 
     async def _generate_annotations(
         self, profile: dict, promo_results: dict[str, list[dict]],
@@ -298,7 +298,7 @@ class PromoCandidateGenerationService:
                 logger.warning(f"Gemini returned truncated JSON (attempt {attempt}), retrying...")
                 time.sleep(1)
                 return self._call_gemini(user_message, attempt + 1, language)
-            logger.warning(f"Gemini returned truncated JSON on final attempt")
+            raise GeminiPromoError("Gemini returned truncated JSON on final attempt")
 
         return response.text
 

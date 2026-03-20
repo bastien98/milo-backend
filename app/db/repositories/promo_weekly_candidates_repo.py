@@ -49,8 +49,10 @@ class PromoWeeklyCandidatesRepository:
         store_tips_json: Optional[Any],
         interest_item_count: int,
         total_matches: int,
+        existing: Optional[PromoWeeklyCandidates] = None,
     ) -> PromoWeeklyCandidates:
-        existing = await self.get_by_user_and_week(user_id, iso_year, iso_week)
+        if existing is None:
+            existing = await self.get_by_user_and_week(user_id, iso_year, iso_week)
         if existing is None:
             candidates = PromoWeeklyCandidates(
                 id=candidates_id,

@@ -116,11 +116,9 @@ async def process_receipt_background(
                     blocking = fraud_result.blocking_signal
                     # Map check names to user-facing error codes and messages
                     error_code_map = {
-                        "receipt_age": "receipt_too_old",
                         "fingerprint": "duplicate_content",
                     }
                     error_message_map = {
-                        "receipt_age": "This receipt is too old. Only receipts from the last 7 days are accepted.",
                         "fingerprint": "This receipt appears to be a duplicate of one you already uploaded.",
                     }
                     check_name = blocking.check_name if blocking else ""
@@ -233,18 +231,25 @@ async def process_receipt_background(
             await session.commit()
             logger.info(f"⏱ bg_mark_completed: {time.monotonic() - t0:.3f}s")
 
-            # Step 7: Award cashback
+            # Step 7: Award cashback (non-fatal — receipt stays COMPLETED even if limits exceeded)
             if final_total and final_total > 0:
-                t0 = time.monotonic()
-                from app.services.cashback_service import CashbackService
-                cashback_svc = CashbackService(session)
-                await cashback_svc.award_cashback_for_receipt(
-                    user_id=user_id,
-                    receipt_id=receipt_id,
-                    receipt_total=final_total,
-                )
-                await session.commit()
-                logger.info(f"⏱ bg_award_cashback: {time.monotonic() - t0:.3f}s")
+                try:
+                    t0 = time.monotonic()
+                    from app.services.cashback_service import CashbackService
+                    cashback_svc = CashbackService(session)
+                    await cashback_svc.award_cashback_for_receipt(
+                        user_id=user_id,
+                        receipt_id=receipt_id,
+                        receipt_total=final_total,
+                    )
+                    await session.commit()
+                    logger.info(f"⏱ bg_award_cashback: {time.monotonic() - t0:.3f}s")
+                except ValueError as limit_err:
+                    logger.warning(f"Cashback skipped (fair-use limit): {limit_err}")
+                    await session.rollback()
+                except Exception as cashback_err:
+                    logger.warning(f"Cashback award failed (non-fatal): {cashback_err}")
+                    await session.rollback()
 
             # Step 7b: Update streak if receipt qualifies (>€50)
             if final_total and final_total > 50:

@@ -72,7 +72,15 @@ def upgrade() -> None:
     op.drop_index("ix_promo_weekly_reports_user_id", table_name="promo_weekly_reports")
     op.drop_table("promo_weekly_reports")
 
-    # 4. Make preferred_stores non-null with default []
+    # 4. Add preferred_stores column if missing (019_add_preferred_stores may not have applied)
+    op.execute("""
+        DO $$ BEGIN
+            ALTER TABLE user_profiles ADD COLUMN preferred_stores JSONB;
+        EXCEPTION WHEN duplicate_column THEN null;
+        END $$;
+    """)
+
+    # 5. Make preferred_stores non-null with default []
     op.execute("UPDATE user_profiles SET preferred_stores = '[]'::jsonb WHERE preferred_stores IS NULL")
     op.alter_column(
         "user_profiles",
