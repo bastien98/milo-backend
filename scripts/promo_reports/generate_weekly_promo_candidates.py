@@ -15,7 +15,7 @@ from datetime import date
 from app.core.promo_reports import compute_promo_week, current_brussels_date
 from app.db.repositories.enriched_profile_repo import EnrichedProfileRepository
 from app.db.session import async_session_maker
-from jobs.weekly_promo_candidate_generator import WeeklyPromoCandidateGenerator
+from scripts.promo_reports.weekly_promo_candidate_generator import WeeklyPromoCandidateGenerator
 
 logging.basicConfig(
     level=logging.INFO,

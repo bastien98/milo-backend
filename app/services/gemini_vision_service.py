@@ -509,6 +509,10 @@ Extract all line items from this receipt.'''
             normalized_brand = item.get("normalized_brand")
             if normalized_brand:
                 normalized_brand = normalized_brand.lower()
+                # Replace generic "in-house" with store-specific housebrand
+                if normalized_brand == "in-house":
+                    store = (data.get("vendor_name") or "other").lower().strip()
+                    normalized_brand = f"{store}-housebrand"
 
             # Parse unit measure fields
             unit_of_measure = item.get("unit_of_measure")

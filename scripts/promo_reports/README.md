@@ -28,7 +28,7 @@ The enriched profile rebuild script lives at `scripts/rebuild_profiles.py` (outs
 
 Run in this order:
 
-1. **Ingest new promo folders into Pinecone** (see `ai/promo_pipelines/README.md`)
+1. **Ingest new promo folders into Pinecone** (see `promo_folders_pipelines/README.md`)
 2. **Rebuild enriched profiles**
 3. **Generate weekly promo candidates**
 

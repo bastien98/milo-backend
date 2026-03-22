@@ -1,0 +1,97 @@
+store_id: "lidl"
+display_name: "Lidl"
+language: "nl_fr"
+bilingual_dedup: true
+
+validity_format: >
+  "Geldig van maandag DD/MM tot zaterdag DD/MM" or
+  "Valable du lundi DD/MM au samedi DD/MM"
+
+store_brands:
+  - name: "milbona"
+    description: "Dairy house brand"
+  - name: "pikok"
+    description: "Poultry/meat brand"
+  - name: "chef select"
+    description: "Ready meals / premium food"
+  - name: "deluxe"
+    description: "Premium line"
+  - name: "freeway"
+    description: "Soft drinks brand"
+  - name: "solevita"
+    description: "Juice brand"
+  - name: "fin carré"
+    description: "Chocolate brand"
+  - name: "mcennedy"
+    description: "American-style snacks"
+  - name: "ocean sea"
+    description: "Fish/seafood brand"
+  - name: "cien"
+    description: "Personal care brand"
+  - name: "formil"
+    description: "Cleaning products brand"
+  - name: "lupilu"
+    description: "Baby products brand"
+  - name: "silvercrest"
+    description: "Kitchen appliances brand"
+  - name: "italiamo"
+    description: "Italian food line"
+  - name: "vitasia"
+    description: "Asian food line"
+
+promo_mechanisms:
+  - label: "Stunt"
+    aliases: ["Super Promo"]
+    description: "Weekly stunt deal — highlighted promotion"
+  - label: "Lidl Plus"
+    aliases: []
+    description: "Lidl Plus app exclusive discount"
+  - label: "-30%"
+    aliases: []
+    description: "Percentage discount (also -25%, -20%, -40%, -50%, etc.)"
+  - label: "1+1 gratis"
+    aliases: ["1+1 gratuit"]
+    description: "Buy one get one free. promo_price = price of one item"
+  - label: "X voor €Y"
+    aliases: ["X pour €Y"]
+    description: "Multi-buy deal (set promo_price to per-unit price €Y/X)"
+
+normalized_name_examples:
+  - input: "Milbona Volle Melk 1L"
+    output: "volle melk"
+  - input: "Pikok Kipfilet 500g"
+    output: "kipfilet"
+  - input: "Coca-Cola Zero 1,5L PET"
+    output: "cola zero"
+  - input: "Chef Select Lasagne Bolognese 1kg"
+    output: "lasagne bolognese"
+  - input: "Fin Carré Chocolade Melk Hazelnoot 100g"
+    output: "chocolade melk hazelnoot"
+
+content_examples:
+  - input: "1L"
+    pack_size: 1
+    content_value: 1
+    content_unit: "l"
+  - input: "500g"
+    pack_size: 1
+    content_value: 500
+    content_unit: "g"
+  - input: "6x33cl"
+    pack_size: 6
+    content_value: 33
+    content_unit: "cl"
+
+price_rules:
+  original_price: "nullable"
+  promo_price: "nullable"
+
+normalized_name_guidance: >
+  Lidl uses many house brands. Always strip the brand from normalized_name.
+  Lidl themed weeks (e.g., Italian week, Asian week) have unique products — extract all.
+
+price_calculation_table: null
+extra_rules:
+  - "Lidl folders contain both food promos and non-food weekly specials — extract all"
+  - "Lidl Plus deals may show a different (lower) price — use the Lidl Plus price as promo_price and label the mechanism 'Lidl Plus'"
+validation_checklist: []

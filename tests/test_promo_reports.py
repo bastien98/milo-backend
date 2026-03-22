@@ -8,7 +8,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from app.core.promo_reports import build_empty_promo_response
 from app.models.enums import PromoReportStatus
-from jobs.promo_candidate_generation import (
+from scripts.promo_reports.promo_candidate_generation import (
     _compute_promo_week,
     _is_display_eligible_promo,
     _build_candidate_items,

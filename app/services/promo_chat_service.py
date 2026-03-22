@@ -24,6 +24,7 @@ from app.schemas.promo_chat import (
     SearchQuery,
 )
 from app.core.categories import CATEGORIES_PROMPT_LIST
+from app.core.stores import ALL_STORE_NAMES, STORES_PROMPT_LIST
 
 logger = logging.getLogger(__name__)
 settings = get_settings()
@@ -37,17 +38,13 @@ SEARCH_TOP_K = 30
 RERANK_TOP_N = 10
 RERANK_SCORE_THRESHOLD = 0.40  # Threshold for non-filtered searches
 
-# Belgian supermarket chains for retailer matching
-BELGIAN_RETAILERS = [
-    "colruyt", "delhaize", "carrefour", "aldi", "lidl", "spar",
-    "albert heijn", "bio-planet", "okay", "jumbo", "intermarché",
-    "cora", "match", "louis delhaize", "proxy delhaize"
-]
+# Belgian supermarket chains for retailer matching — derived from app/core/stores.py
+BELGIAN_RETAILERS = [s for s in ALL_STORE_NAMES if s != "other"]
 
 # LLM prompt for intent extraction - uses CATEGORIES_PROMPT_LIST dynamically
 INTENT_EXTRACTION_PROMPT = f"""You are a promo search assistant for Belgian supermarkets. Your job is to extract structured search parameters from user queries about grocery promotions.
 
-BELGIAN RETAILERS: Colruyt, Delhaize, Carrefour, Aldi, Lidl, Spar, Albert Heijn, Bio-Planet, Okay, Jumbo, Intermarché, Cora, Match, Louis Delhaize, Proxy Delhaize
+BELGIAN RETAILERS: {STORES_PROMPT_LIST}
 
 GRANULAR CATEGORIES (use these EXACT names for granular_categories):
 {CATEGORIES_PROMPT_LIST}

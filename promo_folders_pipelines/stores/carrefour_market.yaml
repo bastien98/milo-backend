@@ -1,0 +1,61 @@
+store_id: "carrefour market"
+display_name: "Carrefour Market"
+language: "nl_fr"
+bilingual_dedup: true
+
+validity_format: >
+  "Geldig van DD/MM tot DD/MM" or "Valable du DD/MM au DD/MM"
+
+store_brands:
+  - name: "carrefour"
+    description: "Standard Carrefour house brand"
+  - name: "carrefour bio"
+    description: "Organic house brand"
+  - name: "simpl"
+    description: "Budget/economy brand"
+  - name: "carrefour classic"
+    description: "Mid-range house brand"
+
+promo_mechanisms:
+  - label: "Bonus Card"
+    aliases: ["Carte Bonus"]
+    description: "Carrefour loyalty card price — extract the card price as promo_price"
+  - label: "Prix Choc"
+    aliases: ["Stuntprijs"]
+    description: "Shock price / stunt deal"
+  - label: "1+1 gratis"
+    aliases: ["1+1 gratuit"]
+    description: "Buy one get one free. promo_price = price of one item"
+  - label: "-30%"
+    aliases: []
+    description: "Percentage discount (also -25%, -20%, etc.)"
+  - label: "X voor €Y"
+    aliases: ["X pour €Y"]
+    description: "Multi-buy deal (set promo_price to per-unit price €Y/X)"
+
+normalized_name_examples:
+  - input: "Jupiler Pils 6x33cl"
+    output: "pils"
+  - input: "Carrefour Halfvolle Melk 1L"
+    output: "halfvolle melk"
+  - input: "Simpl Rijst 1kg"
+    output: "rijst"
+
+content_examples:
+  - input: "6x33cl"
+    pack_size: 6
+    content_value: 33
+    content_unit: "cl"
+  - input: "1kg"
+    pack_size: 1
+    content_value: 1
+    content_unit: "kg"
+
+price_rules:
+  original_price: "nullable"
+  promo_price: "nullable"
+
+normalized_name_guidance: null
+price_calculation_table: null
+extra_rules: []
+validation_checklist: []

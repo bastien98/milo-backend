@@ -76,6 +76,7 @@ class PromoReportService:
             candidates_row=candidates_row,
             preferred_stores=preferred_stores,
             promo_week=promo_week,
+            report_date=report_date,
         )
 
     async def log_event(
@@ -120,9 +121,14 @@ class PromoReportService:
         candidates_row,
         preferred_stores: list[str],
         promo_week: dict,
+        report_date: Optional[date] = None,
     ) -> dict:
         """Deterministic assembly: filter, rank, group, compute totals."""
         items = list(candidates_row.candidates_json or [])
+        today_str = report_date.isoformat() if report_date else current_brussels_date().isoformat()
+
+        # 0. Filter out expired promos (validity_end < today)
+        items = [i for i in items if (i.get("validity_end") or "") >= today_str]
 
         # 1. Filter by preferred_stores ([] = all stores)
         if preferred_stores:

@@ -1,0 +1,62 @@
+store_id: "jumbo"
+display_name: "Jumbo"
+language: "nl"
+bilingual_dedup: false
+
+validity_format: >
+  "Geldig van woensdag DD/MM tot dinsdag DD/MM"
+
+store_brands:
+  - name: "jumbo"
+    description: "Standard Jumbo house brand"
+
+promo_mechanisms:
+  - label: "Extra's"
+    aliases: []
+    description: "Jumbo Extra's loyalty deal"
+  - label: "1+1 gratis"
+    aliases: []
+    description: "Buy one get one free. promo_price = price of one item"
+  - label: "2e halve prijs"
+    aliases: []
+    description: "Second item at half price"
+  - label: "-30%"
+    aliases: []
+    description: "Percentage discount (also -25%, -20%, etc.)"
+  - label: "X voor €Y"
+    aliases: []
+    description: "Multi-buy deal (set promo_price to per-unit price €Y/X)"
+
+normalized_name_examples:
+  - input: "Jupiler Pils Blikken 6x33cl"
+    output: "pils"
+  - input: "Jumbo Volle Melk 1L"
+    output: "volle melk"
+  - input: "Coca-Cola Zero 1,5L PET"
+    output: "cola zero"
+  - input: "Jumbo Kaas Jong Belegen 400g"
+    output: "kaas jong belegen"
+
+content_examples:
+  - input: "6x33cl"
+    pack_size: 6
+    content_value: 33
+    content_unit: "cl"
+  - input: "1L"
+    pack_size: 1
+    content_value: 1
+    content_unit: "l"
+  - input: "400g"
+    pack_size: 1
+    content_value: 400
+    content_unit: "g"
+
+price_rules:
+  original_price: "nullable"
+  promo_price: "nullable"
+
+normalized_name_guidance: null
+price_calculation_table: null
+extra_rules:
+  - "Jumbo folders are Dutch only"
+validation_checklist: []

@@ -26,7 +26,7 @@ os.environ["DATABASE_URL"] = (
 from app.db.session import async_session_maker
 # Import all models so SQLAlchemy can resolve relationships
 from app.models import user, receipt, transaction, user_profile, budget, budget_ai_insight, budget_history, user_enriched_profile  # noqa
-from jobs.promo_candidate_generation import PromoCandidateGenerationService
+from scripts.promo_reports.promo_candidate_generation import PromoCandidateGenerationService
 
 USER_ID = os.environ.get("TEST_USER_ID", "c9b6bc31-d05a-4ab4-97fc-f40ff5fe6f67")
 

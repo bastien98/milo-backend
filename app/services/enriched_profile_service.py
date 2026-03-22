@@ -18,6 +18,10 @@ logger = logging.getLogger(__name__)
 LOOKBACK_DAYS = 120
 # Max promo interest items
 MAX_INTEREST_ITEMS = 25
+# Category-level brand loyalty: if top brand holds >= this share of purchases
+# within a granular_category, items are classified brand_loyal; otherwise price_switcher.
+CATEGORY_BRAND_LOYAL_THRESHOLD = 0.65
+CATEGORY_BRAND_MIN_PURCHASES = 3
 
 
 class EnrichedProfileService:
@@ -514,6 +518,20 @@ def _build_promo_interest_items(
         if t.dp_product_name_no_brand:
             item_data[name_lower]["product_names_no_brand"][t.dp_product_name_no_brand] += 1
 
+    # Pre-compute category-level brand counts for loyalty classification
+    # Exclude housebrand placeholders — they represent unbranded deli/bakery
+    # items and would pollute brand analysis (no promo matches these).
+    category_brand_counts: dict[str, Counter] = defaultdict(Counter)
+    for t in transactions:
+        if (t.granular_category
+                and t.granular_category != "Other"
+                and t.normalized_brand
+                and t.normalized_brand != "in-house"
+                and not t.normalized_brand.endswith("-housebrand")
+                and not t.is_deposit
+                and not t.is_discount):
+            category_brand_counts[t.granular_category][t.normalized_brand] += 1
+
     # Precompute cross-item metrics for relative tags
     all_receipt_ids = {t.receipt_id for t in transactions if t.receipt_id}
     total_receipts_in_window = len(all_receipt_ids)
@@ -631,22 +649,21 @@ def _build_promo_interest_items(
         if trip_count >= 2:
             high_spend.append((data["total_spend"], entry.copy()))
 
-        # Brand analysis: loyal (>= 80% one brand) vs price switcher (no dominant brand)
+        # Brand analysis: use CATEGORY-level brand concentration
+        # (not product-level, which is almost always single-brand)
         if data["brands"] and data["count"] >= 2 and trip_count >= 2:
-            brand_counts: dict[str, int] = defaultdict(int)
-            for bt in transactions:
-                bt_name = bt.normalized_name or bt.item_name
-                if bt_name and bt_name.lower().strip() == name and bt.normalized_brand:
-                    brand_counts[bt.normalized_brand] += 1
-            if brand_counts:
-                top_brand = max(brand_counts, key=brand_counts.get)  # type: ignore[arg-type]
-                top_brand_count = brand_counts[top_brand]
-                total_branded = sum(brand_counts.values())
-                brand_ratio = top_brand_count / total_branded
-                if brand_ratio >= 0.8:
-                    brand_loyal.append((trip_count, entry.copy()))
-                elif len(brand_counts) >= 2:
-                    price_switchers.append((trip_count, entry.copy()))
+            item_cat = next(iter(data["granular_categories"]), None)
+            if item_cat:
+                cat_brands = category_brand_counts.get(item_cat)
+                if cat_brands and sum(cat_brands.values()) >= CATEGORY_BRAND_MIN_PURCHASES:
+                    top_count = cat_brands.most_common(1)[0][1]
+                    brand_share = top_count / sum(cat_brands.values())
+                    if brand_share >= CATEGORY_BRAND_LOYAL_THRESHOLD:
+                        brand_loyal.append((trip_count, entry.copy()))
+                    elif len(cat_brands) >= 2:
+                        e = entry.copy()
+                        e["category_brands"] = sorted(cat_brands.keys())
+                        price_switchers.append((trip_count, e))
 
         if avg_units_per_trip >= 2 and trip_count >= 2:
             bulk_buys.append((avg_units_per_trip, entry.copy()))
