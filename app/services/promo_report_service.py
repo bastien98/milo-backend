@@ -142,12 +142,15 @@ class PromoReportService:
                 report_date=candidates_row.report_date,
             )
 
-        # 2. Score and rank
+        # 2. Score and rank — relevance-first: personal relevance drives ranking,
+        # savings is a small tiebreaker so pricing availability doesn't determine top picks
         for item in items:
-            urgency = item.get("restock_urgency") or 0.5
-            freq_days = item.get("purchase_frequency_days") or 30
-            savings = item.get("savings", 0)
-            item["_score"] = savings * min(urgency, 3.0) * (30 / max(freq_days, 1))
+            relevance = item.get("relevance_score") or 0.6
+            urgency = min(item.get("restock_urgency") or 0.5, 3.0)
+            freq_factor = 30 / max(item.get("purchase_frequency_days") or 30, 1)
+            savings_bonus = min(item.get("savings", 0), 5.0)
+
+            item["_score"] = relevance * urgency * freq_factor + (savings_bonus * 0.1)
 
         items.sort(key=lambda x: x.get("_score", 0), reverse=True)
 
@@ -174,6 +177,11 @@ class PromoReportService:
                 "reason": item.get("reason", ""),
                 "page_number": item.get("page_number"),
                 "promo_folder_url": item.get("promo_folder_url"),
+                "display_name": item.get("display_name", ""),
+                "display_mechanism": item.get("display_mechanism", ""),
+                "display_description": item.get("display_description", ""),
+                "display_unit_price": item.get("display_unit_price"),
+                "display_savings_label": item.get("display_savings_label"),
             })
 
         # 5. Group remaining by store
@@ -197,6 +205,11 @@ class PromoReportService:
                 "validity_end": item.get("validity_end", ""),
                 "page_number": item.get("page_number"),
                 "promo_folder_url": item.get("promo_folder_url"),
+                "display_name": item.get("display_name", ""),
+                "display_mechanism": item.get("display_mechanism", ""),
+                "display_description": item.get("display_description", ""),
+                "display_unit_price": item.get("display_unit_price"),
+                "display_savings_label": item.get("display_savings_label"),
             })
 
         stores = []

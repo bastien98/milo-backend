@@ -33,3 +33,8 @@ class PromoItem:
     source_type: str = "folder"
     page_number: Optional[int] = None
     promo_folder_url: Optional[str] = None
+    display_name: str = ""                     # Clean display label: Brand + product + variant + size
+    display_mechanism: str = ""                # Standardized promo mechanism for display
+    display_description: str = ""              # One-line deal explanation in plain language
+    display_unit_price: Optional[str] = None   # Human-readable price-per-unit (e.g., "€0.84/L")
+    display_savings_label: Optional[str] = None  # Pre-formatted savings text

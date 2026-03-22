@@ -67,6 +67,11 @@ class _PromoItemSchema(PydanticBaseModel):
     content_unit: Optional[str] = Field(default=None, description="Unit lowercase: cl, ml, l, g, kg")
     unit_info: Optional[str] = Field(default=None, description="Raw unit string as printed: 6x33cl, 500g, 1L")
     page_number: Optional[int] = Field(default=None, description="Page within batch, 1-indexed")
+    display_name: str = Field(description="Clean display label: Brand + product + variant + size. Title case. e.g., 'Oîkos Yoghurt Appel-Kaneel 4 x 115 g', 'Croky Chips Paprika 150 g'. Always include brand, variant/flavour, and size info. No promo text or pricing.")
+    display_mechanism: str = Field(description="Clear, standardized promo label with consistent capitalization. e.g., '1+1 Gratis', '-25%', '2e aan Halve Prijs', 'Prijsverlaging'.")
+    display_description: str = Field(description="One-line plain-language explanation of the deal (~80 chars max). e.g., 'Koop 2 pakken Danone yoghurt en krijg het 3e gratis', 'Alle Croky chips met 25% korting'.")
+    display_unit_price: Optional[str] = Field(default=None, description="Human-readable price-per-unit. e.g., '€0.84/L', '€12.50/kg', '€0.55/stuk'. null if not enough info to compute.")
+    display_savings_label: Optional[str] = Field(default=None, description="Pre-formatted savings text. e.g., '1 Gratis Item', 'Bespaar €0.80', 'Tot -25% Korting'. null if no meaningful savings description possible.")
 
 
 class _PromoFolderSchema(PydanticBaseModel):
@@ -329,6 +334,11 @@ def parse_promo_items(
                 source_type="folder",
                 page_number=raw.get("page_number"),
                 promo_folder_url=promo_folder_url,
+                display_name=(raw.get("display_name") or "").strip(),
+                display_mechanism=(raw.get("display_mechanism") or "").strip(),
+                display_description=(raw.get("display_description") or "").strip(),
+                display_unit_price=(raw.get("display_unit_price") or "").strip() or None,
+                display_savings_label=(raw.get("display_savings_label") or "").strip() or None,
             )
         )
 
@@ -552,6 +562,16 @@ def upsert_to_pinecone(items: list[PromoItem], batch_size: int = 50, auto_delete
             record["page_number"] = item.page_number
         if item.promo_folder_url:
             record["promo_folder_url"] = item.promo_folder_url
+        if item.display_name:
+            record["display_name"] = item.display_name
+        if item.display_mechanism:
+            record["display_mechanism"] = item.display_mechanism
+        if item.display_description:
+            record["display_description"] = item.display_description
+        if item.display_unit_price:
+            record["display_unit_price"] = item.display_unit_price
+        if item.display_savings_label:
+            record["display_savings_label"] = item.display_savings_label
         records.append(record)
 
     total_upserted = 0

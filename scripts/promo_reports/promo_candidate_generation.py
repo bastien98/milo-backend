@@ -478,8 +478,12 @@ def _build_active_filter(
 
 
 def _is_display_eligible_promo(promo: dict, report_date_epoch: int) -> bool:
-    product_label = (promo.get("original_description") or promo.get("normalized_name") or "").strip()
-    mechanism = (promo.get("promo_mechanism") or "").strip()
+    # Require display-ready fields (preferred) or fall back to legacy fields
+    display_name = (promo.get("display_name") or "").strip()
+    display_mechanism = (promo.get("display_mechanism") or "").strip()
+    # Fall back to legacy fields for records ingested before the display fields existed
+    product_label = display_name or (promo.get("original_description") or promo.get("normalized_name") or "").strip()
+    mechanism = display_mechanism or (promo.get("promo_mechanism") or "").strip()
     retailer = (promo.get("source_retailer") or "").strip()
     if not product_label or not mechanism or not retailer:
         return False
@@ -488,23 +492,37 @@ def _is_display_eligible_promo(promo: dict, report_date_epoch: int) -> bool:
         return False
 
     try:
-        original = float(promo["original_price"])
-        promo_price = float(promo["promo_price"])
         validity_start_epoch = int(promo["validity_start_epoch"])
         validity_end_epoch = int(promo["validity_end_epoch"])
     except (KeyError, TypeError, ValueError):
         return False
 
-    if original <= 0 or promo_price <= 0:
-        return False
-    if promo_price > original:
-        return False
     if validity_start_epoch > validity_end_epoch:
         return False
     if report_date_epoch < validity_start_epoch or report_date_epoch > validity_end_epoch:
         return False
 
+    # Prices are optional — but validate if both are present
+    original = _safe_price(promo.get("original_price"))
+    promo_price = _safe_price(promo.get("promo_price"))
+    if original is not None and promo_price is not None:
+        if original <= 0 or promo_price <= 0:
+            return False
+        if promo_price > original:
+            return False
+
     return True
+
+
+def _safe_price(value) -> Optional[float]:
+    """Return a float if value is a valid price, else None."""
+    if value is None:
+        return None
+    try:
+        v = float(value)
+        return v if v > 0 else None
+    except (TypeError, ValueError):
+        return None
 
 
 def _build_item_key(fields: dict) -> str:
@@ -551,6 +569,11 @@ def _build_promo_dict(fields: dict, score: float) -> dict:
         "source_retailer": fields.get("source_retailer", ""),
         "page_number": fields.get("page_number"),
         "promo_folder_url": fields.get("promo_folder_url"),
+        "display_name": fields.get("display_name", ""),
+        "display_mechanism": fields.get("display_mechanism", ""),
+        "display_description": fields.get("display_description", ""),
+        "display_unit_price": fields.get("display_unit_price"),
+        "display_savings_label": fields.get("display_savings_label"),
     }
     return promo
 
@@ -847,8 +870,9 @@ def _build_candidate_items(
 
             original_price = _coerce_price(promo.get("original_price"))
             promo_price = _coerce_price(promo.get("promo_price"))
-            savings = round(original_price - promo_price, 2)
-            discount_pct = round((1 - promo_price / original_price) * 100) if original_price > 0 else 0
+            has_prices = original_price > 0 and promo_price > 0
+            savings = round(original_price - promo_price, 2) if has_prices else 0
+            discount_pct = round((1 - promo_price / original_price) * 100) if has_prices and original_price > 0 else 0
 
             # Coerce page_number to int
             page_number = promo.get("page_number")
@@ -862,26 +886,39 @@ def _build_candidate_items(
             granular_category = promo.get("granular_category", "")
             parent_category = promo.get("parent_category", "")
 
+            # Use display_name if available, fall back to legacy fields
+            display_name = (promo.get("display_name") or "").strip()
+            product_name = display_name or (
+                promo.get("original_description")
+                or promo.get("normalized_name", "")
+            ).strip()
+
+            display_mechanism = (promo.get("display_mechanism") or "").strip()
+            mechanism = display_mechanism or promo.get("promo_mechanism", "")
+
             candidates.append({
                 "item_key": item_key,
                 "brand": promo.get("brand", ""),
-                "product_name": (
-                    promo.get("original_description")
-                    or promo.get("normalized_name", "")
-                ).strip(),
+                "product_name": product_name,
                 "emoji": _get_emoji_for_category(granular_category, parent_category),
                 "original_price": original_price,
                 "promo_price": promo_price,
                 "savings": savings,
                 "discount_percentage": discount_pct,
-                "mechanism": promo.get("promo_mechanism", ""),
+                "mechanism": mechanism,
                 "validity_start": promo.get("validity_start", ""),
                 "validity_end": promo.get("validity_end", ""),
                 "page_number": page_number,
                 "promo_folder_url": promo.get("promo_folder_url"),
                 "store_name": store_name,
+                "display_name": display_name,
+                "display_mechanism": display_mechanism,
+                "display_description": promo.get("display_description", ""),
+                "display_unit_price": promo.get("display_unit_price"),
+                "display_savings_label": promo.get("display_savings_label"),
                 "store_color": _get_store_color(store_name),
                 "granular_category": granular_category,
+                "relevance_score": promo.get("relevance_score"),
                 "restock_urgency": item_metrics.get("restock_urgency"),
                 "purchase_frequency_days": item_metrics.get("purchase_frequency_days"),
                 "avg_unit_price": item_metrics.get("avg_unit_price"),

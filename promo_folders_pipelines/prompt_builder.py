@@ -206,6 +206,45 @@ def _build_extraction_rules(config: Dict[str, Any], categories_list: str) -> str
 
 14. **page_number**: Page number within the current batch (1-indexed).
 
+15. **display_name**: A clean, human-readable product label for the consumer app.
+    - Title Case (capitalize first letter of each significant word)
+    - Format: "[Brand] [Product Type] [Variant/Flavour] [Size Info]"
+    - ALWAYS include the brand name (even for house brands like Boni, Everyday)
+    - Include variant/flavour if applicable
+    - Include size/unit info if available
+    - Do NOT include promo text, pricing, or mechanism info
+    - Examples:
+      - "Oîkos Yoghurt Appel-Kaneel 4 x 115 g"
+      - "Croky Chips Explosions Salt & Pepper 150 g"
+      - "Coca-Cola Regular 1,5 L"
+      - "Boni Selection Serranoham Reserva 200 g"
+      - "Parodontax Tandpasta" (when no size info available)
+
+16. **display_mechanism**: A clean, standardized promo label.
+    - Use the mechanism as printed in the folder
+    - Consistent capitalization (title case for words, keep numbers/symbols)
+    - Examples: "1+1 Gratis", "-25%", "2e aan Halve Prijs", "2+1 Gratis",
+      "-20% vanaf 2 Verpakkingen", "Prijsverlaging", "3+3 Gratis"
+
+17. **display_description**: A short plain-language explanation of the deal (~80 chars max).
+    - Written in the folder's language (Dutch or French)
+    - Explains what the user gets in simple terms
+    - Examples:
+      - "Koop 2 pakken Danone yoghurt en krijg het 3e gratis"
+      - "Alle Croky chips met 25% korting"
+      - "Passendale kaas nu met 20% korting vanaf 1 verpakking"
+      - "Coca-Cola flessen: koop 12, krijg 6 gratis"
+
+18. **display_unit_price**: Human-readable price-per-unit string.
+    - Compute from promo_price and content_value/content_unit if possible
+    - Format: "€X.XX/unit" (e.g., "€0.84/L", "€12.50/kg", "€0.55/stuk")
+    - null if not enough info to compute
+
+19. **display_savings_label**: Pre-formatted savings text.
+    - When exact euro savings are known: "Bespaar €X.XX"
+    - When only mechanism is known: "1 Gratis Item", "2e aan Halve Prijs", "Tot -25% Korting"
+    - null only if no meaningful savings description is possible
+
 ### IMPORTANT RULES
 - Extract EVERY product, including small secondary items and non-food (household, personal care, pet)
 - Each unique product appears ONCE — deduplicate across languages if bilingual
@@ -229,6 +268,11 @@ def _build_validation_checklist(config: Dict[str, Any]) -> str:
         "- granular_category is from the provided list",
         "- Prices use dot decimal (not comma)",
         "- normalized_brand is a SINGLE brand — if multiple brands share a promo, split into separate items",
+        "- display_name is Title Case, includes brand + product + variant + size (no promo text or pricing)",
+        "- display_mechanism matches the promo as printed in the folder, with consistent capitalization",
+        "- display_description is a plain-language deal explanation, max ~80 characters",
+        "- display_unit_price format is \"€X.XX/unit\" (or null if not computable)",
+        "- display_savings_label summarizes the saving in user-friendly text (or null)",
     ]
     for item in checklist:
         lines.append(f"- {item}")

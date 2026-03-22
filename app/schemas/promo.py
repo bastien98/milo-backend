@@ -1,5 +1,5 @@
 from typing import Any, Optional, List
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from app.models.enums import PromoReportEventType, PromoReportStatus
 
@@ -141,3 +141,58 @@ class PromoReportEventCreate(BaseModel):
     item_key: Optional[str] = None
     store_name: Optional[str] = None
     metadata: Optional[dict[str, Any]] = None
+
+
+# ---------------------------------------------------------------------------
+# Promo Search
+# ---------------------------------------------------------------------------
+
+class PromoSearchRequest(BaseModel):
+    """Request body for POST /api/v2/promos/search."""
+    query: str = Field(
+        ...,
+        min_length=1,
+        max_length=500,
+        description="Product name or description to search for",
+    )
+    stores: List[str] = Field(
+        ...,
+        min_length=1,
+        description="Canonical store names to filter by",
+    )
+
+
+class PromoSearchResult(BaseModel):
+    """A single promo search result."""
+    product_name: str
+    brand: Optional[str] = None
+    category: str
+    store: str
+    original_price: Optional[float] = None
+    promo_price: Optional[float] = None
+    savings: Optional[float] = None
+    discount_percent: Optional[float] = None
+    mechanism: Optional[str] = None
+    validity_start: Optional[str] = None
+    validity_end: Optional[str] = None
+    display_name: Optional[str] = None
+    display_mechanism: Optional[str] = None
+    display_description: Optional[str] = None
+    display_unit_price: Optional[str] = None
+    relevance_score: float
+    page_number: Optional[int] = None
+    promo_folder_url: Optional[str] = None
+
+
+class PromoSearchResponse(BaseModel):
+    """Response for POST /api/v2/promos/search."""
+    query: str
+    stores: List[str]
+    result_count: int
+    results: List[PromoSearchResult]
+
+
+class PromoStoreOption(BaseModel):
+    """A store available for promo search filtering."""
+    id: str
+    name: str
