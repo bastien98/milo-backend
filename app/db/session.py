@@ -33,7 +33,7 @@ async def init_db():
     # Import all models to ensure they're registered with SQLAlchemy
     from app.models import user, receipt, transaction, user_profile, budget, budget_history  # noqa
     from app.models import user_enriched_profile  # noqa
-    from app.models import promo_weekly_candidates, promo_report_event  # noqa
+    from app.models import promo_candidates, promo_report_event  # noqa
 
     if not settings.USE_ALEMBIC:
         async with engine.begin() as conn:

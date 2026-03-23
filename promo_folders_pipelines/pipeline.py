@@ -11,6 +11,7 @@ import logging
 import os
 import re
 import time
+from datetime import date
 from typing import Any, Dict, List, Optional
 
 import fitz  # PyMuPDF
@@ -53,30 +54,31 @@ REQUEST_TIMEOUT = 300  # 5 minutes per Gemini call
 # Pydantic schemas for Gemini structured output
 # ---------------------------------------------------------------------------
 class _PromoItemSchema(PydanticBaseModel):
-    original_description: str = Field(description="Full product text as printed in folder")
-    normalized_name: str = Field(description="Lowercase product name WITHOUT brand, WITH variant/flavour")
-    normalized_brand: Optional[str] = Field(default=None, description="Lowercase brand name")
-    is_premium: bool = Field(description="true for national brands, false for house/store brands")
-    packaging_type: Optional[str] = Field(default=None, description="Container: blik, fles, pet, zak, pot, doos, pak, brik, tube, spray, kuip, bakje, rol. null for loose")
-    granular_category: str = Field(description="Category from provided list, or 'Other'")
-    original_price: Optional[float] = Field(default=None, description="Regular price before promo")
-    promo_price: Optional[float] = Field(default=None, description="Promotional price customer pays")
-    promo_mechanism: Optional[str] = Field(default=None, description="Promo label as shown in folder")
-    pack_size: Optional[int] = Field(default=None, description="Multi-pack count, 1 for singles")
-    content_value: Optional[float] = Field(default=None, description="Size of ONE item: 6x33cl→33, 500g→500")
-    content_unit: Optional[str] = Field(default=None, description="Unit lowercase: cl, ml, l, g, kg")
-    unit_info: Optional[str] = Field(default=None, description="Raw unit string as printed: 6x33cl, 500g, 1L")
-    page_number: Optional[int] = Field(default=None, description="Page within batch, 1-indexed")
-    display_name: str = Field(description="Clean display label: Brand + product + variant + size. Title case. e.g., 'Oîkos Yoghurt Appel-Kaneel 4 x 115 g', 'Croky Chips Paprika 150 g'. Always include brand, variant/flavour, and size info. No promo text or pricing.")
-    display_mechanism: str = Field(description="Clear, standardized promo label with consistent capitalization. e.g., '1+1 Gratis', '-25%', '2e aan Halve Prijs', 'Prijsverlaging'.")
-    display_description: str = Field(description="One-line plain-language explanation of the deal (~80 chars max). e.g., 'Koop 2 pakken Danone yoghurt en krijg het 3e gratis', 'Alle Croky chips met 25% korting'.")
-    display_unit_price: Optional[str] = Field(default=None, description="Human-readable price-per-unit. e.g., '€0.84/L', '€12.50/kg', '€0.55/stuk'. null if not enough info to compute.")
-    display_savings_label: Optional[str] = Field(default=None, description="Pre-formatted savings text. e.g., '1 Gratis Item', 'Bespaar €0.80', 'Tot -25% Korting'. null if no meaningful savings description possible.")
+    # --- Display fields (all required except display_unit_price) ---
+    display_name: str = Field(description="Clean Title Case product label: Brand + product + variant + size. ALWAYS include size/quantity when visible (e.g., '4 x 125 g' not just '125 g'). For drinks, volume is CRITICAL (e.g., '33 cl', '6 x 25 cl', '1,5 L'). No promo text or pricing. Examples: 'Oîkos Yoghurt Appel-Kaneel 4 x 115 g', 'Coca-Cola Zero 1,5 L', 'Jupiler Pils 24 x 25 cl'.")
+    display_mechanism: str = Field(description="Standardized promo label. Title case, consistent formatting. For conditional percentage discounts, ALWAYS include the condition (e.g., '-25% Vanaf 2 Verpakkingen', NOT just '-25%'). Only use bare '-25%' if the discount applies to a single item with no minimum purchase. Examples: '1+1 Gratis', '-25%', '-25% Vanaf 2 Verpakkingen', '-20% Vanaf 3 Flessen', '-30% Vanaf 12 Blikken', '2e aan Halve Prijs', '2+1 Gratis', 'Prijsverlaging'.")
+    display_description: str = Field(description="Plain-language Dutch explanation of the deal (~80 chars max). Explain what the shopper needs to DO and what they GET. Examples: 'Koop 2 en krijg de 3e gratis', 'Nu €0.80 goedkoper per stuk'. Must be understandable without seeing the folder.")
+    display_savings_label: str = Field(description="Human-friendly savings text. Examples: '1 Gratis Item', 'Bespaar €3.00', 'Tot -25% Korting', '2e aan Halve Prijs'.")
+    display_unit_price: Optional[str] = Field(default=None, description="Price per standard unit computed from promo_price and size info visible on the page. Use Belgian units: €/L for drinks, €/kg for food, €/stuk for countable items, €/rol for paper products, €/stuk for tea bags/tabs/doekjes. For wine assume 75 cl, for beer blik assume 33 cl. Format: '€X.XX/unit'. null ONLY if no size info whatsoever.")
+
+    # --- Price reasoning (scratchpad — generated before prices to improve accuracy) ---
+    price_reasoning: str = Field(description="Show your work: what is the promo mechanism, what prices are visible on the page, and how you calculated promo_price and savings_amount step by step. This field is not displayed to users.")
+
+    # --- Pricing (all required, non-negative) ---
+    original_price: float = Field(ge=0, description="Regular price before promo, rounded to 2 decimal places. REQUIRED — skip item if not visible.")
+    promo_price: float = Field(ge=0, description="Price of ONE item/pack as shown on shelf. For ANY X+Y gratis deal (1+1, 2+1, 3+3, 4+1, 12+6, etc.): ALWAYS same as original_price. For -25%: original_price × 0.75. For X voor €Y: €Y ÷ X. Rounded to 2 decimal places.")
+    savings_amount: float = Field(ge=0, description="Total euro savings when completing the deal. For 1+1 @ €3: savings=3.00. For 2+1 @ €3: savings=3.00. For -25% @ €4: savings=1.00. For 2e halve prijs @ €3: savings=1.50. For 12+6 gratis @ €2.33: savings=13.98. Rounded to 2 decimal places.")
+
+    # --- Category ---
+    granular_category: str = Field(description="Category from the provided list, or 'Other' if nothing fits.")
+
+    # --- Page reference ---
+    page_number: int = Field(ge=1, description="Page number within the current PDF batch, 1-indexed.")
 
 
 class _PromoFolderSchema(PydanticBaseModel):
-    validity_start: Optional[str] = Field(default=None, description="YYYY-MM-DD")
-    validity_end: Optional[str] = Field(default=None, description="YYYY-MM-DD")
+    validity_start: Optional[date] = Field(default=None, description="Folder validity start date")
+    validity_end: Optional[date] = Field(default=None, description="Folder validity end date")
     items: list[_PromoItemSchema] = Field(description="All promotional items extracted")
 
 
@@ -159,11 +161,11 @@ def extract_batch(
                 config=types.GenerateContentConfig(
                     system_instruction=system_prompt,
                     max_output_tokens=MAX_OUTPUT_TOKENS,
-                    temperature=1.0,
+                    temperature=0.0,
                     thinking_config=types.ThinkingConfig(thinking_level="high"),
                     response_mime_type="application/json",
                     response_schema=_PromoFolderSchema,
-                    media_resolution=types.MediaResolution.MEDIA_RESOLUTION_MEDIUM,
+                    media_resolution=types.MediaResolution.MEDIA_RESOLUTION_HIGH,
                 ),
             )
         except Exception as e:
@@ -232,11 +234,11 @@ def extract_promos_from_pdf(pdf_data: bytes, config: Dict[str, Any]) -> dict:
     elapsed = time.time() - start_time
     logger.info(f"All batches complete in {elapsed:.1f}s — {len(all_items)} total items")
 
-    # Deduplicate by normalized_name (keep first occurrence)
+    # Deduplicate by display_name (keep first occurrence)
     seen = set()
     deduped = []
     for item in all_items:
-        name = (item.get("normalized_name") or "").lower().strip()
+        name = (item.get("display_name") or "").lower().strip()
         if name and name not in seen:
             seen.add(name)
             deduped.append(item)
@@ -261,88 +263,103 @@ def parse_promo_items(
     store_id: str,
     promo_folder_url: Optional[str] = None,
 ) -> list[PromoItem]:
-    """Parse Gemini structured output into validated PromoItem list."""
+    """Parse Gemini structured output into validated PromoItem list.
+
+    Enforces a strict quality gate: items missing any mandatory field
+    are dropped. Quality over coverage.
+    """
     validity_start = data.get("validity_start")
     validity_end = data.get("validity_end")
     if not validity_start or not validity_end:
         raise ValueError("Promo folder extraction is missing validity_start or validity_end")
+
     items = []
+    skipped = 0
 
     for raw in data.get("items", []):
+        display_name = (raw.get("display_name") or "").strip()
+        if not display_name:
+            logger.warning("Skipping item with empty display_name")
+            skipped += 1
+            continue
+
+        # Quality gate: all mandatory fields must be present
+        original_price = _parse_price(raw.get("original_price"))
+        promo_price = _parse_price(raw.get("promo_price"))
+        savings_amount = _parse_price(raw.get("savings_amount"))
+        display_mechanism = (raw.get("display_mechanism") or "").strip()
+        display_description = (raw.get("display_description") or "").strip()
+        display_savings_label = (raw.get("display_savings_label") or "").strip()
+
+        if original_price is None or original_price <= 0:
+            logger.warning(f"Skipping '{display_name}': missing or invalid original_price")
+            skipped += 1
+            continue
+        if promo_price is None or promo_price <= 0:
+            logger.warning(f"Skipping '{display_name}': missing or invalid promo_price")
+            skipped += 1
+            continue
+        if savings_amount is None or savings_amount <= 0:
+            logger.warning(f"Skipping '{display_name}': missing or invalid savings_amount")
+            skipped += 1
+            continue
+        if not display_mechanism:
+            logger.warning(f"Skipping '{display_name}': missing display_mechanism")
+            skipped += 1
+            continue
+        if not display_description:
+            logger.warning(f"Skipping '{display_name}': missing display_description")
+            skipped += 1
+            continue
+        if not display_savings_label:
+            logger.warning(f"Skipping '{display_name}': missing display_savings_label")
+            skipped += 1
+            continue
+
+        # Price validation
+        if promo_price > original_price:
+            logger.warning(
+                f"Skipping '{display_name}': promo_price ({promo_price}) > original_price ({original_price})"
+            )
+            skipped += 1
+            continue
+
+        # Round prices to 2 decimal places
+        original_price = round(original_price, 2)
+        promo_price = round(promo_price, 2)
+        savings_amount = round(savings_amount, 2)
+
+        # Category validation
         granular = raw.get("granular_category", "Other")
         if granular not in GRANULAR_CATEGORIES:
-            logger.warning(
-                f"Unknown category '{granular}' for '{raw.get('original_description')}', defaulting to 'Other'"
-            )
+            logger.warning(f"Unknown category '{granular}' for '{display_name}', defaulting to 'Other'")
             granular = "Other"
         parent = get_parent_category(granular)
 
-        normalized_name = (raw.get("normalized_name") or "").lower().strip()
-        if not normalized_name:
-            logger.warning(
-                f"Skipping item with empty normalized_name: {raw.get('original_description')}"
-            )
-            continue
-
-        normalized_brand = raw.get("normalized_brand")
-        if normalized_brand:
-            normalized_brand = normalized_brand.lower().strip()
-            if not normalized_brand:
-                normalized_brand = None
-
-        # Safety net: strip brand from normalized_name if the LLM still included it
-        if normalized_brand and normalized_name.startswith(normalized_brand):
-            stripped = normalized_name[len(normalized_brand):].strip(" -")
-            if stripped:
-                logger.debug(
-                    f"Stripped brand '{normalized_brand}' from normalized_name: "
-                    f"'{normalized_name}' → '{stripped}'"
-                )
-                normalized_name = stripped
-
-        packaging_type = raw.get("packaging_type")
-        if packaging_type:
-            packaging_type = packaging_type.lower().strip()
-            if not packaging_type:
-                packaging_type = None
-
-        content_unit = raw.get("content_unit")
-        if content_unit:
-            content_unit = content_unit.lower().strip()
-            if not content_unit:
-                content_unit = None
-
         items.append(
             PromoItem(
-                original_description=raw.get("original_description", ""),
-                normalized_name=normalized_name,
-                normalized_brand=normalized_brand,
-                is_premium=bool(raw.get("is_premium", False)),
-                packaging_type=packaging_type,
+                display_name=display_name,
+                display_mechanism=display_mechanism,
+                display_description=display_description,
+                display_savings_label=display_savings_label,
+                display_unit_price=(raw.get("display_unit_price") or "").strip() or None,
+                original_price=original_price,
+                promo_price=promo_price,
+                savings_amount=savings_amount,
                 granular_category=granular,
                 parent_category=parent,
-                original_price=_parse_price(raw.get("original_price")),
-                promo_price=_parse_price(raw.get("promo_price")),
-                promo_mechanism=(raw.get("promo_mechanism") or None),
-                pack_size=_parse_int(raw.get("pack_size")),
-                content_value=_parse_float(raw.get("content_value")),
-                content_unit=content_unit,
-                unit_info=raw.get("unit_info"),
                 validity_start=validity_start,
                 validity_end=validity_end,
                 source_retailer=store_id,
                 source_type="folder",
                 page_number=raw.get("page_number"),
                 promo_folder_url=promo_folder_url,
-                display_name=(raw.get("display_name") or "").strip(),
-                display_mechanism=(raw.get("display_mechanism") or "").strip(),
-                display_description=(raw.get("display_description") or "").strip(),
-                display_unit_price=(raw.get("display_unit_price") or "").strip() or None,
-                display_savings_label=(raw.get("display_savings_label") or "").strip() or None,
             )
         )
 
-    logger.info(f"Parsed {len(items)} valid promo items")
+    if skipped:
+        logger.info(f"Quality gate: skipped {skipped} items that didn't meet minimum requirements")
+    logger.info(f"Parsed {len(items)} high-quality promo items")
     return items
 
 
@@ -355,38 +372,17 @@ def _parse_price(val) -> Optional[float]:
         return None
 
 
-def _parse_float(val) -> Optional[float]:
-    if val is None:
-        return None
-    try:
-        return float(val)
-    except (ValueError, TypeError):
-        return None
-
-
-def _parse_int(val) -> Optional[int]:
-    if val is None:
-        return None
-    try:
-        return int(val)
-    except (ValueError, TypeError):
-        return None
-
-
 # ---------------------------------------------------------------------------
 # Embedding & Pinecone
 # ---------------------------------------------------------------------------
 def build_embedding_text(item: PromoItem) -> str:
     """Build the text for Pinecone integrated embedding.
 
-    Format: normalized_brand + normalized_name + [granular_category]
-    Size, packaging, and quantity are excluded so that different pack
-    formats of the same product produce identical embeddings.
+    Format: display_name (lowered) + [granular_category]
+    The display_name already contains brand, product, variant, and size,
+    providing rich context for semantic search.
     """
-    parts = []
-    if item.normalized_brand:
-        parts.append(item.normalized_brand)
-    parts.append(item.normalized_name)
+    parts = [item.display_name.lower()]
     if item.granular_category and item.granular_category != "Other":
         parts.append(f"[{item.granular_category}]")
     return " ".join(parts)
@@ -395,7 +391,7 @@ def build_embedding_text(item: PromoItem) -> str:
 def generate_record_id(item: PromoItem) -> str:
     """Generate a deterministic ID for a promo item."""
     key = (
-        f"{item.source_retailer}:{item.original_description}:"
+        f"{item.source_retailer}:{item.display_name}:"
         f"{item.validity_start}:{item.validity_end}"
     )
     return hashlib.sha256(key.encode()).hexdigest()[:16]
@@ -522,17 +518,25 @@ def upsert_to_pinecone(items: list[PromoItem], batch_size: int = 50, auto_delete
     for item in items:
         if not item.validity_start or not item.validity_end:
             raise ValueError(
-                f"Promo item '{item.normalized_name}' is missing validity window and cannot be indexed"
+                f"Promo item '{item.display_name}' is missing validity window and cannot be indexed"
             )
 
         record = {
             "_id": generate_record_id(item),
             "text": build_embedding_text(item),
-            "normalized_name": item.normalized_name,
-            "is_premium": item.is_premium,
-            "original_description": item.original_description,
+            # Display fields (all guaranteed by quality gate)
+            "display_name": item.display_name,
+            "display_mechanism": item.display_mechanism,
+            "display_description": item.display_description,
+            "display_savings_label": item.display_savings_label,
+            # Pricing (all guaranteed by quality gate)
+            "original_price": item.original_price,
+            "promo_price": item.promo_price,
+            "savings_amount": item.savings_amount,
+            # Category
             "granular_category": item.granular_category,
             "parent_category": item.parent_category,
+            # Metadata
             "validity_start": item.validity_start,
             "validity_end": item.validity_end,
             "validity_start_epoch": _date_to_epoch(item.validity_start),
@@ -540,38 +544,13 @@ def upsert_to_pinecone(items: list[PromoItem], batch_size: int = 50, auto_delete
             "source_retailer": item.source_retailer,
             "source_type": item.source_type,
         }
-        if item.normalized_brand:
-            record["normalized_brand"] = item.normalized_brand
-        if item.packaging_type:
-            record["packaging_type"] = item.packaging_type
-        if item.original_price is not None:
-            record["original_price"] = item.original_price
-        if item.promo_price is not None:
-            record["promo_price"] = item.promo_price
-        if item.promo_mechanism:
-            record["promo_mechanism"] = item.promo_mechanism
-        if item.pack_size is not None:
-            record["pack_size"] = item.pack_size
-        if item.content_value is not None:
-            record["content_value"] = item.content_value
-        if item.content_unit:
-            record["content_unit"] = item.content_unit
-        if item.unit_info:
-            record["unit_info"] = item.unit_info
+        # Optional fields
+        if item.display_unit_price:
+            record["display_unit_price"] = item.display_unit_price
         if item.page_number is not None:
             record["page_number"] = item.page_number
         if item.promo_folder_url:
             record["promo_folder_url"] = item.promo_folder_url
-        if item.display_name:
-            record["display_name"] = item.display_name
-        if item.display_mechanism:
-            record["display_mechanism"] = item.display_mechanism
-        if item.display_description:
-            record["display_description"] = item.display_description
-        if item.display_unit_price:
-            record["display_unit_price"] = item.display_unit_price
-        if item.display_savings_label:
-            record["display_savings_label"] = item.display_savings_label
         records.append(record)
 
     total_upserted = 0
@@ -648,16 +627,15 @@ def run_pipeline(
         return []
 
     # Step 3: Summary
-    logger.info(f"\nExtracted {len(items)} promo items")
+    logger.info(f"\nExtracted {len(items)} high-quality promo items")
     if items[0].validity_start:
         logger.info(f"Validity: {items[0].validity_start} to {items[0].validity_end}")
     logger.info(f"Categories: {len(set(i.granular_category for i in items))} unique")
-    logger.info(f"Brands: {len(set(i.normalized_brand for i in items if i.normalized_brand))} unique")
 
     for item in items[:5]:
         logger.info(
-            f"  - {item.normalized_name} | {item.granular_category} | "
-            f"promo: {item.promo_price} | {item.promo_mechanism or 'price reduction'}"
+            f"  - {item.display_name} | {item.display_mechanism} | "
+            f"€{item.promo_price:.2f} (save €{item.savings_amount:.2f})"
         )
     if len(items) > 5:
         logger.info(f"  ... and {len(items) - 5} more")

@@ -4,58 +4,79 @@ language: "nl_fr"
 bilingual_dedup: true
 
 validity_format: >
-  "Geldig van DD/MM tot DD/MM" or "Valable du DD/MM au DD/MM"
+  "Van woensdag DD maand t.e.m. dinsdag DD maand YYYY" or
+  "Du mercredi DD mois au mardi DD mois YYYY"
 
 store_brands:
   - name: "carrefour"
     description: "Standard Carrefour house brand"
   - name: "carrefour bio"
     description: "Organic house brand"
-  - name: "simpl"
-    description: "Budget/economy brand"
+  - name: "carrefour selection"
+    description: "Premium fresh items (cheese, meat, deli)"
   - name: "carrefour classic"
     description: "Mid-range house brand"
+  - name: "simpl"
+    description: "Budget/economy brand"
+  - name: "kwaliteitsketen carrefour"
+    description: "Quality chain label for traceable meat and fish"
 
 promo_mechanisms:
+  - label: "X+Y gratis"
+    aliases: ["X+Y gratuit"]
+    description: "Buy X get Y free — covers all volume deals (1+1, 2+1, 2+2, 3+1, 3+2, 3+3, 4+2, 5+1, 6+6, etc.). Output the exact numbers seen. promo_price = original_price (shelf price of one item, not the bundle total)."
+  - label: "2e aan halve prijs"
+    aliases: ["2e voor halve prijs", "2ème à moitié prix"]
+    description: "Second item at half price. promo_price = original_price."
+  - label: "2e voor -X%"
+    aliases: ["2e aan -X%", "2ème à -X%"]
+    description: "Second item at X% off (e.g., 2e voor -40%, 2e voor -50%). promo_price = original_price."
   - label: "Bonus Card"
     aliases: ["Carte Bonus"]
     description: "Carrefour loyalty card price — extract the card price as promo_price"
   - label: "Prix Choc"
     aliases: ["Stuntprijs"]
-    description: "Shock price / stunt deal"
-  - label: "1+1 gratis"
-    aliases: ["1+1 gratuit"]
-    description: "Buy one get one free. promo_price = price of one item"
-  - label: "-30%"
+    description: "Shock price / stunt deal — deep discount"
+  - label: "-X%"
     aliases: []
-    description: "Percentage discount (also -25%, -20%, etc.)"
+    description: "Flat percentage discount on the item (e.g. -20%, -25%, -30%, -40%, -50%)"
+  - label: "-X% bij aankoop van Y"
+    aliases: ["-X% à l'achat de Y"]
+    description: "Conditional percentage discount (e.g., -20% bij aankoop van 3 producten). Include the condition in display_mechanism."
   - label: "X voor €Y"
     aliases: ["X pour €Y"]
     description: "Multi-buy deal (set promo_price to per-unit price €Y/X)"
 
-normalized_name_examples:
-  - input: "Jupiler Pils 6x33cl"
-    output: "pils"
-  - input: "Carrefour Halfvolle Melk 1L"
-    output: "halfvolle melk"
-  - input: "Simpl Rijst 1kg"
-    output: "rijst"
+price_calculation_table: |
+  ### CARREFOUR BUNDLE PRICING (CRITICAL)
+  Carrefour Market folders often present X+Y Gratis deals as a pre-made bundle showing the
+  TOTAL quantity and TOTAL price for all items in the deal (including free ones).
 
-content_examples:
-  - input: "6x33cl"
-    pack_size: 6
-    content_value: 33
-    content_unit: "cl"
-  - input: "1kg"
-    pack_size: 1
-    content_value: 1
-    content_unit: "kg"
+  Example from folder: "Parodontax 4 x 75 ml — €15.40 — 2+2 GRATIS"
+  - "4 x 75 ml" is the DEAL TOTAL (2 to buy + 2 free = 4 tubes), NOT a 4-pack product
+  - €15.40 is the TOTAL PRICE for all 4 tubes at regular price (4 × €3.85)
+  - You MUST extract per-item pricing, not bundle pricing:
+    - display_name: "Parodontax Tandpasta 75 ml" (single unit size, NOT "4 x 75 ml")
+    - original_price: €3.85 (= €15.40 ÷ 4)
+    - promo_price: €3.85 (same as original_price for X+Y Gratis)
+    - savings_amount: €7.70 (= €3.85 × 2 free items)
 
-price_rules:
-  original_price: "nullable"
-  promo_price: "nullable"
+  **How to detect a bundle vs a real multi-pack product:**
+  - BUNDLE: the quantity shown (e.g., "4 x") equals the deal total (buy+free).
+    The price is high (total for all items). Strip the quantity from display_name and
+    divide the price by the total items to get per-item original_price.
+  - REAL MULTI-PACK: the quantity shown is the product's standard pack size (e.g.,
+    "DéliChoc 3 x 150 g" is a standard 3-pack). The price is for one multi-pack.
+    Keep the quantity in display_name and use the price as-is for original_price.
 
-normalized_name_guidance: null
-price_calculation_table: null
-extra_rules: []
-validation_checklist: []
+  When in doubt: check if dividing the shown price by the quantity gives a realistic
+  per-item price for that product category. If it does, it's a bundle.
+
+extra_rules:
+  - "Carrefour Market folders often show deal bundles with the TOTAL quantity and price for all items (including free ones). Always extract PER-ITEM pricing. See PRICE EXTRACTION section for details."
+  - "Volume deals frequently include the phrase 'naar keuze' (of your choice / mix & match). Strip 'naar keuze' from the product name, but ensure the promo mechanism is still recognized."
+  - "Spaar/stamp campaigns (e.g., 'Spaar voor Pyrex aan 1€', '+5 zegels') are NOT time-limited promos — SKIP them."
+  - "Loyalty point bonuses (e.g., '150 bonus Punten bij aankoop van 3') are NOT price discounts — SKIP them unless there is also a price reduction."
+validation_checklist:
+  - "For X+Y Gratis deals: original_price is the PER-ITEM shelf price, NOT the bundle total. promo_price = original_price."
+  - "display_name shows single unit size (e.g., '75 ml'), NOT the deal bundle quantity (e.g., NOT '4 x 75 ml')."

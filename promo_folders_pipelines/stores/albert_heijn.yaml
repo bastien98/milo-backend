@@ -38,44 +38,6 @@ promo_mechanisms:
     aliases: []
     description: "Buy 2 get 1 free"
 
-normalized_name_examples:
-  - input: "Jupiler Pils Blikken 24x25cl"
-    output: "pils"
-  - input: "AH Volle Melk 1L"
-    output: "volle melk"
-  - input: "AH Basic Spaghetti 500g"
-    output: "spaghetti"
-  - input: "Coca-Cola Zero 1,5L PET"
-    output: "cola zero"
-  - input: "AH Excellent Biologische Yoghurt 500g"
-    output: "biologische yoghurt"
-  - input: "Lay's Chips Paprika 250g"
-    output: "chips paprika"
-  - input: "Hertog Jan Pilsener Flessen 6x30cl"
-    output: "pilsener"
-
-content_examples:
-  - input: "24x25cl"
-    pack_size: 24
-    content_value: 25
-    content_unit: "cl"
-  - input: "1L"
-    pack_size: 1
-    content_value: 1
-    content_unit: "l"
-  - input: "500g"
-    pack_size: 1
-    content_value: 500
-    content_unit: "g"
-
-price_rules:
-  original_price: "mandatory"
-  promo_price: "mandatory"
-
-normalized_name_guidance: >
-  AH Bonus folders always show both original and Bonus price. Both MUST be extracted.
-  AH products often use Dutch-only descriptions. Keep the Dutch product name.
-
 price_calculation_table: |
   ### PRICE EXTRACTION (MANDATORY)
   AH Bonus folders always show BOTH prices. You MUST extract both:

@@ -4,7 +4,7 @@ language: "nl_fr"
 bilingual_dedup: true
 
 validity_format: >
-  "Geldig van DD/MM tot DD/MM" or "Valable du DD/MM au DD/MM"
+  "Geldig van DD/MM t.e.m. DD/MM" or "Valable du DD/MM au DD/MM"
 
 store_brands:
   - name: "boni"
@@ -13,25 +13,24 @@ store_brands:
     description: "Premium house brand"
   - name: "everyday"
     description: "Budget/economy brand"
+  - name: "boni plan't"
+    description: "Plant-based sub-brand (falafels, lentils, vegan gyros, seitan)"
   - name: "cru"
     description: "Premium delicatessen brand"
 
 promo_mechanisms:
-  - label: "Laagste Prijs"
-    aliases: ["Prix le plus bas"]
-    description: "Core promise — regular promos, extract normally"
-  - label: "1+1 gratis"
-    aliases: ["1+1 gratuit"]
-    description: "Buy one get one free. promo_price = price of one item"
+  - label: "X+Y gratis"
+    aliases: ["X+Y gratuit"]
+    description: "Buy X get Y free — covers all volume deals (e.g. 1+1, 2+1, 2+2, 3+1, 4+1, 5+1, 8+4, 9+3, 12+6, 18+6). Output the exact numbers seen (e.g. '8+4 gratis'). promo_price = original_price (shelf price of one item, not the effective price)."
   - label: "2e aan halve prijs"
     aliases: ["2ème à moitié prix"]
     description: "Second item at half price"
-  - label: "2+1 gratis"
-    aliases: ["2+1 gratuit"]
-    description: "Buy 2 get 1 free"
-  - label: "-30%"
+  - label: "-X%"
     aliases: []
-    description: "Percentage discount on the item (also -25%, -20%, etc.)"
+    description: "Flat percentage discount on the item (e.g. -20%, -25%, -30%, -40%)"
+  - label: "-X% vanaf Y verpakkingen"
+    aliases: ["-X% à partir de Y"]
+    description: "Tiered percentage discount conditional on buying a minimum quantity (e.g. '-15% vanaf 2 verpakkingen', '-25% vanaf 4 verpakkingen'). Output the exact percentages and quantities seen. Can appear as multiple tiers on the same product."
   - label: "€X.XX korting"
     aliases: ["€X.XX réduction"]
     description: "Fixed euro discount"
@@ -42,47 +41,8 @@ promo_mechanisms:
     aliases: []
     description: "Highlighted deal — extract as a normal promo with its mechanism"
 
-normalized_name_examples:
-  - input: "Jupiler Pils Blikken 24x25cl"
-    output: "pils"
-  - input: "Boni Volle Melk 1L"
-    output: "volle melk"
-  - input: "Coca-Cola Zero 1,5L PET"
-    output: "cola zero"
-  - input: "Lay's Chips Paprika 250g"
-    output: "chips paprika"
-  - input: "Danone Activia Aardbei 4x125g"
-    output: "yoghurt aardbei"
-  - input: "Leffe Bruin Flessen 6x33cl"
-    output: "bruin bier"
-  - input: "Everyday Spaghetti 500g"
-    output: "spaghetti"
-  - input: "Dove Douchegel Original 250ml"
-    output: "douchegel"
 
-content_examples:
-  - input: "6x33cl"
-    pack_size: 6
-    content_value: 33
-    content_unit: "cl"
-  - input: "500g"
-    pack_size: 1
-    content_value: 500
-    content_unit: "g"
-  - input: "1,5L"
-    pack_size: 1
-    content_value: 1.5
-    content_unit: "l"
-  - input: "24x25cl"
-    pack_size: 24
-    content_value: 25
-    content_unit: "cl"
-
-price_rules:
-  original_price: "nullable"
-  promo_price: "nullable"
-
-normalized_name_guidance: null
 price_calculation_table: null
-extra_rules: []
+extra_rules:
+  - "SKIP items whose only promotion is 'Rode Prijzen' or 'Laagste Prijs' — these are Colruyt's permanent price-match guarantees, not time-limited promotional deals. Only extract items with a real promotional mechanism (1+1, -25%, 2e halve prijs, etc.)."
 validation_checklist: []

@@ -51,26 +51,10 @@ GRANULAR CATEGORIES (use these EXACT names for granular_categories):
 
 Extract the following from the user's message:
 
-1. search_text: Format as "BRAND NORMALIZED_NAME (GRANULAR_CATEGORY)" - ALL LOWERCASE
-
-   NORMALIZATION RULES (aligned with receipt/promo indexing):
+1. search_text: Format as "brand product variant [GRANULAR_CATEGORY]" - ALL LOWERCASE
+   The promo index uses display_name (lowercased) as embedding text, which includes brand + product + variant + size.
    - Everything LOWERCASE
-   - Remove quantities (500g, 1L, 6x33cl) and packaging (PET, blik, fles)
-   - For normalized_name, remove manufacturer brands UNLESS brand IS the product identity:
-
-     REMOVE brand from normalized_name (brand + generic product):
-     - "Vandemoortele vinaigrette" → brand="vandemoortele", normalized_name="vinaigrette"
-     - "Philadelphia cheese" → brand="philadelphia", normalized_name="kaas"
-     - "Pampers diapers" → brand="pampers", normalized_name="luiers"
-     - "Devos Lemmens mayo" → brand="devos lemmens", normalized_name="mayonaise"
-     - "Lay's chips" → brand="lay's", normalized_name="chips paprika" (or just "chips")
-
-     KEEP brand IN normalized_name (brand IS the product, removing leaves too generic name):
-     - "Jupiler" → brand="jupiler", normalized_name="jupiler" (without = "bier pils", too generic)
-     - "Coca-Cola Zero" → brand="coca-cola", normalized_name="coca-cola zero"
-     - "Leffe Bruin" → brand="leffe", normalized_name="leffe bruin"
-     - "Nutella" → brand="nutella", normalized_name="nutella"
-
+   - Include brand name in the search text
    - Maintain original language (Dutch: kaas, bier, luiers / French: fromage, bière)
 
 2. product_keywords: Normalized product names in Dutch (lowercase): ["kaas", "bier", "luiers"]
@@ -88,16 +72,16 @@ Extract the following from the user's message:
 8. clarification_needed: Question to ask if is_vague=true
 
 EXAMPLES:
-- "Philadelphia" → search_text: "philadelphia kaas (Cheese Spread)", granular_categories: ["Cheese Spread", "Cheese Fresh", "Cheese Soft"]
-- "Jupiler" → search_text: "jupiler (Beer Pils)", granular_categories: ["Beer Pils", "Beer Special", "Beer Abbey Trappist"]
-- "Pampers" → search_text: "pampers luiers (Diapers)", granular_categories: ["Diapers", "Baby Care", "Baby Food"]
-- "coffee" → search_text: "koffie (Coffee Beans Ground)", granular_categories: ["Coffee Beans Ground", "Coffee Capsules", "Coffee Instant"]
-- "Côte d'Or" → search_text: "côte d'or chocolade (Chocolate Bars)", granular_categories: ["Chocolate Bars", "Chocolate Pralines", "Candy"]
-- "Coca-Cola" → search_text: "coca-cola (Cola)", granular_categories: ["Cola", "Lemonade & Soda", "Energy Drinks"]
+- "Philadelphia" → search_text: "philadelphia kaas [Cheese Spread]", granular_categories: ["Cheese Spread", "Cheese Fresh", "Cheese Soft"]
+- "Jupiler" → search_text: "jupiler pils [Beer Pils]", granular_categories: ["Beer Pils", "Beer Special", "Beer Abbey Trappist"]
+- "Pampers" → search_text: "pampers luiers [Diapers]", granular_categories: ["Diapers", "Baby Care", "Baby Food"]
+- "coffee" → search_text: "koffie [Coffee Beans Ground]", granular_categories: ["Coffee Beans Ground", "Coffee Capsules", "Coffee Instant"]
+- "Côte d'Or" → search_text: "côte d'or chocolade [Chocolate Bars]", granular_categories: ["Chocolate Bars", "Chocolate Pralines", "Candy"]
+- "Coca-Cola" → search_text: "coca-cola [Cola]", granular_categories: ["Cola", "Lemonade & Soda", "Energy Drinks"]
 
 RULES:
 - search_text MUST be ALL LOWERCASE
-- Format: "brand normalized_name (granular_category)" or "brand (granular_category)" if brand IS product
+- Format: "brand product [granular_category]"
 - ALWAYS provide exactly 3 granular_categories using EXACT names from the list
 - Return ONLY valid JSON
 
@@ -444,17 +428,27 @@ class PromoChatService:
                 savings = round(original_price - promo_price, 2)
                 discount_percent = round((savings / original_price) * 100, 1)
 
+            savings_amount = None
+            if fields.get("savings_amount"):
+                try:
+                    savings_amount = float(fields["savings_amount"])
+                except (ValueError, TypeError):
+                    pass
+
+            if savings_amount and original_price and original_price > 0:
+                discount_percent = round((savings_amount / original_price) * 100, 1)
+
             return PromoResult(
-                product_name=fields.get("normalized_name", "Unknown"),
-                original_description=fields.get("original_description", fields.get("normalized_name", "")),
-                brand=fields.get("brand"),
+                product_name=fields.get("display_name", "Unknown"),
+                original_description=fields.get("display_description", fields.get("display_name", "")),
+                brand=None,
                 category=fields.get("granular_category", fields.get("parent_category", "Other")),
                 original_price=original_price,
                 promo_price=promo_price,
-                savings=savings,
+                savings=savings_amount or savings,
                 discount_percent=discount_percent,
-                promo_mechanism=fields.get("promo_mechanism"),
-                unit_info=fields.get("unit_info"),
+                promo_mechanism=fields.get("display_mechanism"),
+                unit_info=fields.get("display_unit_price"),
                 retailer=fields.get("source_retailer", "Unknown"),
                 validity_start=fields.get("validity_start"),
                 validity_end=fields.get("validity_end"),

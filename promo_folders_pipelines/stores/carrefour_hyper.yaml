@@ -45,37 +45,6 @@ promo_mechanisms:
     aliases: []
     description: "Carrefour Extra promotional highlight"
 
-normalized_name_examples:
-  - input: "Jupiler Pils Blikken 24x25cl"
-    output: "pils"
-  - input: "Carrefour Bio Volle Melk 1L"
-    output: "volle melk"
-  - input: "Simpl Spaghetti 500g"
-    output: "spaghetti"
-  - input: "Coca-Cola Zero 1,5L PET"
-    output: "cola zero"
-  - input: "Lay's Chips Paprika 250g"
-    output: "chips paprika"
-
-content_examples:
-  - input: "24x25cl"
-    pack_size: 24
-    content_value: 25
-    content_unit: "cl"
-  - input: "500g"
-    pack_size: 1
-    content_value: 500
-    content_unit: "g"
-  - input: "1,5L"
-    pack_size: 1
-    content_value: 1.5
-    content_unit: "l"
-
-price_rules:
-  original_price: "nullable"
-  promo_price: "nullable"
-
-normalized_name_guidance: null
 price_calculation_table: null
 extra_rules: []
 validation_checklist: []

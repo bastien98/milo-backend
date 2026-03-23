@@ -4,7 +4,6 @@ from datetime import date as date_type
 from typing import TYPE_CHECKING, Any, Optional
 
 from sqlalchemy import (
-    CheckConstraint,
     Date,
     DateTime,
     Integer,
@@ -24,8 +23,8 @@ if TYPE_CHECKING:
     from app.models.promo_report_event import PromoReportEvent
 
 
-class PromoWeeklyCandidates(Base):
-    __tablename__ = "promo_weekly_candidates"
+class PromoCandidates(Base):
+    __tablename__ = "promo_candidates"
 
     id: Mapped[str] = mapped_column(
         String, primary_key=True, default=lambda: str(uuid.uuid4())
@@ -36,8 +35,6 @@ class PromoWeeklyCandidates(Base):
         nullable=False,
         index=True,
     )
-    iso_year: Mapped[int] = mapped_column(Integer, nullable=False)
-    iso_week: Mapped[int] = mapped_column(Integer, nullable=False)
     report_date: Mapped[date_type] = mapped_column(Date, nullable=False)
     candidates_json: Mapped[Any] = mapped_column(JSONB, nullable=False)
     closing_nudge: Mapped[str] = mapped_column(Text, nullable=False, default="")
@@ -56,19 +53,10 @@ class PromoWeeklyCandidates(Base):
     )
 
     __table_args__ = (
-        CheckConstraint(
-            "iso_week >= 1 AND iso_week <= 53",
-            name="ck_promo_weekly_candidates_iso_week_range",
-        ),
-        UniqueConstraint(
-            "user_id",
-            "iso_year",
-            "iso_week",
-            name="uq_promo_weekly_candidates_user_week",
-        ),
+        UniqueConstraint("user_id", name="uq_promo_candidates_user_id"),
     )
 
-    user: Mapped["User"] = relationship("User", back_populates="promo_weekly_candidates")
+    user: Mapped["User"] = relationship("User", back_populates="promo_candidates")
     events: Mapped[list["PromoReportEvent"]] = relationship(
         "PromoReportEvent",
         back_populates="candidates",

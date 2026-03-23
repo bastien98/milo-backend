@@ -18,7 +18,7 @@ from app.core.promo_reports import (
 )
 from app.db.repositories.enriched_profile_repo import EnrichedProfileRepository
 from app.db.repositories.promo_report_event_repo import PromoReportEventRepository
-from app.db.repositories.promo_weekly_candidates_repo import PromoWeeklyCandidatesRepository
+from app.db.repositories.promo_candidates_repo import PromoCandidatesRepository
 from app.models.enums import PromoReportEventType, PromoReportStatus
 from app.models.user import User
 from app.models.user_profile import UserProfile
@@ -34,7 +34,7 @@ class PromoReportService:
     def __init__(self, db: AsyncSession):
         self.db = db
         self.enriched_repo = EnrichedProfileRepository(db)
-        self.candidates_repo = PromoWeeklyCandidatesRepository(db)
+        self.candidates_repo = PromoCandidatesRepository(db)
         self.event_repo = PromoReportEventRepository(db)
 
     async def get_current_report_response(
@@ -55,12 +55,8 @@ class PromoReportService:
                 report_date=report_date,
             )
 
-        # Fetch candidates for current week
-        candidates_row = await self.candidates_repo.get_by_user_and_week(
-            user_id,
-            promo_week["iso_year"],
-            promo_week["iso_week"],
-        )
+        # Fetch candidates for user
+        candidates_row = await self.candidates_repo.get_by_user(user_id)
         if candidates_row is None:
             return build_empty_promo_response(
                 report_status=PromoReportStatus.NO_REPORT_AVAILABLE,
@@ -96,8 +92,6 @@ class PromoReportService:
         await self.event_repo.create(
             report_id=candidates.id,
             user_id=user_id,
-            iso_year=candidates.iso_year,
-            iso_week=candidates.iso_week,
             event_type=event_type,
             item_key=item_key,
             store_name=store_name,
@@ -142,8 +136,7 @@ class PromoReportService:
                 report_date=candidates_row.report_date,
             )
 
-        # 2. Score and rank — relevance-first: personal relevance drives ranking,
-        # savings is a small tiebreaker so pricing availability doesn't determine top picks
+        # 2. Score and rank — relevance-first, savings as tiebreaker
         for item in items:
             relevance = item.get("relevance_score") or 0.6
             urgency = min(item.get("restock_urgency") or 0.5, 3.0)
@@ -154,40 +147,9 @@ class PromoReportService:
 
         items.sort(key=lambda x: x.get("_score", 0), reverse=True)
 
-        # 3. Top 3 = top_picks, rest = store items
-        top_pick_items = items[:3]
-        remaining_items = items[3:]
-
-        # 4. Build top_picks
-        top_picks = []
-        for item in top_pick_items:
-            top_picks.append({
-                "item_key": item.get("item_key"),
-                "brand": item.get("brand", ""),
-                "product_name": item.get("product_name", ""),
-                "emoji": item.get("emoji", "🛒"),
-                "store": item.get("store_name", ""),
-                "original_price": item.get("original_price", 0),
-                "promo_price": item.get("promo_price", 0),
-                "savings": item.get("savings", 0),
-                "discount_percentage": item.get("discount_percentage", 0),
-                "mechanism": item.get("mechanism", ""),
-                "validity_start": item.get("validity_start", ""),
-                "validity_end": item.get("validity_end", ""),
-                "reason": item.get("reason", ""),
-                "page_number": item.get("page_number"),
-                "promo_folder_url": item.get("promo_folder_url"),
-                "display_name": item.get("display_name", ""),
-                "display_mechanism": item.get("display_mechanism", ""),
-                "display_description": item.get("display_description", ""),
-                "display_unit_price": item.get("display_unit_price"),
-                "display_savings_label": item.get("display_savings_label"),
-            })
-
-        # 5. Group remaining by store
-        store_tips = candidates_row.store_tips_json or {}
+        # 3. Group all items by store
         stores_dict: dict[str, list[dict]] = {}
-        for item in remaining_items:
+        for item in items:
             store_name = item.get("store_name", "Unknown")
             if store_name not in stores_dict:
                 stores_dict[store_name] = []
@@ -195,21 +157,20 @@ class PromoReportService:
                 "item_key": item.get("item_key"),
                 "brand": item.get("brand", ""),
                 "product_name": item.get("product_name", ""),
-                "emoji": item.get("emoji", "🛒"),
                 "original_price": item.get("original_price", 0),
                 "promo_price": item.get("promo_price", 0),
-                "savings": item.get("savings", 0),
+                "savings": item.get("savings_amount") or item.get("savings", 0),
                 "discount_percentage": item.get("discount_percentage", 0),
                 "mechanism": item.get("mechanism", ""),
                 "validity_start": item.get("validity_start", ""),
                 "validity_end": item.get("validity_end", ""),
-                "page_number": item.get("page_number"),
                 "promo_folder_url": item.get("promo_folder_url"),
                 "display_name": item.get("display_name", ""),
                 "display_mechanism": item.get("display_mechanism", ""),
                 "display_description": item.get("display_description", ""),
                 "display_unit_price": item.get("display_unit_price"),
                 "display_savings_label": item.get("display_savings_label"),
+                "savings_amount": item.get("savings_amount", 0),
             })
 
         stores = []
@@ -219,37 +180,22 @@ class PromoReportService:
                 (i.get("validity_end", "") for i in store_items),
                 default="",
             )
-            store_color = store_items[0].get("store_color", "⬜") if store_items else "⬜"
-            # Get store_color from the first candidate that has this store
-            for item in items:
-                if item.get("store_name") == store_name:
-                    store_color = item.get("store_color", "⬜")
-                    break
             stores.append({
                 "store_name": store_name,
-                "store_color": store_color,
                 "total_savings": total_savings,
                 "validity_end": validity_end,
                 "items": store_items,
-                "tip": store_tips.get(store_name, ""),
             })
 
         # Sort stores by total_savings descending
         stores.sort(key=lambda s: s["total_savings"], reverse=True)
 
-        # 6. Select smart_switch from pre-computed candidates
-        smart_switch = self._select_smart_switch(
-            candidates_row.smart_switch_json,
-            preferred_stores,
-        )
-
-        # 7. Compute summary
+        # 6. Compute summary
         all_savings = [i.get("savings", 0) for i in items]
         total_savings = round(sum(all_savings), 2)
         deal_count = len(items)
 
         stores_breakdown = []
-        # Include top_picks in store breakdown
         store_items_count: dict[str, dict] = {}
         for item in items:
             sn = item.get("store_name", "Unknown")
@@ -275,7 +221,6 @@ class PromoReportService:
             "best_value_store": best_value["store"] if best_value else None,
             "best_value_savings": best_value["savings"] if best_value else 0,
             "best_value_items": best_value["items"] if best_value else 0,
-            "closing_nudge": candidates_row.closing_nudge or "",
         }
 
         return {
@@ -286,35 +231,6 @@ class PromoReportService:
             "weekly_savings": total_savings,
             "deal_count": deal_count,
             "promo_week": promo_week,
-            "top_picks": top_picks,
             "stores": stores,
-            "smart_switch": smart_switch,
             "summary": summary,
         }
-
-    @staticmethod
-    def _select_smart_switch(
-        smart_switch_json: Optional[list],
-        preferred_stores: list[str],
-    ) -> Optional[dict]:
-        """Select the best smart_switch from pre-computed candidates, filtered by visible stores."""
-        if not smart_switch_json:
-            return None
-
-        store_set = {s.lower() for s in preferred_stores} if preferred_stores else set()
-
-        for ss in smart_switch_json:
-            ss_store = (ss.get("store_name") or "").lower()
-            if store_set and ss_store not in store_set:
-                continue
-            return {
-                "from_brand": ss.get("from_brand", ""),
-                "to_brand": ss.get("to_brand", ""),
-                "emoji": ss.get("emoji", "🛒"),
-                "product_type": ss.get("product_type", ""),
-                "savings": ss.get("savings", 0),
-                "mechanism": ss.get("mechanism", ""),
-                "reason": ss.get("reason", ""),
-            }
-
-        return None

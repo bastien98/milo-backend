@@ -4,32 +4,28 @@ from typing import Any, Optional
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models.promo_weekly_candidates import PromoWeeklyCandidates
+from app.models.promo_candidates import PromoCandidates
 
 
-class PromoWeeklyCandidatesRepository:
+class PromoCandidatesRepository:
     def __init__(self, db: AsyncSession):
         self.db = db
 
-    async def get_by_user_and_week(
-        self, user_id: str, iso_year: int, iso_week: int
-    ) -> Optional[PromoWeeklyCandidates]:
+    async def get_by_user(self, user_id: str) -> Optional[PromoCandidates]:
         result = await self.db.execute(
-            select(PromoWeeklyCandidates).where(
-                PromoWeeklyCandidates.user_id == user_id,
-                PromoWeeklyCandidates.iso_year == iso_year,
-                PromoWeeklyCandidates.iso_week == iso_week,
+            select(PromoCandidates).where(
+                PromoCandidates.user_id == user_id,
             )
         )
         return result.scalar_one_or_none()
 
     async def get_by_id_for_user(
         self, candidates_id: str, user_id: str
-    ) -> Optional[PromoWeeklyCandidates]:
+    ) -> Optional[PromoCandidates]:
         result = await self.db.execute(
-            select(PromoWeeklyCandidates).where(
-                PromoWeeklyCandidates.id == candidates_id,
-                PromoWeeklyCandidates.user_id == user_id,
+            select(PromoCandidates).where(
+                PromoCandidates.id == candidates_id,
+                PromoCandidates.user_id == user_id,
             )
         )
         return result.scalar_one_or_none()
@@ -39,8 +35,6 @@ class PromoWeeklyCandidatesRepository:
         *,
         candidates_id: str,
         user_id: str,
-        iso_year: int,
-        iso_week: int,
         report_date: date,
         generated_at: datetime,
         candidates_json: Any,
@@ -49,16 +43,14 @@ class PromoWeeklyCandidatesRepository:
         store_tips_json: Optional[Any],
         interest_item_count: int,
         total_matches: int,
-        existing: Optional[PromoWeeklyCandidates] = None,
-    ) -> PromoWeeklyCandidates:
+        existing: Optional[PromoCandidates] = None,
+    ) -> PromoCandidates:
         if existing is None:
-            existing = await self.get_by_user_and_week(user_id, iso_year, iso_week)
+            existing = await self.get_by_user(user_id)
         if existing is None:
-            candidates = PromoWeeklyCandidates(
+            candidates = PromoCandidates(
                 id=candidates_id,
                 user_id=user_id,
-                iso_year=iso_year,
-                iso_week=iso_week,
                 report_date=report_date,
                 generated_at=generated_at,
                 candidates_json=candidates_json,

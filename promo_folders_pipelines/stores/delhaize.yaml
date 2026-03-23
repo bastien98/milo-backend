@@ -33,37 +33,6 @@ promo_mechanisms:
     aliases: ["X pour €Y"]
     description: "Multi-buy deal (set promo_price to per-unit price €Y/X)"
 
-normalized_name_examples:
-  - input: "Jupiler Pils Blikken 24x25cl"
-    output: "pils"
-  - input: "Delhaize Verse Soep Tomaat 1L"
-    output: "verse soep tomaat"
-  - input: "365 Spaghetti 500g"
-    output: "spaghetti"
-  - input: "Coca-Cola Zero 1,5L PET"
-    output: "cola zero"
-  - input: "Danone Activia Vanille 4x125g"
-    output: "yoghurt vanille"
-
-content_examples:
-  - input: "24x25cl"
-    pack_size: 24
-    content_value: 25
-    content_unit: "cl"
-  - input: "1L"
-    pack_size: 1
-    content_value: 1
-    content_unit: "l"
-  - input: "4x125g"
-    pack_size: 4
-    content_value: 125
-    content_unit: "g"
-
-price_rules:
-  original_price: "nullable"
-  promo_price: "nullable"
-
-normalized_name_guidance: null
 price_calculation_table: null
 extra_rules: []
 validation_checklist: []

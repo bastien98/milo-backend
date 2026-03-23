@@ -18,6 +18,16 @@ endif
 
 export RAILWAY_TOKEN
 
+# Database URLs per environment (asyncpg driver)
+ifeq ($(ENV),production)
+  DATABASE_URL = postgresql+asyncpg://postgres:hrGaUOZtYDDNPUDPmXlzpnVAReIgxlkx@switchback.proxy.rlwy.net:45896/railway
+else
+  DATABASE_URL = postgresql+asyncpg://postgres:tBKODGAPzROEyTeTYDKVjtbdhBhEwkgc@shortline.proxy.rlwy.net:33385/railway
+endif
+
+# Python interpreter (use backend venv)
+PYTHON = .venv/bin/python3
+
 .PHONY: help
 help:
 	@echo "Railway Deployment Commands:"
@@ -26,6 +36,10 @@ help:
 	@echo "  make status [ENV=production|non-prod]     - Show project status"
 	@echo "  make variables [ENV=production|non-prod]  - List variables for specified environment"
 	@echo "  make domain [ENV=production|non-prod]     - Get domain for specified environment"
+	@echo ""
+	@echo "Script Commands:"
+	@echo "  make rebuild-profiles [ENV=production|non-prod]    - Rebuild enriched user profiles"
+	@echo "  make generate-promos [ENV=production|non-prod]     - Generate promo candidates"
 	@echo ""
 	@echo "Deploy examples:"
 	@echo "  make deploy                # Deploy to non-prod"
@@ -56,3 +70,15 @@ domain:
 variables:
 	@echo "Listing variables for $(RAILWAY_ENV) environment..."
 	@railway variable --service $(SERVICE) --environment $(RAILWAY_ENV)
+
+# --- Scripts ---
+
+.PHONY: rebuild-profiles
+rebuild-profiles:
+	@echo "Rebuilding enriched profiles on $(RAILWAY_ENV)..."
+	DATABASE_URL=$(DATABASE_URL) $(PYTHON) -m scripts.rebuild_profiles
+
+.PHONY: generate-promos
+generate-promos:
+	@echo "Generating promo candidates on $(RAILWAY_ENV)..."
+	DATABASE_URL=$(DATABASE_URL) $(PYTHON) -m scripts.promo_reports.generate_promo_candidates

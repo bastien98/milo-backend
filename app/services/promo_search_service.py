@@ -53,22 +53,20 @@ that maximize recall against a vector database of grocery promotions.
 </role>
 
 <context>
-The promo index stores items with a text field in this exact format:
-  normalized_brand normalized_name [granular_category]
+The promo index stores items with a text field in this format:
+  display_name (lowercased) [granular_category]
 Examples of real indexed text:
-  "côte d'or chocolade [Chocolate Bars]"
-  "pampers luiers [Diapers]"
-  "coca-cola zero [Cola]"
-  "danio vanille [Yoghurt Natural]"
-  "jupiler [Beer Pils]"
+  "côte d'or chocolade tabletten 200 g [Chocolate Bars]"
+  "pampers luiers premium protection maat 4 [Diapers]"
+  "coca-cola zero 1,5 l [Cola]"
+  "danone activia vanille 4 x 125 g [Yoghurt Natural]"
+  "jupiler pils 24 x 25 cl [Beer Pils]"
 </context>
 
 <task>
 Given a user's search query, produce:
 1. search_text — matching the index format above. ALL LOWERCASE.
-   - Strip quantities (500g, 6x33cl) and packaging (PET, blik, fles, doos)
-   - Separate brand from product name UNLESS brand IS the product
-     (e.g. "Jupiler" stays as-is because removing it leaves "bier pils" which is too generic)
+   - Include brand and product name
    - Translate to Dutch if user writes in English/French (the index is primarily Dutch)
    - Append your FIRST granular_category guess in [square brackets]
      IMPORTANT: the category in brackets MUST be one of the EXACT names from the <categories> list below. Do NOT invent category names.
@@ -275,7 +273,7 @@ class PromoSearchService:
         try:
             original_price = None
             promo_price = None
-            savings = None
+            savings_amount = None
             discount_percent = None
 
             if fields.get("original_price"):
@@ -290,22 +288,27 @@ class PromoSearchService:
                 except (ValueError, TypeError):
                     pass
 
-            if original_price and promo_price and original_price > 0:
-                savings = round(original_price - promo_price, 2)
-                discount_percent = round((savings / original_price) * 100, 1)
+            if fields.get("savings_amount"):
+                try:
+                    savings_amount = float(fields["savings_amount"])
+                except (ValueError, TypeError):
+                    pass
+
+            if savings_amount and original_price and original_price > 0:
+                discount_percent = round((savings_amount / original_price) * 100, 1)
 
             return PromoSearchResult(
-                product_name=fields.get("normalized_name", "Unknown"),
-                brand=fields.get("normalized_brand"),
+                product_name=fields.get("display_name", "Unknown"),
+                brand=None,
                 category=fields.get(
                     "granular_category", fields.get("parent_category", "Other")
                 ),
                 store=fields.get("source_retailer", "Unknown"),
                 original_price=original_price,
                 promo_price=promo_price,
-                savings=savings,
+                savings=savings_amount,
                 discount_percent=discount_percent,
-                mechanism=fields.get("promo_mechanism"),
+                mechanism=fields.get("display_mechanism"),
                 validity_start=fields.get("validity_start"),
                 validity_end=fields.get("validity_end"),
                 display_name=fields.get("display_name"),
@@ -313,7 +316,7 @@ class PromoSearchService:
                 display_description=fields.get("display_description"),
                 display_unit_price=fields.get("display_unit_price"),
                 relevance_score=round(score, 3),
-                page_number=fields.get("page_number"),
+                page_number=None,
                 promo_folder_url=fields.get("promo_folder_url"),
             )
         except Exception as e:

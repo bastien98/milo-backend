@@ -2,7 +2,7 @@ import uuid
 from datetime import datetime
 from typing import TYPE_CHECKING, Any, Optional
 
-from sqlalchemy import CheckConstraint, DateTime, Enum as SAEnum, ForeignKey, Integer, String
+from sqlalchemy import DateTime, Enum as SAEnum, ForeignKey, String
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from sqlalchemy.sql import func
@@ -12,7 +12,7 @@ from app.models.enums import PromoReportEventType
 
 if TYPE_CHECKING:
     from app.models.user import User
-    from app.models.promo_weekly_candidates import PromoWeeklyCandidates
+    from app.models.promo_candidates import PromoCandidates
 
 
 class PromoReportEvent(Base):
@@ -22,13 +22,11 @@ class PromoReportEvent(Base):
         String, primary_key=True, default=lambda: str(uuid.uuid4())
     )
     report_id: Mapped[str] = mapped_column(
-        String, ForeignKey("promo_weekly_candidates.id", ondelete="CASCADE"), nullable=False, index=True
+        String, ForeignKey("promo_candidates.id", ondelete="CASCADE"), nullable=False, index=True
     )
     user_id: Mapped[str] = mapped_column(
         String, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True
     )
-    iso_year: Mapped[int] = mapped_column(Integer, nullable=False)
-    iso_week: Mapped[int] = mapped_column(Integer, nullable=False)
     event_type: Mapped[PromoReportEventType] = mapped_column(
         SAEnum(PromoReportEventType, native_enum=False),
         nullable=False,
@@ -40,9 +38,5 @@ class PromoReportEvent(Base):
         DateTime(timezone=True), nullable=False, server_default=func.now(), index=True
     )
 
-    __table_args__ = (
-        CheckConstraint("iso_week >= 1 AND iso_week <= 53", name="ck_promo_report_events_iso_week_range"),
-    )
-
-    candidates: Mapped["PromoWeeklyCandidates"] = relationship("PromoWeeklyCandidates", back_populates="events")
+    candidates: Mapped["PromoCandidates"] = relationship("PromoCandidates", back_populates="events")
     user: Mapped["User"] = relationship("User", back_populates="promo_report_events")

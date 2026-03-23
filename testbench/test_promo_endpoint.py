@@ -36,7 +36,7 @@ async def main():
 
     async with async_session_maker() as db:
         service = PromoCandidateGenerationService(db)
-        result = await service.build_weekly_candidates(USER_ID)
+        result = await service.build_candidates(USER_ID)
 
     if result is None:
         print("No candidates generated (no interest items or no matches).")

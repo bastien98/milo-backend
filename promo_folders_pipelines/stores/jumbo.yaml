@@ -27,35 +27,6 @@ promo_mechanisms:
     aliases: []
     description: "Multi-buy deal (set promo_price to per-unit price €Y/X)"
 
-normalized_name_examples:
-  - input: "Jupiler Pils Blikken 6x33cl"
-    output: "pils"
-  - input: "Jumbo Volle Melk 1L"
-    output: "volle melk"
-  - input: "Coca-Cola Zero 1,5L PET"
-    output: "cola zero"
-  - input: "Jumbo Kaas Jong Belegen 400g"
-    output: "kaas jong belegen"
-
-content_examples:
-  - input: "6x33cl"
-    pack_size: 6
-    content_value: 33
-    content_unit: "cl"
-  - input: "1L"
-    pack_size: 1
-    content_value: 1
-    content_unit: "l"
-  - input: "400g"
-    pack_size: 1
-    content_value: 400
-    content_unit: "g"
-
-price_rules:
-  original_price: "nullable"
-  promo_price: "nullable"
-
-normalized_name_guidance: null
 price_calculation_table: null
 extra_rules:
   - "Jumbo folders are Dutch only"
