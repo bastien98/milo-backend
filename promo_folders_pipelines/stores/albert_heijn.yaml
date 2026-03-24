@@ -22,23 +22,45 @@ promo_mechanisms:
   - label: "Bonus"
     aliases: []
     description: "Weekly Bonus deal — the main AH promo mechanism"
-  - label: "1+1 gratis"
+  - label: "X+Y gratis"
     aliases: []
-    description: "Buy one get one free. promo_price = price of one item"
+    description: "Buy X get Y free — covers all volume deals (1+1, 2+1, 1+2, 1+3, 2+3, 2+4, etc.). Output the exact numbers seen. promo_price = original_price (shelf price of one item, not the bundle total)."
   - label: "2e halve prijs"
+    aliases: ["2e aan halve prijs"]
+    description: "Second item at half price. promo_price = original_price."
+  - label: "X% korting"
     aliases: []
-    description: "Second item at half price"
-  - label: "25% korting"
-    aliases: []
-    description: "Percentage discount (also 30%, 35%, 40%, etc.)"
+    description: "Percentage discount (e.g., 25%, 30%, 40% korting). Extract the discounted price as promo_price."
   - label: "X voor €Y"
     aliases: []
     description: "Multi-buy deal (set promo_price to per-unit price €Y/X)"
-  - label: "2+1 gratis"
-    aliases: []
-    description: "Buy 2 get 1 free"
 
 price_calculation_table: |
+  ### AH BUNDLE PRICING (CRITICAL)
+  Albert Heijn Bonus folders often present X+Y Gratis deals as a pre-made bundle showing the
+  TOTAL quantity and TOTAL price for all items in the deal (including free ones).
+
+  Example 1: "Andrélon Shampoo 2 x 400 ml — €12.98 — 1+1 GRATIS"
+  - "2 x 400 ml" is the DEAL TOTAL (1 to buy + 1 free = 2 bottles), NOT a twin-pack product.
+  - €12.98 is the TOTAL PRICE for all 2 bottles at regular price (2 × €6.49).
+  - You MUST extract per-item pricing, not bundle pricing:
+    - display_name: "Andrélon Shampoo 400 ml" (single unit size, NOT "2 x 400 ml")
+    - original_price: €6.49 (= €12.98 ÷ 2)
+    - promo_price: €6.49 (same as original_price for X+Y Gratis)
+    - savings_amount: €6.49 (= €6.49 × 1 free item)
+
+  Example 2: "Prodent Tandpasta 5 x 75 ml — €11.45 — 2+3 GRATIS"
+  - "5 x 75 ml" is the deal total (2 buy + 3 free = 5 items).
+  - €11.45 is the TOTAL for 5 items.
+  - original_price = €2.29 (€11.45 ÷ 5)
+  - promo_price = €2.29
+  - savings_amount = €6.87 (€2.29 × 3 free items)
+
+  **How to detect a bundle vs a real multi-pack product:**
+  - BUNDLE: the quantity shown (e.g., "2 x", "5 x", "4 stuks") equals the deal total (buy+free).
+    The price is high (total for all items). Strip the quantity from display_name and
+    divide the price by the total items to get per-item original_price.
+
   ### PRICE EXTRACTION (MANDATORY)
   AH Bonus folders always show BOTH prices. You MUST extract both:
   - original_price: the regular/doorstreept price (crossed out)
@@ -50,5 +72,9 @@ extra_rules:
   - "AH folders are Dutch only — no bilingual deduplication needed"
   - "AH Bonus items always show both original and Bonus price — extract both"
   - "AH uses 'Bonus' as the primary mechanism label"
+  - "AH bundle deals often list total quantities like '4 stuks' or '5 x 235 ml'. Always extract PER-ITEM pricing. See PRICE EXTRACTION section for details."
+  - "Recognize 'wasbeurten' and 'pakje' as valid units of measurement."
+  - "Categorization note: Ensure specific seasonal items (e.g., Libeert Paashaas) are categorized correctly (e.g., Chocolate) and non-grocery clothing (e.g., Sloggi) are handled appropriately."
 validation_checklist:
   - "Both original_price and promo_price are extracted (MANDATORY for AH)"
+  - "For X+Y Gratis deals, bundle prices have been divided by the total deal quantity to extract single-unit pricing."

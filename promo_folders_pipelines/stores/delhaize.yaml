@@ -4,35 +4,77 @@ language: "nl_fr"
 bilingual_dedup: true
 
 validity_format: >
-  "Geldig van donderdag DD/MM tot woensdag DD/MM" or
-  "Valable du jeudi DD/MM au mercredi DD/MM"
+  "donderdag DD/MM -> woensdag DD/MM/YYYY" or
+  "jeudi DD/MM -> mercredi DD/MM/YYYY"
 
 store_brands:
   - name: "delhaize"
     description: "Standard Delhaize house brand"
   - name: "365"
     description: "Budget/economy brand (cheapest tier)"
+  - name: "taste of inspirations"
+    description: "Premium culinary house brand"
+  - name: "care"
+    description: "Health and body care house brand"
 
 promo_mechanisms:
   - label: "SuperPlus"
+    aliases: ["Super+"]
+    description: "Delhaize loyalty card discount. Often combined with other mechanisms."
+  - label: "X+Y gratis"
+    aliases: ["X+Y gratuit"]
+    description: "Buy X get Y free — covers all volume deals (1+1, 2+1, 2+2, 3+1, 3+3, 4+2, 5+1, etc.). Output the exact numbers seen. promo_price = original_price (shelf price of one item, not the bundle total)."
+  - label: "2e tegen -X%"
+    aliases: ["2ème à -X%", "2de schaal tegen -X%"]
+    description: "Percentage discount on the second item (e.g., 2e tegen -50%, 2e tegen -40%, 2e tegen -70%). promo_price = original_price."
+  - label: "-X%"
     aliases: []
-    description: "Delhaize loyalty card discount — extract with the card price"
-  - label: "NutriBoost"
-    aliases: []
-    description: "Health-focused promotional campaign"
-  - label: "1+1 gratis"
-    aliases: ["1+1 gratuit"]
-    description: "Buy one get one free. promo_price = price of one item"
-  - label: "2e aan -50%"
-    aliases: ["2ème à -50%"]
-    description: "Second item at 50% off"
-  - label: "-30%"
-    aliases: []
-    description: "Percentage discount (also -25%, -20%, -40%, etc.)"
+    description: "Flat percentage discount (e.g., -30%, -25%, -20%). Extract the discounted per-unit price as promo_price."
+  - label: "-€X"
+    aliases: ["-€X korting", "Korting"]
+    description: "Fixed euro discount (e.g., -€4, -€1,25)."
   - label: "X voor €Y"
     aliases: ["X pour €Y"]
     description: "Multi-buy deal (set promo_price to per-unit price €Y/X)"
+  - label: "Sunday Deal"
+    aliases: []
+    description: "Promo only valid on Sunday"
+  - label: "New Deal"
+    aliases: ["Deal"]
+    description: "Highlighted deal"
 
-price_calculation_table: null
-extra_rules: []
-validation_checklist: []
+price_calculation_table: |
+  ### DELHAIZE BUNDLE PRICING (CRITICAL)
+  Delhaize folders frequently present volume deals showing the TOTAL bundle prices for both original and promo.
+  The layout is usually: `[Crossed-out Total] [Promo Total]/[Quantity]`
+
+  Example 1 (1+1 Gratis): "2 x emmentaler, 150 g — 3,30 1,65/2"
+  - "3,30" is the TOTAL original price for 2 items.
+  - "1,65/2" means the TOTAL promo price is €1.65 for 2 items.
+  - You MUST extract PER-ITEM pricing:
+    - original_price: €1.65 (= €3.30 ÷ 2)
+    - promo_price: €1.65 (same as original_price for X+Y Gratis deals)
+
+  Example 2 (2e tegen -50%): "2 x smeerkaas natuur — 5,98 4,49/2"
+  - "5,98" is the TOTAL original price for 2 items.
+  - "4,49/2" is the TOTAL promo price for 2 items.
+  - You MUST extract PER-ITEM pricing:
+    - original_price: €2.99 (= €5.98 ÷ 2)
+    - promo_price: €2.99 (same as original_price for 2e tegen -X% deals, the frontend will calculate the effective price)
+
+  Example 3 (Wine 2+1 Gratis): "35,97 23,98/3 — HETZIJ 7,99/FLES BIJ AANKOOP VAN 3"
+  - "35,97" is the total original price for 3 bottles.
+  - "23,98/3" is the total promo price for 3 bottles.
+  - original_price: €11.99 (= €35.97 ÷ 3)
+  - promo_price: €11.99 (same as original_price for X+Y Gratis deals)
+
+  **How to handle:**
+  If you see a price format like "X,XX Y,YY/Z", always divide X,XX by Z to get the single-unit `original_price`. Look for "HETZIJ X,XX/stuk" as a helpful indicator for per-unit calculations.
+
+extra_rules:
+  - "Delhaize relies heavily on the 'SuperPlus' loyalty program. Mention SuperPlus in the mechanism if the deal requires it."
+  - "Always calculate and extract the PER-ITEM original price, never the total bundle price."
+  - "Delhaize folders often display the Nutri-Score (e.g., A, B, C, D, E). Do not confuse this with product names or brands."
+validation_checklist:
+  - "For X+Y Gratis and 2e tegen -X% deals, bundle prices have been divided by the total deal quantity to extract single-unit pricing."
+  - "promo_price equals original_price for X+Y Gratis and 2e tegen -X% deals."

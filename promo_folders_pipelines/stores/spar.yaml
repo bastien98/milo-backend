@@ -1,0 +1,41 @@
+store_id: "spar"
+display_name: "Spar"
+language: "nl_fr"
+bilingual_dedup: true
+
+validity_format: >
+  "Geldig van DD/MM t.e.m. DD/MM" or "Valable du DD/MM au DD/MM"
+
+store_brands:
+  - name: "spar"
+    description: "Spar house brand"
+  - name: "boni"
+    description: "Standard store brand (mid-range, shared with Colruyt Group)"
+  - name: "everyday"
+    description: "Budget/economy brand (shared with Colruyt Group)"
+
+promo_mechanisms:
+  - label: "X+Y gratis"
+    aliases: ["X+Y gratuit"]
+    description: "Buy X get Y free — covers all volume deals (1+1, 2+1, 2+2, 3+1, etc.). Output the exact numbers seen. promo_price = original_price (shelf price of one item, not the effective price)."
+  - label: "2e aan halve prijs"
+    aliases: ["2ème à moitié prix"]
+    description: "Second item at half price. promo_price = original_price."
+  - label: "-X%"
+    aliases: []
+    description: "Flat percentage discount on the item (e.g. -20%, -25%, -30%, -40%)"
+  - label: "-X% vanaf Y verpakkingen"
+    aliases: ["-X% à partir de Y"]
+    description: "Tiered percentage discount conditional on buying a minimum quantity. Include the condition in display_mechanism."
+  - label: "€X.XX korting"
+    aliases: ["€X.XX réduction"]
+    description: "Fixed euro discount"
+  - label: "X voor €Y"
+    aliases: ["X pour €Y"]
+    description: "Multi-buy deal (set promo_price to per-unit price €Y/X)"
+
+price_calculation_table: null
+extra_rules:
+  - "SKIP items whose only promotion is 'Rode Prijzen' or 'Laagste Prijs' — these are Colruyt Group permanent price-match guarantees, not time-limited promotional deals."
+  - "Spar is a smaller-format Colruyt Group store. Its folders share the same visual style as Colruyt with per-item pricing."
+validation_checklist: []
