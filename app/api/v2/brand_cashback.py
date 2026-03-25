@@ -80,17 +80,24 @@ async def get_my_claims(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_db_user),
 ):
-    """Deals the user has claimed or earned."""
+    """
+    Deals the user has claimed or earned.
+    - 'earned' claims: returned for ALL campaigns (including inactive/deleted-soft ones)
+      so that earned history is never lost.
+    - 'claimed' claims: only returned for still-active, non-expired campaigns.
+    """
     repo = BrandCashbackRepository(db)
-    svc = BrandCashbackService(db)
 
-    campaigns = await repo.get_active_campaigns()
+    all_campaigns = await repo.get_all_campaigns()
     claims = await repo.get_user_claims(current_user.id)
+    now = datetime.now(timezone.utc)
 
     result = []
-    for campaign in campaigns:
+    for campaign in all_campaigns:
         claim = claims.get(campaign.id)
-        if claim and claim.status in ("claimed", "earned"):
+        if not claim:
+            continue
+        if claim.status == "earned":
             result.append(
                 BrandCashbackDealResponse(
                     id=campaign.id,
@@ -103,8 +110,24 @@ async def get_my_claims(
                     valid_until=campaign.valid_until,
                     eligible_stores=campaign.eligible_stores or [],
                     requires_store=campaign.requires_store,
-                    user_status=claim.status,
+                    user_status="earned",
                     earned_at=claim.earned_at,
+                )
+            )
+        elif claim.status == "claimed" and campaign.is_active and campaign.valid_until > now:
+            result.append(
+                BrandCashbackDealResponse(
+                    id=campaign.id,
+                    brand_name=campaign.brand_name,
+                    product_name=campaign.product_name,
+                    description=campaign.description,
+                    cashback_amount=campaign.cashback_amount_cents / 100,
+                    image_system_name=campaign.image_system_name,
+                    valid_from=campaign.valid_from,
+                    valid_until=campaign.valid_until,
+                    eligible_stores=campaign.eligible_stores or [],
+                    requires_store=campaign.requires_store,
+                    user_status="claimed",
                 )
             )
     return result
@@ -221,7 +244,8 @@ async def admin_delete_campaign(
     campaign = await repo.get_campaign_by_id(campaign_id)
     if not campaign:
         raise HTTPException(status_code=404, detail="Campaign not found")
-    await repo.delete_campaign(campaign_id)
+    # Soft-delete: deactivate instead of hard-delete to preserve earned claim history.
+    await repo.update_campaign(campaign_id, {"is_active": False})
 
 
 @router.post(
