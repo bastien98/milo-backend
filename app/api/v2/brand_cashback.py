@@ -104,6 +104,7 @@ async def get_my_claims(
                     eligible_stores=campaign.eligible_stores or [],
                     requires_store=campaign.requires_store,
                     user_status=claim.status,
+                    earned_at=claim.earned_at,
                 )
             )
     return result

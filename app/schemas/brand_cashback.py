@@ -21,6 +21,7 @@ class BrandCashbackDealResponse(BaseModel):
     eligible_stores: List[str]
     requires_store: bool
     user_status: str              # "available" | "claimed" | "earned" | "expired"
+    earned_at: Optional[datetime] = None  # set when user_status == "earned"
 
     class Config:
         from_attributes = True
