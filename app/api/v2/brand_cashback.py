@@ -24,8 +24,8 @@ router = APIRouter()
 
 def _require_admin(current_user: User) -> None:
     settings = get_settings()
-    admin_emails: list[str] = getattr(settings, "ADMIN_EMAILS", [])
-    if current_user.email not in admin_emails:
+    admin_uids: list[str] = getattr(settings, "ADMIN_UIDS", [])
+    if current_user.firebase_uid not in admin_uids:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Admin only")
 
 
