@@ -49,6 +49,10 @@ class Settings(BaseSettings):
     # Fraud detection (PDF metadata, fingerprint dedup, receipt age)
     FRAUD_DETECTION_ENABLED: bool = True
 
+    # Admin UIDs (Firebase UIDs) for brand cashback admin panel
+    # Set via Railway env var: ADMIN_UIDS=uid1,uid2
+    ADMIN_UIDS: List[str] = []
+
     # CORS
     CORS_ORIGINS: List[str] = ["*"]
 

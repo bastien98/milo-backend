@@ -277,6 +277,24 @@ async def process_receipt_background(
                 logger.warning(f"Referral completion check failed (non-fatal): {ref_err}")
                 await session.rollback()
 
+            # Step 9: Check brand cashback deals (non-fatal)
+            try:
+                t0 = time.monotonic()
+                from app.services.brand_cashback_service import BrandCashbackService
+                brand_cb_svc = BrandCashbackService(session)
+                receipt_item_names = [item.item_name for item in extraction_result.line_items]
+                await brand_cb_svc.check_receipt_for_brand_cashback(
+                    receipt_id=receipt_id,
+                    user_id=user_id,
+                    receipt_line_items=receipt_item_names,
+                    store_name=cleaned_store_name,
+                )
+                await session.commit()
+                logger.info(f"⏱ bg_brand_cashback: {time.monotonic() - t0:.3f}s")
+            except Exception as brand_cb_err:
+                logger.warning(f"Brand cashback check failed (non-fatal): {brand_cb_err}")
+                await session.rollback()
+
             invalidate_user(user_id)
 
             logger.info(

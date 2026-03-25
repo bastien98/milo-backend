@@ -14,6 +14,7 @@ from app.models.spin import SpinTransaction
 from app.models.promo_candidates import PromoCandidates
 from app.models.promo_report_event import PromoReportEvent
 from app.models.enums import PromoReportStatus, PromoReportEventType
+from app.models.brand_cashback import BrandCashbackCampaign, BrandCashbackStoreLineItem, UserBrandCashbackClaim
 
 __all__ = [
     "User",
@@ -39,4 +40,7 @@ __all__ = [
     "PromoReportEvent",
     "PromoReportStatus",
     "PromoReportEventType",
+    "BrandCashbackCampaign",
+    "BrandCashbackStoreLineItem",
+    "UserBrandCashbackClaim",
 ]
