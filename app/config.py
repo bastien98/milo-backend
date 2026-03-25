@@ -77,6 +77,13 @@ class Settings(BaseSettings):
     WALLET_CERT_PASSWORD: str = ""
     WALLET_WWDR_CERT_BASE64: Optional[str] = None  # Base64-encoded WWDR .pem certificate
 
+    @field_validator("ADMIN_EMAILS", mode="before")
+    @classmethod
+    def parse_admin_emails(cls, v):
+        if isinstance(v, str):
+            return [e.strip() for e in v.split(",") if e.strip()]
+        return v
+
     @field_validator("DATABASE_URL", mode="before")
     @classmethod
     def convert_database_url(cls, v: str) -> str:
