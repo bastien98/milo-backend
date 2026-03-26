@@ -1,4 +1,4 @@
-"""Tests for weekly promo report helpers and deterministic assembly."""
+"""Tests for weekly promo report helpers and promo-first matching engine."""
 
 import sys
 from pathlib import Path
@@ -6,57 +6,78 @@ from datetime import date
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from app.core.promo_reports import build_empty_promo_response
-from app.models.enums import PromoReportStatus
+from app.core.promo_reports import build_empty_promo_response, compute_promo_week
+from app.models.enums import LoyaltyStatus, PromoBucket, PromoReportStatus
 from scripts.promo_reports.promo_candidate_generation import (
-    _compute_promo_week,
-    _is_display_eligible_promo,
-    _build_candidate_items,
-    _get_emoji_for_category,
-    _get_store_color,
-    _merge_annotations,
+    _compute_brand_bonus,
+    _compute_score,
+    BUCKET_LABELS,
+    BUCKET_SIZES,
 )
 
 
-def _base_promo() -> dict:
+# ---------------------------------------------------------------------------
+# Fixtures
+# ---------------------------------------------------------------------------
+
+class _FakePromoItem:
+    """Minimal PromoItem stand-in for unit tests."""
+    def __init__(self, **kwargs):
+        self.display_name = kwargs.get("display_name", "Test Product")
+        self.display_mechanism = kwargs.get("display_mechanism", "-25%")
+        self.display_description = kwargs.get("display_description", "")
+        self.display_savings_label = kwargs.get("display_savings_label", "")
+        self.display_unit_price = kwargs.get("display_unit_price", None)
+        self.original_price = kwargs.get("original_price", 4.00)
+        self.promo_price = kwargs.get("promo_price", 3.00)
+        self.savings_amount = kwargs.get("savings_amount", 1.00)
+        self.min_purchase_qty = kwargs.get("min_purchase_qty", 1)
+        self.promo_depth = kwargs.get("promo_depth", 25.0)
+        self.granular_category = kwargs.get("granular_category", "Cola")
+        self.source_retailer = kwargs.get("source_retailer", "colruyt")
+        self.source_type = kwargs.get("source_type", "folder")
+        self.page_number = kwargs.get("page_number", None)
+        self.promo_folder_url = kwargs.get("promo_folder_url", None)
+        self.validity_start = kwargs.get("validity_start", date(2026, 3, 24))
+        self.validity_end = kwargs.get("validity_end", date(2026, 3, 30))
+
+
+def _loyal_profile():
     return {
-        "normalized_name": "coca cola zero",
-        "original_description": "Coca-Cola Zero 1.5L",
-        "source_retailer": "carrefour",
-        "promo_mechanism": "1+1 Gratis",
-        "original_price": 4.20,
-        "promo_price": 2.10,
-        "validity_start": "2026-03-16",
-        "validity_end": "2026-03-22",
-        "validity_start_epoch": 20260316,
-        "validity_end_epoch": 20260322,
+        "total_purchase_events": 9,
+        "average_days_between": 14,
+        "avg_price_paid": 0.43,
+        "total_spend": 3.87,
+        "brand_tally": {"everyday": 9},
+        "loyalty_status": LoyaltyStatus.STRICTLY_LOYAL.value,
+        "preferred_brand": "everyday",
+        "is_premium_buyer": False,
+        "last_purchase_date": "2026-02-21",
+        "restock_urgency": 1.43,
     }
 
 
-def test_display_eligible_promo_accepts_active_complete_promos():
-    promo = _base_promo()
-    assert _is_display_eligible_promo(promo, report_date_epoch=20260318) is True
+def _agnostic_profile():
+    return {
+        "total_purchase_events": 8,
+        "average_days_between": 24,
+        "avg_price_paid": 1.38,
+        "total_spend": 10.10,
+        "brand_tally": {"doritos": 3, "cheetos": 2, "lay's": 1},
+        "loyalty_status": LoyaltyStatus.BRAND_AGNOSTIC.value,
+        "preferred_brand": None,
+        "is_premium_buyer": True,
+        "last_purchase_date": "2026-02-21",
+        "restock_urgency": 1.25,
+    }
 
 
-def test_display_eligible_promo_rejects_missing_mechanism():
-    promo = _base_promo()
-    promo["promo_mechanism"] = ""
-    assert _is_display_eligible_promo(promo, report_date_epoch=20260318) is False
-
-
-def test_display_eligible_promo_rejects_invalid_pricing():
-    promo = _base_promo()
-    promo["promo_price"] = 5.00
-    assert _is_display_eligible_promo(promo, report_date_epoch=20260318) is False
-
-
-def test_display_eligible_promo_rejects_inactive_promos():
-    promo = _base_promo()
-    assert _is_display_eligible_promo(promo, report_date_epoch=20260325) is False
-
+# ---------------------------------------------------------------------------
+# Tests: promo week
+# ---------------------------------------------------------------------------
 
 def test_compute_promo_week_includes_iso_fields():
-    week = _compute_promo_week(date(2026, 3, 16))
+    week = compute_promo_week(date(2026, 3, 16))
     assert week == {
         "start": "16/03",
         "end": "22/03",
@@ -78,133 +99,62 @@ def test_empty_response_exposes_status_and_message():
     assert response["promo_week"]["iso_week"] == 12
 
 
-# --- New candidate-related tests ---
+# ---------------------------------------------------------------------------
+# Tests: brand bonus scoring
+# ---------------------------------------------------------------------------
+
+def test_brand_bonus_strictly_loyal_match():
+    promo = _FakePromoItem(display_name="Everyday Cola Zero 1.5L")
+    bonus = _compute_brand_bonus(promo, _loyal_profile())
+    assert bonus == 1.0
 
 
-def test_get_emoji_for_category():
-    assert _get_emoji_for_category("Plant-based Milk", "Dairy") == "🥛"
-    assert _get_emoji_for_category("Belgian Beer", "Alcohol") == "🍺"
-    assert _get_emoji_for_category("Unknown", "") == "🛒"
+def test_brand_bonus_no_match():
+    promo = _FakePromoItem(display_name="Coca-Cola Zero 1.5L")
+    bonus = _compute_brand_bonus(promo, _loyal_profile())
+    assert bonus == 0.0
 
 
-def test_get_store_color():
-    assert _get_store_color("Colruyt") == "🟧"
-    assert _get_store_color("Delhaize") == "🟩"
-    assert _get_store_color("Albert Heijn") == "🟨"
-    assert _get_store_color("SomeUnknownStore") == "⬜"
+def test_brand_bonus_partial_match_in_tally():
+    promo = _FakePromoItem(display_name="Doritos Sweet Chili 200g")
+    bonus = _compute_brand_bonus(promo, _agnostic_profile())
+    assert bonus == 0.3
 
 
-def _sample_promo_results():
-    return {
-        "milk": [
-            {
-                "item_key": "abc123",
-                "normalized_name": "milk",
-                "original_description": "Whole Milk 1L",
-                "brand": "Alpro",
-                "granular_category": "Milk",
-                "parent_category": "Dairy",
-                "original_price": 2.50,
-                "promo_price": 1.50,
-                "promo_mechanism": "-40%",
-                "validity_start": "17/03",
-                "validity_end": "23/03",
-                "source_retailer": "Colruyt",
-                "page_number": 5.0,
-                "promo_folder_url": "https://example.com/folder",
-            },
-        ],
-        "bread": [
-            {
-                "item_key": "def456",
-                "normalized_name": "bread",
-                "original_description": "Whole Wheat Bread",
-                "brand": "Private Label",
-                "granular_category": "Bread",
-                "parent_category": "Bakery",
-                "original_price": 3.00,
-                "promo_price": 2.00,
-                "promo_mechanism": "1+1 Gratis",
-                "validity_start": "17/03",
-                "validity_end": "23/03",
-                "source_retailer": "Delhaize",
-                "page_number": None,
-                "promo_folder_url": None,
-            },
-        ],
-    }
+# ---------------------------------------------------------------------------
+# Tests: score computation
+# ---------------------------------------------------------------------------
+
+def test_compute_score_loyal_profile():
+    promo = _FakePromoItem(display_name="Everyday Cola Zero 1.5L", promo_depth=50.0)
+    score, match_type = _compute_score(promo, _loyal_profile())
+    assert match_type == "loyal"
+    assert score > 0
 
 
-def _sample_interest_items():
-    return [
-        {
-            "normalized_name": "milk",
-            "metrics": {
-                "restock_urgency": 1.8,
-                "purchase_frequency_days": 12,
-                "avg_unit_price": 2.30,
-            },
-        },
-        {
-            "normalized_name": "bread",
-            "metrics": {
-                "restock_urgency": 0.5,
-                "purchase_frequency_days": 7,
-                "avg_unit_price": 2.80,
-            },
-        },
-    ]
+def test_compute_score_agnostic_profile():
+    promo = _FakePromoItem(display_name="Unknown Brand Chips", promo_depth=30.0)
+    score, match_type = _compute_score(promo, _agnostic_profile())
+    assert match_type == "agnostic"
+    assert score > 0
 
 
-def test_build_candidate_items_creates_correct_structure():
-    candidates = _build_candidate_items(_sample_promo_results(), _sample_interest_items())
-    assert len(candidates) == 2
-
-    milk = next(c for c in candidates if c["item_key"] == "abc123")
-    assert milk["brand"] == "Alpro"
-    assert milk["product_name"] == "Whole Milk 1L"
-    assert milk["savings"] == 1.00
-    assert milk["discount_percentage"] == 40
-    assert milk["store_name"] == "Colruyt"
-    assert milk["store_color"] == "🟧"
-    assert milk["emoji"] == "🥛"
-    assert milk["page_number"] == 5  # coerced from float
-    assert milk["restock_urgency"] == 1.8
-    assert milk["reason"] == ""  # not yet annotated
+def test_score_higher_for_matching_brand():
+    promo_match = _FakePromoItem(display_name="Everyday Cola Zero 1.5L", promo_depth=25.0)
+    promo_no_match = _FakePromoItem(display_name="Unknown Cola 1.5L", promo_depth=25.0)
+    score_match, _ = _compute_score(promo_match, _loyal_profile())
+    score_no_match, _ = _compute_score(promo_no_match, _loyal_profile())
+    assert score_match > score_no_match
 
 
-def test_build_candidate_items_deduplicates_by_item_key():
-    promo_results = _sample_promo_results()
-    # Add duplicate
-    promo_results["milk"].append(promo_results["milk"][0])
-    candidates = _build_candidate_items(promo_results, _sample_interest_items())
-    assert len(candidates) == 2
+# ---------------------------------------------------------------------------
+# Tests: bucket configuration
+# ---------------------------------------------------------------------------
+
+def test_bucket_sizes_sum_to_15():
+    assert sum(BUCKET_SIZES.values()) == 15
 
 
-def test_merge_annotations():
-    candidates = [
-        {"item_key": "abc123", "reason": ""},
-        {"item_key": "def456", "reason": ""},
-    ]
-    annotations = {
-        "item_annotations": [
-            {"item_key": "abc123", "reason": "You buy this every 12 days."},
-            {"item_key": "def456", "reason": "Great deal on bread."},
-        ],
-    }
-    _merge_annotations(candidates, annotations)
-    assert candidates[0]["reason"] == "You buy this every 12 days."
-    assert candidates[1]["reason"] == "Great deal on bread."
-
-
-def test_merge_annotations_handles_missing_keys():
-    candidates = [
-        {"item_key": "abc123", "reason": ""},
-    ]
-    annotations = {
-        "item_annotations": [
-            {"item_key": "unknown_key", "reason": "Should not match."},
-        ],
-    }
-    _merge_annotations(candidates, annotations)
-    assert candidates[0]["reason"] == ""
+def test_all_buckets_have_labels():
+    for bucket in PromoBucket:
+        assert bucket in BUCKET_LABELS

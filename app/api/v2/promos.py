@@ -7,7 +7,7 @@ from fastapi import APIRouter, Depends, HTTPException, Response, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_db, get_current_db_user
-from app.core.stores import ALL_STORE_NAMES, STORE_DISPLAY_NAMES
+from app.core.stores import ALL_STORE_NAMES, STORE_DISPLAY_NAMES, STORE_HAS_PROMOS
 from app.models.user import User
 from app.schemas.promo import (
     PromoRecommendationResponse,
@@ -96,7 +96,11 @@ async def create_promo_report_event(
 async def get_promo_stores():
     """Return all stores available for promo search filtering."""
     return [
-        PromoStoreOption(id=name, name=STORE_DISPLAY_NAMES[name])
+        PromoStoreOption(
+            id=name,
+            name=STORE_DISPLAY_NAMES[name],
+            has_promos=STORE_HAS_PROMOS.get(name, False),
+        )
         for name in ALL_STORE_NAMES
         if name != "other"
     ]

@@ -120,12 +120,13 @@ async def get_budget_history(
     month_total: dict[str, float] = defaultdict(float)
     month_cat_spend: dict[str, dict[str, float]] = defaultdict(lambda: defaultdict(float))
     for t in all_txns:
-        if t.is_discount or t.is_deposit:
+        if t.is_deposit:
             continue
         txn_month = t.date.strftime("%Y-%m")
         if txn_month in months:
-            month_total[txn_month] += t.item_price
-            month_cat_spend[txn_month][t.category] += t.item_price
+            amount = -t.item_price if t.is_discount else t.item_price
+            month_total[txn_month] += amount
+            month_cat_spend[txn_month][t.category] += amount
 
     entries = []
     for entry in history_entries:

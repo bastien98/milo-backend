@@ -19,6 +19,20 @@ class PieChartCategory(BaseModel):
     color_hex: str
     percentage: float
     transaction_count: int
+    group: Optional[str] = None
+    group_color_hex: Optional[str] = None
+    group_icon: Optional[str] = None
+
+
+class PieChartGroup(BaseModel):
+    """Group-level aggregation for Pie Chart visualization."""
+    group_name: str
+    group_icon: str
+    group_color_hex: str
+    total_spent: float
+    percentage: float
+    transaction_count: int
+    categories: List[PieChartCategory]
 
 
 class PieChartStore(BaseModel):
@@ -35,6 +49,7 @@ class PieChartSummaryResponse(BaseModel):
     year: int
     total_spent: float
     categories: List[PieChartCategory]
+    groups: List[PieChartGroup]
     stores: List[PieChartStore]
 
 

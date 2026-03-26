@@ -71,7 +71,7 @@ async def get_used_categories(
             "sub_category": sub_category,
             "display_name": get_display_name(sub_category),
             "category": info.name if info else "Uncategorized",
-            "group": info.group if info else "Miscellaneous",
+            "group": info.group.get("en") if info else "Miscellaneous",
             "total_spent": float(row.total_spent),
             "transaction_count": row.transaction_count,
             "color_hex": get_category_color(sub_category),

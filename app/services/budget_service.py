@@ -41,7 +41,10 @@ class BudgetService:
         if not transactions:
             return 0.0
 
-        return round(sum(t.item_price for t in transactions if not t.is_discount and not t.is_deposit), 2)
+        return round(sum(
+            (-t.item_price if t.is_discount else t.item_price)
+            for t in transactions if not t.is_deposit
+        ), 2)
 
     @cached(include_month=True)
     async def get_current_month_spend_by_category(
@@ -68,9 +71,10 @@ class BudgetService:
         from collections import defaultdict
         category_spend: dict[str, float] = defaultdict(float)
         for t in transactions:
-            if t.is_discount or t.is_deposit:
+            if t.is_deposit:
                 continue
-            category_spend[t.category] += t.item_price
+            amount = -t.item_price if t.is_discount else t.item_price
+            category_spend[t.category] += amount
         return {cat: round(spend, 2) for cat, spend in category_spend.items()}
 
     async def get_budget_progress(

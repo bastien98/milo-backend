@@ -1,16 +1,14 @@
 """
 Category definitions — single source of truth for the entire app.
 
-Three-level hierarchy:
-  Group (8)  →  Category / Parent (31)  →  Granular (~200)
+Three-level hierarchy (ECR Total Store Taxonomy):
+  Department/Group (5)  →  Macro-Category / Parent (22)  →  Granular (~120)
 
 Everything is defined once in _TREE below. All lookup dicts and constants
 are derived from it at module load time.
 
-Groups provide coarse visual grouping (section headers, group-level SF Symbol icons).
-Categories have their own Phosphor icon and hex color (cross-platform: iOS + Android).
-Categories are what transactions store in the database.
-Granular categories are used by LLM prompts for fine-grained classification.
+Supports English ('en'), Dutch ('nl'), and French ('fr').
+Features dual-display names: b2b_display (FMCG Dashboard) and b2c_display (iOS App).
 """
 
 import re
@@ -26,606 +24,306 @@ from typing import Dict, List, Optional
 @dataclass(frozen=True)
 class CategoryInfo:
     """Full metadata for a parent category."""
-    name: str               # Internal name (stored in DB), e.g. "Meat & Poultry (Raw)"
-    display_name: str       # Clean display name, e.g. "Meat & Poultry"
-    group: str              # Group name, e.g. "Fresh Food"
-    color_hex: str          # Group color (hex)
-    icon: str               # Group icon (SF Symbol)
-    category_icon: str      # Per-category icon (Phosphor, kebab-case)
-    category_color_hex: str # Per-category color (hex)
+    name: str                       # Internal DB name (e.g., "Sweet Groceries")
+    b2b_display: Dict[str, str]     # FMCG Dashboard names (e.g., "Épicerie Sucrée")
+    b2c_display: Dict[str, str]     # iOS App User names (e.g., "Snacks & Douceurs")
+    group: Dict[str, str]           # Multi-lingual group names
+    group_id: str                   # Internal group ID
+    color_hex: str                  # Group color (hex)
+    icon: str                       # Group icon (SF Symbol)
+    category_icon: str              # Per-category icon (Phosphor)
+    category_color_hex: str         # Per-category color (hex)
+    is_budgetable: bool             # Whether it is included in analytics
 
 
 # ============================================================
 # SINGLE SOURCE OF TRUTH
 # ============================================================
-#
-# Structure: list of groups, each containing its categories,
-# each category containing its granular sub-categories.
-#
-# Group fields:
-#   group      — Group name (section header)
-#   color      — Hex color for the group
-#   icon       — SF Symbol icon for the group
-#   categories — List of parent categories in this group
-#
-# Category fields:
-#   name       — Internal DB name (e.g. "Meat & Poultry (Raw)")
-#   display    — Clean display name (e.g. "Meat & Poultry")
-#   icon       — Phosphor icon (kebab-case, cross-platform)
-#   color      — Hex color for this specific category
-#   granular   — List of granular sub-category names (used by LLM)
-#   excluded   — (optional) If True, excluded from analytics/budgets
 
 _TREE = [
 
-    # ── Fresh Food ───────────────────────────────────────────
+    # ── 1. Ambient Food ──────────────────────────────────────
     {
-        "group": "Fresh Food",
-        "color": "#2ECC71",
-        "icon": "leaf.fill",
-        "categories": [
-            {
-                "name": "Fruits",
-                "display": "Fruits",
-                "icon": "apple-logo",
-                "color": "#34D399",
-                "granular": [
-                    "Fruit Apples Pears",
-                    "Fruit Citrus",
-                    "Fruit Bananas",
-                    "Fruit Berries",
-                    "Fruit Stone",
-                    "Fruit Grapes",
-                    "Fruit Melons",
-                    "Fruit Tropical",
-                    "Fruit Dried",
-                    "Nuts",
-                ],
-            },
-            {
-                "name": "Vegetables",
-                "display": "Vegetables",
-                "icon": "carrot",
-                "color": "#16A34A",
-                "granular": [
-                    "Tomatoes",
-                    "Salad & Leafy Greens",
-                    "Cucumber & Peppers",
-                    "Onions & Garlic",
-                    "Carrots & Root Veg",
-                    "Potatoes",
-                    "Cabbage & Broccoli",
-                    "Beans & Peas",
-                    "Mushrooms",
-                    "Zucchini & Eggplant",
-                    "Corn",
-                    "Fresh Herbs",
-                    "Prepared Vegetables",
-                ],
-            },
-            {
-                "name": "Meat & Poultry (Raw)",
-                "display": "Meat & Poultry",
-                "icon": "steak",
-                "color": "#FB923C",
-                "granular": [
-                    "Beef",
-                    "Pork",
-                    "Chicken",
-                    "Turkey",
-                    "Lamb",
-                    "Minced Meat",
-                    "Meat Preparations",
-                    "Offal",
-                ],
-            },
-            {
-                "name": "Charcuterie & Salads (Preparé/Deli)",
-                "display": "Charcuterie & Salads",
-                "icon": "sandwich",
-                "color": "#F87171",
-                "granular": [
-                    "Ham Cooked",
-                    "Ham Dry",
-                    "Salami & Sausage",
-                    "Pâté & Terrine",
-                    "Bacon & Lardons",
-                    "Chicken Turkey Deli",
-                    "Vegetarian Deli",
-                    "Meals Salads",
-                    "Sandwiches",
-                    "Sushi",
-                    "Hummus & Dips",
-                ],
-            },
-            {
-                "name": "Fish & Seafood",
-                "display": "Fish & Seafood",
-                "icon": "fish",
-                "color": "#22D3EE",
-                "granular": [
-                    "Fish Fresh",
-                    "Fish Smoked",
-                    "Fish Frozen",
-                    "Shellfish",
-                    "Canned Fish",
-                    "Surimi",
-                ],
-            },
-            {
-                "name": "Dairy, Eggs & Cheese",
-                "display": "Dairy, Eggs & Cheese",
-                "icon": "cheese",
-                "color": "#FACC15",
-                "granular": [
-                    "Plant Milk",
-                    "Milk Fresh",
-                    "Milk Long Life",
-                    "Cream",
-                    "Yoghurt Natural",
-                    "Yoghurt Fruit",
-                    "Yoghurt Drinks",
-                    "Skyr & Quark",
-                    "Pudding & Desserts",
-                    "Butter",
-                    "Margarine",
-                    "Cooking Fat",
-                    "Cheese Hard",
-                    "Cheese Soft",
-                    "Cheese Blue",
-                    "Cheese Fresh",
-                    "Cheese Spread",
-                    "Cheese Sliced",
-                    "Cheese Grated",
-                    "Cheese Belgian",
-                    "Eggs",
-                    "Vegan Cheese Dairy",
-                    "Protein Shakes",
-                    "Protein Desserts",
-                ],
-            },
-            {
-                "name": "Bakery (Bread, Pistolets)",
-                "display": "Bakery",
-                "icon": "bread",
-                "color": "#F59E0B",
-                "granular": [
-                    "Bread Fresh",
-                    "Bread Sliced",
-                    "Bread Specialty",
-                    "Wraps & Pita",
-                    "Crackers",
-                ],
-            },
-            {
-                "name": "Pastries & Koffiekoeken",
-                "display": "Pastries",
-                "icon": "cake",
-                "color": "#FB7185",
-                "granular": [
-                    "Croissants & Pastries",
-                    "Cakes & Tarts",
-                    "Waffles",
-                ],
-            },
-        ],
-    },
-
-    # ── Pantry & Staples ─────────────────────────────────────
-    {
-        "group": "Pantry & Staples",
+        "group_id": "Ambient Food",
+        "group": {"en": "Pantry", "nl": "Voorraadkast", "fr": "Garde-manger"},
         "color": "#E67E22",
         "icon": "cabinet.fill",
         "categories": [
             {
-                "name": "Grains, Pasta & Potatoes",
-                "display": "Grains, Pasta & Potatoes",
-                "icon": "grains",
+                "name": "Sweets",
+                "b2b_display": {"en": "Sweets", "nl": "Snoep & Koek", "fr": "Confiserie"},
+                "b2c_display": {"en": "Sweets", "nl": "Snoep & Koek", "fr": "Confiserie"},
+                "icon": "cookie",
                 "color": "#D97706",
-                "granular": [
-                    "Pasta Dry",
-                    "Pasta Fresh",
-                    "Rice",
-                    "Noodles Asian",
-                    "Couscous & Bulgur",
-                    "Grains & Legumes",
-                ],
+                "granular": ["Biscuits & Pastries", "Chocolate & Confectionery", "Desserts & Home Baking"],
             },
             {
-                "name": "Canned & Jarred Goods",
-                "display": "Canned & Jarred Goods",
-                "icon": "jar",
-                "color": "#84CC16",
-                "granular": [
-                    "Canned Tomatoes",
-                    "Canned Vegetables",
-                    "Canned Beans",
-                    "Canned Fruits",
-                    "Pickles & Olives",
-                    "Jarred Antipasti",
-                    "Soup Canned",
-                    "Soup Carton Fresh",
-                    "Soup Instant",
-                ],
+                "name": "Breakfast",
+                "b2b_display": {"en": "Breakfast", "nl": "Ontbijt", "fr": "Petit-déjeuner"},
+                "b2c_display": {"en": "Breakfast", "nl": "Ontbijt", "fr": "Petit-déjeuner"},
+                "icon": "coffee",
+                "color": "#F59E0B",
+                "granular": ["Breakfast & Cereals", "Sweet Spreads & Honey"],
             },
             {
-                "name": "Sauces, Mayo & Condiments",
-                "display": "Sauces & Condiments",
+                "name": "Snacks",
+                "b2b_display": {"en": "Snacks", "nl": "Snacks", "fr": "Snacks"},
+                "b2c_display": {"en": "Snacks", "nl": "Snacks", "fr": "Snacks"},
+                "icon": "chips",
+                "color": "#EF4444",
+                "granular": ["Salty Snacks & Nuts"],
+            },
+            {
+                "name": "Savory Groceries",
+                "b2b_display": {"en": "Savory Groceries", "nl": "Zoute Kruidenierswaren", "fr": "Épicerie Salée"},
+                "b2c_display": {"en": "Dry Goods & Staples", "nl": "Droge Voeding & Basisproducten", "fr": "Épicerie Sèche & Essentiels"},
                 "icon": "pepper",
                 "color": "#EA580C",
-                "granular": [
-                    "Pasta Sauce",
-                    "Tomato Sauce & Ketchup",
-                    "Mayonnaise",
-                    "Mustard",
-                    "Soy & Asian Sauce",
-                    "BBQ Sauce",
-                    "Salad Dressing",
-                    "Vinegar",
-                    "Olive Oil",
-                    "Cooking Oil",
-                    "Salt Pepper & Spices",
-                    "Stock & Bouillon",
-                    "Dried Herbs",
-                ],
-            },
-            {
-                "name": "Breakfast & Cereal (Choco/Jam)",
-                "display": "Breakfast & Cereal",
-                "icon": "bowl-food",
-                "color": "#EAB308",
-                "granular": [
-                    "Cereals",
-                    "Oatmeal",
-                    "Spreads Chocolate",
-                    "Spreads Jam",
-                    "Spreads Honey",
-                    "Spreads Peanut Nut",
-                    "Spreads Savory",
-                ],
-            },
-            {
-                "name": "Baking & Flour",
-                "display": "Baking & Flour",
-                "icon": "chef-hat",
-                "color": "#C4A57B",
-                "granular": [
-                    "Flour",
-                    "Sugar",
-                    "Baking Ingredients",
-                    "Baking Decorations",
-                    "Chocolate Baking",
-                ],
+                "granular": ["Condiments & Sauces", "Soups & Bouillons", "Canned & Jarred Goods", "Staples Pasta Rice", "Oils & Vinegars"],
             },
         ],
     },
 
-    # ── Frozen ───────────────────────────────────────────────
+    # ── 2. Beverages ─────────────────────────────────────────
     {
-        "group": "Frozen",
-        "color": "#3498DB",
-        "icon": "snowflake",
-        "categories": [
-            {
-                "name": "Frozen Ingredients (Veg/Fruit)",
-                "display": "Frozen Ingredients",
-                "icon": "snowflake",
-                "color": "#0891B2",
-                "granular": [
-                    "Frozen Vegetables",
-                    "Frozen Fish",
-                    "Frozen Meat",
-                    "Frozen Bread",
-                    "Frozen Fruits",
-                    "Ice Cream",
-                    "Frozen Desserts",
-                ],
-            },
-            {
-                "name": "Fries & Snacks (Frituur at home)",
-                "display": "Fries & Snacks",
-                "icon": "french-fries",
-                "color": "#EF4444",
-                "granular": [
-                    "Frozen Fries",
-                    "Frozen Snacks",
-                ],
-            },
-            {
-                "name": "Ready Meals & Pizza",
-                "display": "Ready Meals & Pizza",
-                "icon": "pizza",
-                "color": "#F97316",
-                "granular": [
-                    "Frozen Pizza",
-                    "Frozen Meals",
-                    "Meals Fresh",
-                    "Pizza Fresh",
-                    "Meat Substitute",
-                    "Vegetarian Meals",
-                    "Asian Food",
-                    "Mexican Food",
-                    "Italian Specialty",
-                    "Middle Eastern",
-                ],
-            },
-        ],
-    },
-
-    # ── Drinks ───────────────────────────────────────────────
-    {
-        "group": "Drinks",
+        "group_id": "Beverages",
+        "group": {"en": "Beverages", "nl": "Dranken", "fr": "Boissons"},
         "color": "#E74C3C",
         "icon": "mug.fill",
         "categories": [
             {
-                "name": "Water (Bottled)",
-                "display": "Water",
-                "icon": "drop-half-bottom",
+                "name": "Water & Juices",
+                "b2b_display": {"en": "Water & Juices", "nl": "Water & Sappen", "fr": "Eaux & Jus"},
+                "b2c_display": {"en": "Water & Juices", "nl": "Water & Sappen", "fr": "Eaux & Jus"},
+                "icon": "drop",
                 "color": "#38BDF8",
-                "granular": [
-                    "Water Still",
-                    "Water Sparkling",
-                    "Water Flavored",
-                ],
+                "granular": ["Still Water", "Sparkling Water", "Fruit Juices", "Smoothies & Fresh Juices", "Syrups & Cordials"],
             },
             {
-                "name": "Soda & Juices",
-                "display": "Soda & Juices",
-                "icon": "soda-can",
-                "color": "#F472B6",
-                "granular": [
-                    "Cola",
-                    "Lemonade & Soda",
-                    "Energy Drinks",
-                    "Ice Tea",
-                    "Fruit Juice",
-                    "Vegetable Juice",
-                    "Smoothies",
-                    "Syrup",
-                    "Beer Non-Alcoholic",
-                ],
+                "name": "Sodas & Energy Drinks",
+                "b2b_display": {"en": "Sodas & Energy Drinks", "nl": "Frisdranken & Energiedranken", "fr": "Sodas & Boissons Énergisantes"},
+                "b2c_display": {"en": "Sodas & Energy Drinks", "nl": "Frisdrank & Energy Drinks", "fr": "Sodas & Energy Drinks"},
+                "icon": "lightning",
+                "color": "#F43F5E",
+                "granular": ["Colas", "Fruit Sodas & Lemonades", "Iced Teas", "Energy Drinks", "Sports Drinks"],
             },
             {
                 "name": "Coffee & Tea",
-                "display": "Coffee & Tea",
+                "b2b_display": {"en": "Coffee & Tea", "nl": "Koffie & Thee", "fr": "Café & Thé"},
+                "b2c_display": {"en": "Coffee & Tea", "nl": "Koffie & Thee", "fr": "Café & Thé"},
                 "icon": "coffee",
-                "color": "#A8896C",
-                "granular": [
-                    "Coffee Beans Ground",
-                    "Coffee Capsules",
-                    "Coffee Instant",
-                    "Tea",
-                    "Hot Chocolate",
-                ],
-            },
-            {
-                "name": "Alcohol (Beer, Cider, Wine, Whisky, Vodka, Gin, Cava, Champagne)",
-                "display": "Alcohol",
-                "icon": "wine",
-                "color": "#DC2626",
-                "granular": [
-                    "Beer Pils",
-                    "Beer Abbey Trappist",
-                    "Beer Special",
-                    "Beer White Fruit",
-                    "Cider",
-                    "Wine Red",
-                    "Wine White",
-                    "Wine Rosé",
-                    "Wine Sparkling",
-                    "Spirits Whisky",
-                    "Spirits Gin",
-                    "Spirits Vodka",
-                    "Spirits Rum",
-                    "Spirits Liqueur",
-                    "Aperitif",
-                ],
+                "color": "#78350F",
+                "granular": ["Coffee Beans & Ground", "Coffee Pods & Capsules", "Instant Coffee", "Tea Bags & Loose Tea"],
             },
         ],
     },
 
-    # ── Snacks ───────────────────────────────────────────────
+    # ── 3. Alcohol ──────────────────────────────────────────
     {
-        "group": "Snacks",
-        "color": "#F39C12",
-        "icon": "popcorn.fill",
+        "group_id": "Alcohol",
+        "group": {"en": "Alcohol", "nl": "Alcohol", "fr": "Alcool"},
+        "color": "#9F1239",
+        "icon": "wine",
         "categories": [
             {
-                "name": "Chips, Nuts & Aperitif",
-                "display": "Chips, Nuts & Aperitif",
-                "icon": "popcorn",
-                "color": "#E85D5D",
+                "name": "Alcohol",
+                "b2b_display": {"en": "Alcohol", "nl": "Alcohol", "fr": "Alcool"},
+                "b2c_display": {"en": "Alcohol", "nl": "Alcohol", "fr": "Alcool"},
+                "icon": "wine",
+                "color": "#9F1239",
                 "granular": [
-                    "Chips",
-                    "Nuts Snack",
-                    "Crackers Snack",
-                    "Popcorn",
-                    "Dried Meat Snack",
-                    "Protein Bars",
-                ],
-            },
-            {
-                "name": "Chocolate & Sweets (Biscuits)",
-                "display": "Chocolate, Biscuits & Sweets",
-                "icon": "candy",
-                "color": "#EC4899",
-                "granular": [
-                    "Cookies & Biscuits",
-                    "Chocolate Bars",
-                    "Chocolate Pralines",
-                    "Candy",
-                    "Licorice",
-                    "Gum & Mints",
-                    "Marshmallows",
+                    "Pilsners & Lagers", "Specialty & Abbey Beers", "Fruit Beers & Geuze",
+                    "Non-Alcoholic Beers (0.0%)", "Ciders",
+                    "Red Wine", "White Wine", "Rosé Wine", "Champagne & Sparkling Wine",
+                    "Non-Alcoholic Wine",
+                    "Gin, Vodka & White Spirits", "Whisky, Rum & Dark Spirits",
+                    "Liqueurs & Digestifs", "Aperitifs & Ready-to-Drink",
                 ],
             },
         ],
     },
 
-    # ── Household ────────────────────────────────────────────
+    # ── 4. Fresh Food ──────────────────────────────────────
     {
-        "group": "Household",
+        "group_id": "Fresh & Chilled",
+        "group": {"en": "Fresh Food", "nl": "Verse Producten", "fr": "Produits Frais"},
+        "color": "#2ECC71",
+        "icon": "leaf.fill",
+        "categories": [
+            {
+                "name": "Dairy & Eggs",
+                "b2b_display": {"en": "Dairy & Eggs", "nl": "Zuivel & Eieren", "fr": "Crémerie & Œufs"},
+                "b2c_display": {"en": "Dairy & Eggs", "nl": "Zuivel & Eieren", "fr": "Laitage & Œufs"},
+                "icon": "egg",
+                "color": "#FACC15",
+                "granular": [
+                    "Fresh Milk", "Long Life Milk", "Plant Milk", "Cream",
+                    "Cheese Hard", "Cheese Soft & Blue", "Cheese Fresh & Spread", "Cheese Sliced & Grated",
+                    "Yoghurt Plain", "Yoghurt Fruit & Drinks", "Skyr & Quark", "Chilled Desserts",
+                    "Butter & Margarine",
+                    "Eggs",
+                ],
+            },
+            {
+                "name": "Deli & Convenience",
+                "b2b_display": {"en": "Deli & Convenience", "nl": "Traiteur & Kant-en-klaar", "fr": "Traiteur & Plats Préparés"},
+                "b2c_display": {"en": "Deli & Ready Meals", "nl": "Traiteur & Maaltijden", "fr": "Traiteur & Plats"},
+                "icon": "bowl-food",
+                "color": "#F87171",
+                "granular": ["Charcuterie", "Chilled Ready Meals", "Plant-Based Meat Alternatives", "Fresh Tapas & Salads"],
+            },
+            {
+                "name": "Meat & Poultry",
+                "b2b_display": {"en": "Meat & Poultry", "nl": "Vlees & Gevogelte", "fr": "Boucherie & Volaille"},
+                "b2c_display": {"en": "Meat & Poultry", "nl": "Vlees & Kip", "fr": "Viande & Volaille"},
+                "icon": "meat",
+                "color": "#FB923C",
+                "granular": ["Beef Veal Pork", "Poultry & Game"],
+            },
+            {
+                "name": "Seafood",
+                "b2b_display": {"en": "Seafood", "nl": "Vis & Schaaldieren", "fr": "Poissonnerie"},
+                "b2c_display": {"en": "Fish & Seafood", "nl": "Vis & Zeevruchten", "fr": "Poisson & Fruits de Mer"},
+                "icon": "fish-simple",
+                "color": "#22D3EE",
+                "granular": ["Fresh Fish", "Shellfish & Crustaceans"],
+            },
+            {
+                "name": "Fruit & Vegetables",
+                "b2b_display": {"en": "Fruit & Vegetables", "nl": "Groenten & Fruit", "fr": "Fruits & Légumes"},
+                "b2c_display": {"en": "Fruit & Vegetables", "nl": "Groenten & Fruit", "fr": "Fruits & Légumes"},
+                "icon": "carrot",
+                "color": "#16A34A",
+                "granular": [
+                    "Apples & Pears", "Citrus Fruit", "Bananas", "Berries", "Stone & Tropical Fruit", "Dried Fruit & Nuts",
+                    "Tomatoes & Peppers", "Salad & Leafy Greens", "Root Vegetables & Potatoes", "Cabbage & Broccoli", "Mushrooms & Other Vegetables", "Fresh Herbs",
+                ],
+            },
+            {
+                "name": "Fresh Bakery",
+                "b2b_display": {"en": "Fresh Bakery", "nl": "Verse Bakkerij", "fr": "Boulangerie Fraîche"},
+                "b2c_display": {"en": "Bakery", "nl": "Bakkerij", "fr": "Boulangerie"},
+                "icon": "bread",
+                "color": "#F59E0B",
+                "granular": ["Daily Bread", "Viennoiserie & Patisserie"],
+            },
+        ],
+    },
+
+    # ── 5. Frozen Food ───────────────────────────────────────
+    {
+        "group_id": "Frozen Food",
+        "group": {"en": "Frozen", "nl": "Diepvries", "fr": "Surgelés"},
+        "color": "#3498DB",
+        "icon": "snowflake",
+        "categories": [
+            {
+                "name": "Frozen",
+                "b2b_display": {"en": "Frozen", "nl": "Diepvries", "fr": "Surgelés"},
+                "b2c_display": {"en": "Frozen", "nl": "Diepvries", "fr": "Surgelés"},
+                "icon": "snowflake.circle",
+                "color": "#3498DB",
+                "granular": ["Frozen Potato Products", "Frozen Vegetables & Herbs", "Frozen Meat & Seafood", "Frozen Ready Meals & Pizzas", "Ice Cream", "Frozen Desserts & Pastries"],
+            },
+        ],
+    },
+
+    # ── 6. Baby & Kids ──────────────────────────────────────
+    {
+        "group_id": "Baby & Kids",
+        "group": {"en": "Baby & Kids", "nl": "Baby & Kids", "fr": "Bébé & Enfants"},
+        "color": "#F472B6",
+        "icon": "figure.and.child.holdinghands",
+        "categories": [
+            {
+                "name": "Baby Food & Care",
+                "b2b_display": {"en": "Baby Food", "nl": "Babyvoeding", "fr": "Alimentation Bébé"},
+                "b2c_display": {"en": "Baby Food", "nl": "Babyvoeding", "fr": "Alimentation Bébé"},
+                "icon": "baby-carriage",
+                "color": "#F472B6",
+                "granular": ["Baby Formula & Milk", "Baby Meals & Purees", "Baby Snacks & Biscuits", "Baby Care"],
+            },
+        ],
+    },
+
+    # ── 7. Tobacco ───────────────────────────────────────────
+    {
+        "group_id": "Tobacco",
+        "group": {"en": "Tobacco", "nl": "Tabak", "fr": "Tabac"},
+        "color": "#1F2937",
+        "icon": "smoke.fill",
+        "categories": [
+            {
+                "name": "Tobacco & Vaping",
+                "b2b_display": {"en": "Tobacco & Vaping", "nl": "Tabak & Vaping", "fr": "Tabac & Vapotage"},
+                "b2c_display": {"en": "Tobacco", "nl": "Tabak", "fr": "Tabac"},
+                "icon": "prohibit",
+                "color": "#1F2937",
+                "granular": ["Cigarettes & Rolling Tobacco", "Cigars & Cigarillos", "E-Cigarettes & Vapes", "Smoking Accessories"],
+            },
+        ],
+    },
+
+    # ── 8. Non-Food & Near-Food ──────────────────────────────
+    {
+        "group_id": "Non-Food",
+        "group": {"en": "Household & Care", "nl": "Verzorging & Huis", "fr": "Maison & Soins"},
         "color": "#8E44AD",
         "icon": "bubbles.and.sparkles.fill",
         "categories": [
             {
-                "name": "Official Waste Bags (PMD/Rest)",
-                "display": "Waste Bags",
-                "icon": "trash",
-                "color": "#78909C",
+                "name": "Personal Care",
+                "b2b_display": {"en": "Personal Care", "nl": "Persoonlijke Verzorging", "fr": "Parfumerie & Hygiène"},
+                "b2c_display": {"en": "Personal Care", "nl": "Verzorging", "fr": "Soins & Beauté"},
+                "icon": "hand-heart",
+                "color": "#1ABC9C",
                 "granular": [
-                    "Trash Bags",
+                    "Shampoo & Conditioner", "Hair Styling & Color",
+                    "Toothpaste & Toothbrush", "Mouthwash",
+                    "Shower & Bath", "Deodorant", "Body & Face Care", "Sunscreen",
+                    "Feminine Hygiene",
                 ],
             },
             {
-                "name": "Cleaning & Paper Goods",
-                "display": "Cleaning & Paper Goods",
+                "name": "Home Care",
+                "b2b_display": {"en": "Home Care", "nl": "Onderhoud", "fr": "Entretien"},
+                "b2c_display": {"en": "Household & Cleaning", "nl": "Huishouden & Schoonmaak", "fr": "Maison & Entretien"},
                 "icon": "toilet-paper",
                 "color": "#A855F7",
-                "granular": [
-                    "Cleaning All-Purpose",
-                    "Cleaning Kitchen",
-                    "Cleaning Bathroom",
-                    "Cleaning Floor",
-                    "Cleaning Glass",
-                    "Cleaning WC",
-                    "Cleaning Tools",
-                    "Laundry Detergent",
-                    "Laundry Softener",
-                    "Laundry Stain Remover",
-                    "Laundry Ironing",
-                    "Toilet Paper",
-                    "Kitchen Paper",
-                    "Tissues",
-                    "Napkins",
-                    "Kitchen Accessories",
-                ],
-            },
-        ],
-    },
-
-    # ── Personal Care ────────────────────────────────────────
-    {
-        "group": "Personal Care",
-        "color": "#1ABC9C",
-        "icon": "heart.fill",
-        "categories": [
-            {
-                "name": "Pharmacy & Hygiene",
-                "display": "Pharmacy & Hygiene",
-                "icon": "first-aid",
-                "color": "#8B5CF6",
-                "granular": [
-                    "Shower Gel",
-                    "Soap",
-                    "Deodorant",
-                    "Body Lotion",
-                    "Sunscreen",
-                    "Shampoo",
-                    "Conditioner",
-                    "Hair Styling",
-                    "Hair Color",
-                    "Face Care",
-                    "Toothpaste",
-                    "Toothbrush",
-                    "Mouthwash",
-                    "Shaving",
-                    "Feminine Hygiene",
-                    "Contraception",
-                    "First Aid",
-                    "Vitamins & Supplements",
-                    "Pain Relief",
-                ],
-            },
-        ],
-    },
-
-    # ── Other ────────────────────────────────────────────────
-    {
-        "group": "Other",
-        "color": "#95A5A6",
-        "icon": "square.grid.2x2.fill",
-        "categories": [
-            {
-                "name": "Baby & Kids",
-                "display": "Baby & Kids",
-                "icon": "baby",
-                "color": "#3B82F6",
-                "granular": [
-                    "Baby Milk",
-                    "Baby Food",
-                    "Baby Snacks",
-                    "Diapers",
-                    "Baby Care",
-                ],
+                "granular": ["Laundry Care", "Dishwashing", "Surface Care", "Paper Products & Waste Bags"],
             },
             {
-                "name": "Pet Supplies",
-                "display": "Pet Supplies",
+                "name": "Pet Care",
+                "b2b_display": {"en": "Pet Care", "nl": "Dierenartikelen", "fr": "Animalerie"},
+                "b2c_display": {"en": "Pets", "nl": "Huisdieren", "fr": "Animaux"},
                 "icon": "paw-print",
                 "color": "#64748B",
-                "granular": [
-                    "Pet Food Dog",
-                    "Pet Food Cat",
-                    "Pet Treats",
-                    "Pet Litter",
-                    "Pet Care",
-                ],
+                "granular": ["Dog Care", "Cat Care", "Other Pet Supplies"],
             },
             {
-                "name": "Tobacco",
-                "display": "Tobacco",
-                "icon": "cigarette",
-                "color": "#B91C1C",
-                "granular": [
-                    "Tobacco",
-                ],
+                "name": "General Merchandise",
+                "b2b_display": {"en": "General Merchandise", "nl": "Bazar & Non-Food", "fr": "Bazar & Divers"},
+                "b2c_display": {"en": "Home & Extras", "nl": "Wonen & Extra", "fr": "Maison & Divers"},
+                "icon": "squares-four",
+                "color": "#94A3B8",
+                "granular": ["Household & Kitchenware", "Stationery & Media"],
             },
             {
                 "name": "Lottery & Scratch Cards",
-                "display": "Lottery & Scratch Cards",
+                "b2b_display": {"en": "Lottery & Scratch Cards", "nl": "Loterij & Krasloten", "fr": "Loterie & Jeux à gratter"},
+                "b2c_display": {"en": "Lottery", "nl": "Loterij", "fr": "Loterie"},
                 "icon": "ticket",
-                "color": "#94A3B8",
-                "granular": [
-                    "Lottery & Scratch Cards",
-                ],
+                "color": "#10B981",
+                "granular": ["Lottery & Scratch Cards"],
             },
             {
-                "name": "Promos & Discounts",
-                "display": "Promos & Discounts",
-                "icon": "percent",
-                "color": "#94A3B8",
-                "excluded": True,
-                "granular": [
-                    "Discount",
-                ],
-            },
-            {
-                "name": "Deposits (Statiegeld/Vidange)",
-                "display": "Deposits",
+                "name": "System Excluded",
+                "b2b_display": {"en": "Discounts & Deposits", "nl": "Kortingen & Statiegeld", "fr": "Réductions & Consignes"},
+                "b2c_display": {"en": "Discounts & Deposits", "nl": "Korting & Statiegeld", "fr": "Promo & Consignes"},
                 "icon": "recycle",
                 "color": "#94A3B8",
                 "excluded": True,
-                "granular": [
-                    "Bottle Deposit",
-                    "Can Deposit",
-                    "Crate Deposit",
-                    "Deposit Refund",
-                ],
-            },
-            {
-                "name": "Other",
-                "display": "Other",
-                "icon": "dots-three-circle",
-                "color": "#94A3B8",
-                "granular": [
-                    "Batteries",
-                    "Lightbulbs",
-                    "Party Supplies",
-                    "Flowers & Plants",
-                    "Other",
-                ],
+                "granular": ["Discount", "Bottle Deposit", "Refund"],
             },
         ],
     },
@@ -633,81 +331,58 @@ _TREE = [
 
 
 # ============================================================
-# DERIVED LOOKUPS (built once at module load time from _TREE)
+# DERIVED LOOKUPS (built once at module load time)
 # ============================================================
 
-GROUP_COLORS: Dict[str, str] = {}
-GROUP_ICONS: Dict[str, str] = {}
-CATEGORY_ICONS: Dict[str, str] = {}
-CATEGORY_COLORS: Dict[str, str] = {}
-GRANULAR_CATEGORIES: Dict[str, str] = {}
-EXCLUDED_CATEGORIES: frozenset
-
-_HIERARCHY: Dict[str, List[tuple]] = {}
 _CATEGORY_LOOKUP: Dict[str, CategoryInfo] = {}
 _LOWER_LOOKUP: Dict[str, str] = {}
 _DISPLAY_LOOKUP: Dict[str, str] = {}
 _ALL_CATEGORIES: List[str] = []
+GRANULAR_CATEGORIES: Dict[str, str] = {}
+EXCLUDED_CATEGORIES: frozenset[str]
 
 
 def _build_lookups() -> None:
-    """Build all lookup tables from _TREE at module load time."""
     excluded = set()
 
     for group in _TREE:
-        group_name = group["group"]
-        group_color = group["color"]
-        group_icon = group["icon"]
-
-        # Group-level dicts
-        GROUP_COLORS[group_name] = group_color
-        GROUP_ICONS[group_name] = group_icon
-
-        # Hierarchy (for backward compat)
-        hierarchy_entries = []
-
         for cat in group["categories"]:
             cat_name = cat["name"]
-            display_name = cat["display"]
-            cat_icon = cat["icon"]
-            cat_color = cat["color"]
+            is_excluded = cat.get("excluded", False)
 
-            # Category-level dicts
-            CATEGORY_ICONS[cat_name] = cat_icon
-            CATEGORY_COLORS[cat_name] = cat_color
-
-            # Hierarchy entry
-            hierarchy_entries.append((cat_name, display_name))
-
-            # Excluded flag
-            if cat.get("excluded"):
+            if is_excluded:
                 excluded.add(cat_name)
 
-            # Granular → parent mapping
             for granular in cat.get("granular", []):
                 GRANULAR_CATEGORIES[granular] = cat_name
 
-            # CategoryInfo lookup
             info = CategoryInfo(
                 name=cat_name,
-                display_name=display_name,
-                group=group_name,
-                color_hex=group_color,
-                icon=group_icon,
-                category_icon=cat_icon,
-                category_color_hex=cat_color,
+                b2b_display=cat["b2b_display"],
+                b2c_display=cat["b2c_display"],
+                group=group["group"],
+                group_id=group["group_id"],
+                color_hex=group["color"],
+                icon=group["icon"],
+                category_icon=cat["icon"],
+                category_color_hex=cat["color"],
+                is_budgetable=not is_excluded
             )
+
             _CATEGORY_LOOKUP[cat_name] = info
             _LOWER_LOOKUP[cat_name.lower()] = cat_name
-            _DISPLAY_LOOKUP[display_name] = cat_name
-            _DISPLAY_LOOKUP[display_name.lower()] = cat_name
-            _ALL_CATEGORIES.append(cat_name)
 
-        _HIERARCHY[group_name] = hierarchy_entries
+            # Safely index translations without KeyError risks
+            for display_dict in [cat.get("b2b_display", {}), cat.get("b2c_display", {})]:
+                for lang, text in display_dict.items():
+                    _DISPLAY_LOOKUP[text] = cat_name
+                    _DISPLAY_LOOKUP[text.lower()] = cat_name
 
     global EXCLUDED_CATEGORIES
     EXCLUDED_CATEGORIES = frozenset(excluded)
 
+    global _ALL_CATEGORIES
+    _ALL_CATEGORIES = list(_CATEGORY_LOOKUP.keys())
 
 _build_lookups()
 
@@ -732,14 +407,12 @@ PARENT_CATEGORIES_PROMPT_LIST: str = "\n".join(
 # ============================================================
 
 def get_parent_category(granular: str) -> str:
-    """Get parent category for a granular category, defaulting to 'Other'."""
-    return GRANULAR_CATEGORIES.get(granular, "Other")
-
+    """Get parent category for a granular category, defaulting to 'General Merchandise'."""
+    return GRANULAR_CATEGORIES.get(granular, "General Merchandise")
 
 def get_all_granular_categories() -> List[str]:
     """Get list of all valid granular categories."""
     return list(GRANULAR_CATEGORIES.keys())
-
 
 def validate_granular_category(granular: str) -> bool:
     """Check if a granular category is valid."""
@@ -751,99 +424,88 @@ def validate_granular_category(granular: str) -> bool:
 # ============================================================
 
 def get_category_info(category: str) -> Optional[CategoryInfo]:
-    """Get full info for a parent category (case-insensitive)."""
-    info = _CATEGORY_LOOKUP.get(category)
-    if info:
-        return info
+    """Get full info for a parent category (case-insensitive & multi-lingual)."""
+    if category in _CATEGORY_LOOKUP:
+        return _CATEGORY_LOOKUP[category]
+    if category in _DISPLAY_LOOKUP:
+        return _CATEGORY_LOOKUP[_DISPLAY_LOOKUP[category]]
+
     canonical = _LOWER_LOOKUP.get(category.lower())
     if canonical:
         return _CATEGORY_LOOKUP[canonical]
+
+    lower_display = _DISPLAY_LOOKUP.get(category.lower())
+    if lower_display:
+        return _CATEGORY_LOOKUP[lower_display]
+
     return None
 
-
-def get_display_name(category: str) -> str:
-    """Get clean display name for a category."""
+def get_display_name(category: str, lang: str = "en", mode: str = "b2c") -> str:
+    """Get clean display name for a category. Defaults to English B2C (iOS users)."""
     info = get_category_info(category)
-    return info.display_name if info else category
+    if not info:
+        return category
 
+    display_dict = info.b2c_display if mode == "b2c" else info.b2b_display
+    return display_dict.get(lang, display_dict.get("en", category))
 
-def get_group(category: str) -> Optional[str]:
+def get_group(category: str, lang: str = "en") -> Optional[str]:
     """Get the group name for a category."""
     info = get_category_info(category)
-    return info.group if info else None
-
+    if not info:
+        return None
+    return info.group.get(lang, info.group.get("en"))
 
 def get_group_color(category: str) -> str:
     """Get hex color for a category based on its group."""
     info = get_category_info(category)
     return info.color_hex if info else "#BDC3C7"
 
-
 def get_group_icon(category: str) -> str:
     """Get SF Symbol icon for a category based on its group."""
     info = get_category_info(category)
     return info.icon if info else "square.grid.2x2.fill"
-
 
 def get_category_icon(category: str) -> str:
     """Get Phosphor icon name for a specific category (cross-platform)."""
     info = get_category_info(category)
     return info.category_icon if info else "tag"
 
-
 def get_category_color(category: str) -> str:
     """Get hex color for a specific category."""
     info = get_category_info(category)
     return info.category_color_hex if info else "#8E8E93"
 
-
 def get_internal_name(category: str) -> Optional[str]:
-    """Resolve a category string to its internal name (the key stored in the DB).
-
-    Accepts internal names, display names, or lowercase variants of either.
-    Returns None if no match is found.
-    """
-    if category in _CATEGORY_LOOKUP:
-        return category
-    if category in _DISPLAY_LOOKUP:
-        return _DISPLAY_LOOKUP[category]
-    lower = category.lower()
-    if lower in _LOWER_LOOKUP:
-        return _LOWER_LOOKUP[lower]
-    if lower in _DISPLAY_LOOKUP:
-        return _DISPLAY_LOOKUP[lower]
-    return None
-
+    """Resolve a category string to its internal name (the key stored in the DB)."""
+    info = get_category_info(category)
+    return info.name if info else None
 
 def is_valid_category(category: str) -> bool:
     """Check if a parent category name is valid (case-insensitive)."""
-    if category in _CATEGORY_LOOKUP:
-        return True
-    return category.lower() in _LOWER_LOOKUP
-
+    return get_category_info(category) is not None
 
 def get_all_categories() -> List[str]:
     """Get all parent category names."""
     return _ALL_CATEGORIES.copy()
 
-
 def get_all_groups() -> List[str]:
-    """Get all group names."""
-    return list(_HIERARCHY.keys())
+    """Get all group names (returns internal group IDs like 'Ambient Food')."""
+    return [group["group_id"] for group in _TREE]
 
-
-def get_categories_for_group(group: str) -> List[str]:
+def get_categories_for_group(group_id: str) -> List[str]:
     """Get all category names in a group."""
-    entries = _HIERARCHY.get(group, [])
-    return [name for name, _ in entries]
-
+    for group in _TREE:
+        if group["group_id"] == group_id or group_id in group["group"].values():
+            return [cat["name"] for cat in group["categories"]]
+    return []
 
 def get_category_id(category: str) -> str:
-    """Generate a stable UPPER_SNAKE_CASE ID from a category's display name.
-
+    """Generate a stable UPPER_SNAKE_CASE ID from a category's internal name.
     e.g. "Meat & Poultry" -> "MEAT_POULTRY"
     """
-    s = get_display_name(category).upper()
+    internal_name = get_internal_name(category) or category
+    s = internal_name.upper()
     s = s.replace("(", "").replace(")", "")
     for ch in "&/-,.":
         s = s.replace(ch, "_")
@@ -851,37 +513,40 @@ def get_category_id(category: str) -> str:
     s = s.strip("_")
     return s
 
-
 def find_closest_match(name: str, threshold: float = 0.6) -> Optional[str]:
     """Find closest matching parent category using fuzzy matching."""
     if is_valid_category(name):
-        canonical = _LOWER_LOOKUP.get(name.lower())
-        return canonical if canonical else name
+        return get_internal_name(name)
 
     best_match = None
     best_score = 0.0
     name_lower = name.lower()
 
-    for cat in _ALL_CATEGORIES:
-        score = SequenceMatcher(None, name_lower, cat.lower()).ratio()
+    # Match against all known display translations
+    for display_str, internal_name in _DISPLAY_LOOKUP.items():
+        score = SequenceMatcher(None, name_lower, display_str).ratio()
         if score > best_score and score >= threshold:
             best_score = score
-            best_match = cat
+            best_match = internal_name
 
     return best_match
 
-
-def get_hierarchy() -> dict:
+def get_hierarchy(lang: str = "en", mode: str = "b2c") -> dict:
     """Get the full hierarchy as a dict for API responses."""
     groups = []
     for group in _TREE:
-        group_name = group["group"]
+        group_name = group["group"].get(lang, group["group"]["en"])
         cat_list = []
         for cat in group["categories"]:
+
+            # Select B2C or B2B display dict based on mode
+            display_dict = cat.get(f"{mode}_display", cat.get("b2c_display"))
+            display_name = display_dict.get(lang, display_dict.get("en", cat["name"]))
+
             cat_list.append({
                 "name": cat["name"],
-                "display_name": cat["display"],
-                "sub_categories": [cat["name"]],
+                "display_name": display_name,
+                "sub_categories": cat.get("granular", []),
                 "icon": cat["icon"],
                 "color_hex": cat["color"],
                 "budgetable": not cat.get("excluded", False),

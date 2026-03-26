@@ -3,18 +3,26 @@
 Offline scripts for building B2C promo candidate pools.
 
 These scripts are **not** part of the live `/api/v2/promos` request path.
-The API assembles reports at serve time from pre-computed candidates — no Pinecone calls at request time.
+The API assembles reports at serve time from pre-computed candidates — no database queries at request time.
 
 ## Architecture
 
 ```
 Batch (offline):
-  1. Rebuild enriched profiles (from latest receipts)
-  2. Generate promo candidates (Pinecone search + rerank → DB)
+  1. Ingest promo folders into promo_items table (see promo_folders_pipelines/)
+  2. Rebuild enriched profiles with category_profiles (from latest receipts)
+  3. Generate promo candidates (promo-first reverse matching → promo_candidates table)
 
 Serve Time (GET /api/v2/promos):
   Fetch candidates → Filter by user's current preferred_stores → Deterministic assembly → Response
 ```
+
+The recommendation engine uses **promo-first reverse matching**: each promo item in `promo_items` is scored against users' `category_profiles` (purchase frequency, brand loyalty, restock urgency, discount depth). Results are bucketed into 4 UX sections per store:
+
+1. **Your Everyday Staples** (5 items) — loyal + high frequency
+2. **Stock Up & Save** (4 items) — deep discounts in brand-agnostic categories
+3. **Ending Soon** (3 items) — expiring within 2 days
+4. **Discover for You** (3 items) — complementary items via category affinities
 
 Each user has **one** candidates row that gets overwritten on each generation run.
 
@@ -23,6 +31,8 @@ When a user changes their preferred stores, the next `GET /api/v2/promos` reques
 ## What Lives Here
 
 - `generate_promo_candidates.py` — Generates and stores promo candidate pools for all users with enriched profiles.
+- `promo_candidate_generation.py` — Core matching engine (scoring, bucketing).
+- `promo_candidate_generator.py` — Orchestrator (fetches profiles, calls engine, stores results).
 
 The enriched profile rebuild script lives at `scripts/rebuild_profiles.py` (outside this folder).
 
@@ -30,7 +40,7 @@ The enriched profile rebuild script lives at `scripts/rebuild_profiles.py` (outs
 
 Run in this order:
 
-1. **Ingest new promo folders into Pinecone** (see `promo_folders_pipelines/README.md`)
+1. **Ingest new promo folders into PostgreSQL** (see `promo_folders_pipelines/README.md`)
 2. **Rebuild enriched profiles**
 3. **Generate promo candidates**
 
@@ -82,9 +92,9 @@ Check:
 
 Check:
 
-- whether the user had `promo_interest_items` in their enriched profile
-- whether active promos existed in Pinecone for the current date
-- whether promos were rejected by display-eligibility rules
+- whether the user has `category_profiles` in their enriched profile
+- whether active promos exist in the `promo_items` table for the current date
+- whether promos matched any of the user's purchased categories
 
 ### Store Preferences Not Reflected
 

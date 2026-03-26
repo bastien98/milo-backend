@@ -22,6 +22,8 @@ class PromoStoreItem(BaseModel):
     display_description: Optional[str] = None
     display_unit_price: Optional[str] = None
     display_savings_label: Optional[str] = None
+    bucket: Optional[str] = None
+    bucket_label: Optional[str] = None
 
 
 class PromoStore(BaseModel):
@@ -128,3 +130,4 @@ class PromoStoreOption(BaseModel):
     """A store available for promo search filtering."""
     id: str
     name: str
+    has_promos: bool

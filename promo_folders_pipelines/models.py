@@ -25,6 +25,10 @@ class PromoItem:
     promo_price: float = 0.0                   # Price of ONE item as shown on shelf
     savings_amount: float = 0.0                # Total euro savings when completing the deal
 
+    # --- Purchase quantity & depth ---
+    min_purchase_qty: int = 1                    # Min items to complete the deal
+    promo_depth: float = 0.0                     # Effective per-item discount %
+
     # --- Category (for search/filtering) ---
     granular_category: str = ""                # From 238-item category list
     parent_category: str = ""                  # Derived from granular

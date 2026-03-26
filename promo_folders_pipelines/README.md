@@ -1,12 +1,13 @@
 # Promo Folder Ingestion Pipeline
 
-Extracts promotional items from Belgian supermarket folder PDFs (stored on Cloudflare R2) and upserts them into the Pinecone `promos` vector index.
+Extracts promotional items from Belgian supermarket folder PDFs (stored on Cloudflare R2) and upserts them into the PostgreSQL `promo_items` table.
 
 Adding a new store = creating a YAML config file. Zero Python code.
 
 ## Prerequisites
 
-- `GEMINI_API_KEY`, `PINECONE_API_KEY`, `R2_ACCOUNT_ID`, `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY` in `.env`
+- `GEMINI_API_KEY`, `DATABASE_URL`, `R2_ACCOUNT_ID`, `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY` in `.env`
+- Optional: `DATABASE_URL_NONPROD` for non-prod ingestion
 
 ### Python environment setup
 
@@ -55,7 +56,7 @@ One file per week directory, keyed by PDF filename. Every PDF **must** have an e
 Use ISO week format: `YYYY-W{WW}`. Get the current week:
 
 ```bash
-date +%G-W%V    # e.g. 2026-W12
+date +%G-W%V    # e.g. 2026-W13
 ```
 
 ## CLI Usage
@@ -63,20 +64,17 @@ date +%G-W%V    # e.g. 2026-W12
 All commands run from `milo-backend/`.
 
 ```bash
-# Ingest ALL promo folders for a store (all weeks, all PDFs)
+# Ingest a specific week (production)
+python3 -m promo_folders_pipelines.ingest --store colruyt --week 2026-W13
+
+# Ingest to non-prod database
+python3 -m promo_folders_pipelines.ingest --store colruyt --week 2026-W13 --env non-prod
+
+# Ingest ALL weeks for a store
 python3 -m promo_folders_pipelines.ingest --store colruyt
 
-# Ingest a specific week (all PDFs in that week)
-python3 -m promo_folders_pipelines.ingest --store colruyt --week 2026-W12
-
-# Dry-run (extract only, no Pinecone upsert — writes extracted_promos.json locally)
+# Dry-run (extract only, writes extracted_promos.json locally)
 python3 -m promo_folders_pipelines.ingest --store colruyt --dry-run
-
-# Delete all promos for a store (requires confirmation)
-python3 -m promo_folders_pipelines.ingest --clear-index --store colruyt
-
-# Wipe the entire promos index (requires confirmation)
-python3 -m promo_folders_pipelines.ingest --nuke-index
 
 # List available stores
 python3 -m promo_folders_pipelines.ingest --list-stores
@@ -85,10 +83,9 @@ python3 -m promo_folders_pipelines.ingest --list-stores
 | Flag | Description |
 |------|-------------|
 | `--store` | Store ID (e.g. `colruyt`, `delhaize`, `lidl`) |
-| `--week` | Specific week to ingest (e.g. `2026-W12`). Requires `--store`. |
-| `--dry-run` | Extract and parse only — no Pinecone upsert |
-| `--clear-index` | Delete ALL promos for a store (requires confirmation) |
-| `--nuke-index` | Delete ALL records from the entire index (requires confirmation) |
+| `--week` | Specific week to ingest (e.g. `2026-W13`). Requires `--store`. |
+| `--env` | Target database: `prod` (default) or `non-prod` |
+| `--dry-run` | Extract and parse only — no database upsert |
 | `--output` | Custom path for extracted JSON output |
 | `--list-stores` | Print available stores and exit |
 
@@ -98,8 +95,11 @@ python3 -m promo_folders_pipelines.ingest --list-stores
 2. **Split** — PyMuPDF splits into 2-page batches (oversized batches split further)
 3. **Extract** — Each batch sent to Gemini with structured output (Pydantic schema)
 4. **Parse** — Output validated into `PromoItem` objects, categories checked against `app/core/categories.py`
-5. **Dedup** — Items deduplicated by `normalized_name` (handles bilingual folders)
-6. **Upsert** — Auto-deletes existing promos for same store+validity, then upserts new records
+5. **Dedup** — Items deduplicated by `display_name` (handles bilingual folders)
+6. **Clean** — Existing promos for this retailer (scoped to week if `--week` is used) are deleted
+7. **Upsert** — Items inserted with `ON CONFLICT DO UPDATE` for idempotency
+
+The pipeline is **fully idempotent** — running it multiple times with the same arguments produces the same database state.
 
 ## Adding a New Store
 
@@ -114,9 +114,10 @@ promo_folders_pipelines/
 ├── r2_storage.py          # Cloudflare R2 client
 ├── models.py              # PromoItem dataclass
 ├── prompt_builder.py      # Builds Gemini prompt from YAML config
+├── promo_depth.py         # Discount depth calculation
 └── stores/                # One YAML config per store
     ├── __init__.py
     ├── colruyt.yaml
     ├── delhaize.yaml
-    └── ... (13 stores)
+    └── ... (8 stores)
 ```

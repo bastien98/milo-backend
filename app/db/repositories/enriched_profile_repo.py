@@ -25,10 +25,10 @@ class EnrichedProfileRepository:
         self,
         user_id: str,
         shopping_habits: Any,
-        promo_interest_items: Any,
-        data_period_start: Optional[date],
-        data_period_end: Optional[date],
-        receipts_analyzed: int,
+        category_profiles: Optional[Any] = None,
+        data_period_start: Optional[date] = None,
+        data_period_end: Optional[date] = None,
+        receipts_analyzed: int = 0,
     ) -> UserEnrichedProfile:
         profile = await self.get_by_user_id(user_id)
 
@@ -36,7 +36,7 @@ class EnrichedProfileRepository:
             profile = UserEnrichedProfile(
                 user_id=user_id,
                 shopping_habits=shopping_habits,
-                promo_interest_items=promo_interest_items,
+                category_profiles=category_profiles,
                 data_period_start=data_period_start,
                 data_period_end=data_period_end,
                 receipts_analyzed=receipts_analyzed,
@@ -45,7 +45,7 @@ class EnrichedProfileRepository:
             self.db.add(profile)
         else:
             profile.shopping_habits = shopping_habits
-            profile.promo_interest_items = promo_interest_items
+            profile.category_profiles = category_profiles
             profile.data_period_start = data_period_start
             profile.data_period_end = data_period_end
             profile.receipts_analyzed = receipts_analyzed

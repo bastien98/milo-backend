@@ -2,7 +2,7 @@
 Generic promo folder ingestion pipeline engine.
 
 Shared functions for PDF splitting, Gemini extraction (structured output),
-parsing, embedding, and Pinecone upsert.
+parsing, and PostgreSQL upsert.
 """
 
 import hashlib
@@ -18,7 +18,6 @@ import fitz  # PyMuPDF
 from google import genai
 from google.genai import types
 from pydantic import BaseModel as PydanticBaseModel, Field
-from pinecone import Pinecone
 
 from app.core.categories import (
     CATEGORIES_PROMPT_LIST,
@@ -26,6 +25,7 @@ from app.core.categories import (
     get_parent_category,
 )
 from promo_folders_pipelines.models import PromoItem
+from promo_folders_pipelines.promo_depth import compute_promo_depth
 from promo_folders_pipelines.prompt_builder import build_system_prompt
 from promo_folders_pipelines.stores import load_store_config
 
@@ -38,8 +38,6 @@ PdfData = bytes
 # Config
 # ---------------------------------------------------------------------------
 GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "")
-PINECONE_API_KEY = os.environ.get("PINECONE_API_KEY", "")
-PINECONE_INDEX_HOST = "promos-k16b2f4.svc.aped-4627-b74a.pinecone.io"
 
 GEMINI_MODEL = "gemini-3-pro-preview"
 MAX_OUTPUT_TOKENS = 32768
@@ -68,6 +66,9 @@ class _PromoItemSchema(PydanticBaseModel):
     original_price: float = Field(ge=0, description="Regular price before promo, rounded to 2 decimal places. REQUIRED — skip item if not visible.")
     promo_price: float = Field(ge=0, description="Price of ONE item/pack as shown on shelf. For ANY X+Y gratis deal (1+1, 2+1, 3+3, 4+1, 12+6, etc.): ALWAYS same as original_price. For -25%: original_price × 0.75. For X voor €Y: €Y ÷ X. Rounded to 2 decimal places.")
     savings_amount: float = Field(ge=0, description="Total euro savings when completing the deal. For 1+1 @ €3: savings=3.00. For 2+1 @ €3: savings=3.00. For -25% @ €4: savings=1.00. For 2e halve prijs @ €3: savings=1.50. For 12+6 gratis @ €2.33: savings=13.98. Rounded to 2 decimal places.")
+
+    # --- Purchase quantity (for promo depth calculation) ---
+    min_purchase_qty: int = Field(ge=1, description="Minimum number of items/packs a shopper must buy to complete the deal. For 1+1 Gratis: 2. For 2+1 Gratis: 3. For 12+6 Gratis: 18. For 2e aan Halve Prijs: 2. For 2e aan -70%: 2. For -25%: 1. For -25% Vanaf 2 Verpakkingen: 2. For -30% Vanaf 12 Blikken: 12. For Prijsverlaging: 1. For 3 voor €5: 3.")
 
     # --- Category ---
     granular_category: str = Field(description="Category from the provided list, or 'Other' if nothing fits.")
@@ -329,6 +330,10 @@ def parse_promo_items(
         promo_price = round(promo_price, 2)
         savings_amount = round(savings_amount, 2)
 
+        # Purchase quantity & promo depth
+        min_purchase_qty = max(1, int(raw.get("min_purchase_qty", 1)))
+        promo_depth = compute_promo_depth(savings_amount, original_price, min_purchase_qty)
+
         # Category validation
         granular = raw.get("granular_category", "Other")
         if granular not in GRANULAR_CATEGORIES:
@@ -346,6 +351,8 @@ def parse_promo_items(
                 original_price=original_price,
                 promo_price=promo_price,
                 savings_amount=savings_amount,
+                min_purchase_qty=min_purchase_qty,
+                promo_depth=promo_depth,
                 granular_category=granular,
                 parent_category=parent,
                 validity_start=validity_start,
@@ -372,22 +379,6 @@ def _parse_price(val) -> Optional[float]:
         return None
 
 
-# ---------------------------------------------------------------------------
-# Embedding & Pinecone
-# ---------------------------------------------------------------------------
-def build_embedding_text(item: PromoItem) -> str:
-    """Build the text for Pinecone integrated embedding.
-
-    Format: display_name (lowered) + [granular_category]
-    The display_name already contains brand, product, variant, and size,
-    providing rich context for semantic search.
-    """
-    parts = [item.display_name.lower()]
-    if item.granular_category and item.granular_category != "Other":
-        parts.append(f"[{item.granular_category}]")
-    return " ".join(parts)
-
-
 def generate_record_id(item: PromoItem) -> str:
     """Generate a deterministic ID for a promo item."""
     key = (
@@ -397,176 +388,121 @@ def generate_record_id(item: PromoItem) -> str:
     return hashlib.sha256(key.encode()).hexdigest()[:16]
 
 
-def _date_to_epoch(date_str: Optional[str]) -> int:
-    """Convert YYYY-MM-DD to YYYYMMDD integer for Pinecone numeric filtering."""
-    if not date_str:
-        raise ValueError("Missing required validity date")
-    try:
-        return int(date_str.replace("-", ""))
-    except (ValueError, AttributeError) as exc:
-        raise ValueError(f"Invalid validity date: {date_str}") from exc
+# ---------------------------------------------------------------------------
+# PostgreSQL upsert
+# ---------------------------------------------------------------------------
+def _get_pg_connection_string() -> str:
+    """Get a plain postgresql:// connection string for psycopg2."""
+    db_url = os.environ.get("DATABASE_URL", "")
+    # Strip SQLAlchemy driver suffixes if present
+    for suffix in ("+asyncpg", "+psycopg2"):
+        db_url = db_url.replace(suffix, "")
+    return db_url
 
 
-def delete_retailer_promos(index, retailer: str, validity_start: str, validity_end: str) -> int:
-    """Delete existing promos for a retailer + validity period before re-ingesting."""
-    logger.info(
-        f"Cleaning up existing {retailer} promos "
-        f"(validity {validity_start} to {validity_end})..."
-    )
+def upsert_to_postgres(items: list[PromoItem]) -> int:
+    """Upsert promo items to PostgreSQL promo_items table.
 
-    ids_to_delete = []
-    for id_batch in index.list(namespace="__default__"):
-        if not id_batch:
-            break
-        fetched = index.fetch(ids=list(id_batch), namespace="__default__")
-        for vec_id, vec in fetched.vectors.items():
-            meta = vec.metadata or {}
-            if (
-                meta.get("source_retailer") == retailer
-                and meta.get("validity_start") == validity_start
-                and meta.get("validity_end") == validity_end
-            ):
-                ids_to_delete.append(vec_id)
-
-    if ids_to_delete:
-        for i in range(0, len(ids_to_delete), 100):
-            batch = ids_to_delete[i : i + 100]
-            index.delete(ids=batch, namespace="__default__")
-        logger.info(f"Deleted {len(ids_to_delete)} existing records for {retailer} ({validity_start} to {validity_end})")
-    else:
-        logger.info(f"No existing records found for {retailer} ({validity_start} to {validity_end})")
-
-    return len(ids_to_delete)
-
-
-def clear_all_retailer_promos(retailer: str) -> int:
-    """Delete ALL promos for a retailer regardless of validity period."""
-    logger.info(f"Clearing ALL {retailer} promos from Pinecone index...")
-
-    pc = Pinecone(api_key=PINECONE_API_KEY)
-    index = pc.Index(host=PINECONE_INDEX_HOST)
-
-    ids_to_delete = []
-    for id_batch in index.list(namespace="__default__"):
-        if not id_batch:
-            break
-        fetched = index.fetch(ids=list(id_batch), namespace="__default__")
-        for vec_id, vec in fetched.vectors.items():
-            meta = vec.metadata or {}
-            if meta.get("source_retailer") == retailer:
-                ids_to_delete.append(vec_id)
-
-    if ids_to_delete:
-        for i in range(0, len(ids_to_delete), 100):
-            batch = ids_to_delete[i : i + 100]
-            index.delete(ids=batch, namespace="__default__")
-        logger.info(f"Deleted {len(ids_to_delete)} total records for {retailer}")
-    else:
-        logger.info(f"No existing records found for {retailer}")
-
-    return len(ids_to_delete)
-
-
-def nuke_entire_index() -> int:
-    """Delete ALL records from the entire Pinecone promos index."""
-    logger.info("Nuking ENTIRE Pinecone promos index...")
-
-    pc = Pinecone(api_key=PINECONE_API_KEY)
-    index = pc.Index(host=PINECONE_INDEX_HOST)
-
-    ids_to_delete = []
-    for id_batch in index.list(namespace="__default__"):
-        if not id_batch:
-            break
-        ids_to_delete.extend(list(id_batch))
-
-    if ids_to_delete:
-        for i in range(0, len(ids_to_delete), 100):
-            batch = ids_to_delete[i : i + 100]
-            index.delete(ids=batch, namespace="__default__")
-        logger.info(f"Deleted {len(ids_to_delete)} total records from index")
-    else:
-        logger.info("Index was already empty")
-
-    return len(ids_to_delete)
-
-
-def upsert_to_pinecone(items: list[PromoItem], batch_size: int = 50, auto_delete: bool = True) -> int:
-    """Upsert promo items to Pinecone with integrated embedding.
-
-    Args:
-        auto_delete: If True, delete existing promos for same store+validity before upserting.
-                     Set to False when ingesting multiple PDFs for the same store+validity
-                     to avoid wiping items from previous PDFs.
+    Uses raw psycopg2 — no SQLAlchemy ORM, no model imports needed.
+    Caller is responsible for cleanup (use delete_retailer_promos_pg before calling).
     """
     if not items:
-        logger.warning("No items to upsert")
+        logger.warning("No items to upsert to PostgreSQL")
         return 0
 
-    pc = Pinecone(api_key=PINECONE_API_KEY)
-    index = pc.Index(host=PINECONE_INDEX_HOST)
+    import psycopg2
 
-    # Delete existing records for this retailer + validity period
-    if auto_delete:
-        retailer = items[0].source_retailer
-        validity_start = items[0].validity_start or ""
-        validity_end = items[0].validity_end or ""
-        if retailer and validity_start:
-            delete_retailer_promos(index, retailer, validity_start, validity_end)
-
-    records = []
-    for item in items:
-        if not item.validity_start or not item.validity_end:
-            raise ValueError(
-                f"Promo item '{item.display_name}' is missing validity window and cannot be indexed"
+    conn = psycopg2.connect(_get_pg_connection_string())
+    try:
+        cur = conn.cursor()
+        for item in items:
+            record_id = generate_record_id(item)
+            cur.execute(
+                """
+                INSERT INTO promo_items (
+                    id, display_name, display_name_lower, display_mechanism,
+                    display_description, display_savings_label, display_unit_price,
+                    original_price, promo_price, savings_amount, min_purchase_qty, promo_depth,
+                    granular_category, source_retailer, source_type,
+                    page_number, promo_folder_url, validity_start, validity_end
+                ) VALUES (
+                    %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s
+                )
+                ON CONFLICT (id) DO UPDATE SET
+                    display_name = EXCLUDED.display_name,
+                    display_name_lower = EXCLUDED.display_name_lower,
+                    display_mechanism = EXCLUDED.display_mechanism,
+                    display_description = EXCLUDED.display_description,
+                    display_savings_label = EXCLUDED.display_savings_label,
+                    display_unit_price = EXCLUDED.display_unit_price,
+                    original_price = EXCLUDED.original_price,
+                    promo_price = EXCLUDED.promo_price,
+                    savings_amount = EXCLUDED.savings_amount,
+                    min_purchase_qty = EXCLUDED.min_purchase_qty,
+                    promo_depth = EXCLUDED.promo_depth,
+                    granular_category = EXCLUDED.granular_category,
+                    source_retailer = EXCLUDED.source_retailer,
+                    source_type = EXCLUDED.source_type,
+                    page_number = EXCLUDED.page_number,
+                    promo_folder_url = EXCLUDED.promo_folder_url,
+                    validity_start = EXCLUDED.validity_start,
+                    validity_end = EXCLUDED.validity_end
+                """,
+                (
+                    record_id,
+                    item.display_name,
+                    item.display_name.lower(),
+                    item.display_mechanism,
+                    item.display_description,
+                    item.display_savings_label,
+                    item.display_unit_price,
+                    item.original_price,
+                    item.promo_price,
+                    item.savings_amount,
+                    item.min_purchase_qty,
+                    item.promo_depth,
+                    item.granular_category,
+                    item.source_retailer,
+                    item.source_type,
+                    item.page_number,
+                    item.promo_folder_url,
+                    item.validity_start,
+                    item.validity_end,
+                ),
             )
 
-        record = {
-            "_id": generate_record_id(item),
-            "text": build_embedding_text(item),
-            # Display fields (all guaranteed by quality gate)
-            "display_name": item.display_name,
-            "display_mechanism": item.display_mechanism,
-            "display_description": item.display_description,
-            "display_savings_label": item.display_savings_label,
-            # Pricing (all guaranteed by quality gate)
-            "original_price": item.original_price,
-            "promo_price": item.promo_price,
-            "savings_amount": item.savings_amount,
-            # Category
-            "granular_category": item.granular_category,
-            "parent_category": item.parent_category,
-            # Metadata
-            "validity_start": item.validity_start,
-            "validity_end": item.validity_end,
-            "validity_start_epoch": _date_to_epoch(item.validity_start),
-            "validity_end_epoch": _date_to_epoch(item.validity_end),
-            "source_retailer": item.source_retailer,
-            "source_type": item.source_type,
-        }
-        # Optional fields
-        if item.display_unit_price:
-            record["display_unit_price"] = item.display_unit_price
-        if item.page_number is not None:
-            record["page_number"] = item.page_number
-        if item.promo_folder_url:
-            record["promo_folder_url"] = item.promo_folder_url
-        records.append(record)
+        conn.commit()
+        cur.close()
+    finally:
+        conn.close()
 
-    total_upserted = 0
-    for i in range(0, len(records), batch_size):
-        batch = records[i : i + batch_size]
-        index.upsert_records(namespace="__default__", records=batch)
-        total_upserted += len(batch)
-        logger.info(
-            f"Upserted batch {i // batch_size + 1}: {len(batch)} records "
-            f"(total: {total_upserted})"
-        )
-        if i + batch_size < len(records):
-            time.sleep(0.5)
+    logger.info(f"PostgreSQL upsert complete: {len(items)} records in promo_items table")
+    return len(items)
 
-    logger.info(f"Upsert complete: {total_upserted} records in Pinecone")
-    return total_upserted
+
+def delete_retailer_promos_pg(retailer: str, validity_start: str = None, validity_end: str = None) -> int:
+    """Delete promo items from PostgreSQL for a retailer (optionally filtered by validity window)."""
+    import psycopg2
+
+    conn = psycopg2.connect(_get_pg_connection_string())
+    try:
+        cur = conn.cursor()
+        if validity_start and validity_end:
+            cur.execute(
+                "DELETE FROM promo_items WHERE source_retailer = %s AND validity_start = %s AND validity_end = %s",
+                (retailer, validity_start, validity_end),
+            )
+        else:
+            cur.execute("DELETE FROM promo_items WHERE source_retailer = %s", (retailer,))
+        deleted = cur.rowcount
+        conn.commit()
+        cur.close()
+    finally:
+        conn.close()
+
+    if deleted:
+        logger.info(f"Deleted {deleted} existing records for {retailer}")
+    return deleted
 
 
 # ---------------------------------------------------------------------------
@@ -577,8 +513,6 @@ def run_pipeline(
     pdf_data: bytes,
     promo_folder_url: Optional[str] = None,
     dry_run: bool = False,
-    clear_index: bool = False,
-    auto_delete: bool = True,
     pdf_label: str = "",
 ) -> list[PromoItem]:
     """Run the full ingestion pipeline for a store.
@@ -587,10 +521,7 @@ def run_pipeline(
         store_id: Canonical store name from stores.py (e.g. "colruyt")
         pdf_data: Raw PDF bytes (downloaded from R2)
         promo_folder_url: Optional URL of the promo folder source
-        dry_run: If True, extract and parse only — no Pinecone upsert
-        clear_index: If True, delete ALL existing promos for this store first
-        auto_delete: If True, auto-delete existing promos for same store+validity
-                     before upserting. Set to False for 2nd+ PDFs in multi-PDF ingestion.
+        dry_run: If True, extract and parse only — no database upsert
         pdf_label: Human-readable label for logging (e.g. "colruyt/2026-W12/food.pdf")
 
     Returns:
@@ -608,13 +539,6 @@ def run_pipeline(
 
     if not GEMINI_API_KEY:
         raise RuntimeError("GEMINI_API_KEY not set in environment")
-
-    if not dry_run and not PINECONE_API_KEY:
-        raise RuntimeError("PINECONE_API_KEY not set in environment")
-
-    # Clear all retailer promos if requested
-    if clear_index and not dry_run:
-        clear_all_retailer_promos(canonical_store_id)
 
     # Step 1: Extract from PDF via Gemini
     raw_data = extract_promos_from_pdf(pdf_data, config)
@@ -642,9 +566,9 @@ def run_pipeline(
 
     # Step 4: Upsert or dry-run
     if dry_run:
-        logger.info("DRY RUN — skipping Pinecone upsert")
+        logger.info("DRY RUN — skipping upsert")
     else:
-        count = upsert_to_pinecone(items, auto_delete=auto_delete)
-        logger.info(f"Done! {count} promo records in Pinecone 'promos' index.")
+        pg_count = upsert_to_postgres(items)
+        logger.info(f"Done! {pg_count} promo records in promo_items table")
 
     return items

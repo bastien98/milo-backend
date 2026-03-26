@@ -3,6 +3,7 @@ from typing import Optional
 
 from sqlalchemy import select, func, update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -97,19 +98,26 @@ class CashbackRepository:
         )
         balance = result.scalar_one_or_none()
         if balance is None:
-            balance = CashbackBalance(
-                user_id=user_id,
-                total_earned=0.0,
-                total_paid_out=0.0,
-                current_balance=0.0,
-                points_balance=0,
-                total_points_earned=0,
-                total_points_paid_out=0,
-                standard_spins=0,
-                premium_spins=0,
-            )
-            self.db.add(balance)
-            await self.db.flush()
+            try:
+                balance = CashbackBalance(
+                    user_id=user_id,
+                    total_earned=0.0,
+                    total_paid_out=0.0,
+                    current_balance=0.0,
+                    points_balance=0,
+                    total_points_earned=0,
+                    total_points_paid_out=0,
+                    standard_spins=0,
+                    premium_spins=0,
+                )
+                self.db.add(balance)
+                await self.db.flush()
+            except IntegrityError:
+                await self.db.rollback()
+                result = await self.db.execute(
+                    select(CashbackBalance).where(CashbackBalance.user_id == user_id)
+                )
+                balance = result.scalar_one()
         return balance
 
     async def upsert_points_increment(self, user_id: str, points: int) -> None:

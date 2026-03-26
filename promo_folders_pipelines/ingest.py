@@ -1,30 +1,28 @@
 #!/usr/bin/env python3
 """
-Promo folder ingestion CLI — reads PDFs from Cloudflare R2.
+Promo folder ingestion CLI — reads PDFs from Cloudflare R2, upserts to PostgreSQL.
 
 Usage (from milo-backend/):
-    # Ingest all promo folders for a store (all weeks)
-    python -m promo_folders_pipelines.ingest --store colruyt
+    # Ingest a specific week (production)
+    python3 -m promo_folders_pipelines.ingest --store colruyt --week 2026-W13
 
-    # Ingest a specific week
-    python -m promo_folders_pipelines.ingest --store colruyt --week 2026-W12
+    # Ingest to non-prod
+    python3 -m promo_folders_pipelines.ingest --store colruyt --week 2026-W13 --env non-prod
 
-    # Dry-run (extract only, no Pinecone upsert)
-    python -m promo_folders_pipelines.ingest --store colruyt --dry-run
+    # Ingest all weeks for a store
+    python3 -m promo_folders_pipelines.ingest --store colruyt
 
-    # Delete all promos for a store
-    python -m promo_folders_pipelines.ingest --clear-index --store colruyt
-
-    # Delete entire promos index
-    python -m promo_folders_pipelines.ingest --nuke-index
+    # Dry-run (extract only, no database upsert)
+    python3 -m promo_folders_pipelines.ingest --store colruyt --dry-run
 
     # List available stores
-    python -m promo_folders_pipelines.ingest --list-stores
+    python3 -m promo_folders_pipelines.ingest --list-stores
 """
 
 import argparse
 import json
 import logging
+import os
 import sys
 from pathlib import Path
 
@@ -41,7 +39,7 @@ except ImportError:
     sys.exit(1)
 
 from promo_folders_pipelines.stores import list_stores, load_store_config
-from promo_folders_pipelines.pipeline import run_pipeline, clear_all_retailer_promos, nuke_entire_index
+from promo_folders_pipelines.pipeline import run_pipeline, delete_retailer_promos_pg
 from promo_folders_pipelines.r2_storage import R2PromoStorage
 
 logging.basicConfig(
@@ -111,7 +109,7 @@ def _collect_pdfs_from_r2(
 
 def main():
     parser = argparse.ArgumentParser(
-        description="Ingest promo folder PDFs from Cloudflare R2 into the Pinecone promos index."
+        description="Ingest promo folder PDFs from Cloudflare R2 into the PostgreSQL promo_items table."
     )
     parser.add_argument(
         "--store",
@@ -124,17 +122,13 @@ def main():
     parser.add_argument(
         "--dry-run",
         action="store_true",
-        help="Extract and parse only; do not upsert to Pinecone",
+        help="Extract and parse only; do not upsert to database",
     )
     parser.add_argument(
-        "--clear-index",
-        action="store_true",
-        help="Clear ALL existing promos for this store (requires confirmation)",
-    )
-    parser.add_argument(
-        "--nuke-index",
-        action="store_true",
-        help="Delete ALL records from the entire promos index (requires confirmation)",
+        "--env",
+        choices=["prod", "non-prod"],
+        default="non-prod",
+        help="Target environment: 'non-prod' (default) or 'prod'",
     )
     parser.add_argument(
         "--list-stores",
@@ -147,6 +141,16 @@ def main():
     )
     args = parser.parse_args()
 
+    # --- Environment override ---
+    if args.env == "prod":
+        logger.info("Targeting PRODUCTION database")
+    else:
+        nonprod_url = os.environ.get("DATABASE_URL_NONPROD", "")
+        if not nonprod_url:
+            parser.error("DATABASE_URL_NONPROD not set in .env")
+        os.environ["DATABASE_URL"] = nonprod_url
+        logger.info("Targeting NON-PROD database")
+
     # --- List stores ---
     if args.list_stores:
         stores = list_stores()
@@ -155,49 +159,13 @@ def main():
             print(f"  - {s}")
         sys.exit(0)
 
-    # --- Nuke entire index (standalone command) ---
-    if args.nuke_index:
-        if not _confirm(
-            "This will DELETE ALL records from the entire Pinecone promos index.\n"
-            "   This affects ALL stores, ALL validity periods. This cannot be undone."
-        ):
-            logger.info("Aborted.")
-            sys.exit(0)
-        deleted = nuke_entire_index()
-        logger.info(f"Done. {deleted} records deleted from the entire index.")
-        sys.exit(0)
-
     # --- Validate argument combinations ---
     if args.week and not args.store:
         parser.error("--week requires --store")
 
-    # --- Clear store index (standalone, without ingestion) ---
-    if args.clear_index and not args.week:
-        if not args.store:
-            parser.error("--store is required with --clear-index")
-        canonical = load_store_config(args.store)["store_id"]
-        if not _confirm(
-            f"This will DELETE ALL promos for store '{canonical}' from the Pinecone index.\n"
-            f"   This cannot be undone."
-        ):
-            logger.info("Aborted.")
-            sys.exit(0)
-        deleted = clear_all_retailer_promos(canonical)
-        logger.info(f"Done. {deleted} records deleted for store '{canonical}'.")
-        sys.exit(0)
-
     # --- Full ingestion pipeline ---
     if not args.store:
         parser.error("--store is required (use --list-stores to see available stores)")
-
-    # HITL confirmation for --clear-index during ingestion
-    if args.clear_index:
-        if not _confirm(
-            f"This will DELETE ALL existing promos for store '{args.store}' before ingesting.\n"
-            f"   This cannot be undone."
-        ):
-            logger.info("Aborted.")
-            sys.exit(0)
 
     # Collect PDFs from R2
     r2 = R2PromoStorage()
@@ -209,7 +177,23 @@ def main():
 
     logger.info(f"Will ingest {len(pdf_refs)} PDF(s) for store '{args.store}'")
 
-    # Ingest each PDF
+    # Clean slate: delete existing promos before ingesting (idempotent)
+    if not args.dry_run:
+        canonical = load_store_config(args.store)["store_id"]
+        if args.week:
+            # Scoped delete: only this week's validity windows
+            seen_windows = set()
+            for ref in pdf_refs:
+                meta = ref["metadata"]
+                window = (meta.get("validity_start"), meta.get("validity_end"))
+                if window not in seen_windows and window[0] and window[1]:
+                    seen_windows.add(window)
+                    delete_retailer_promos_pg(canonical, validity_start=window[0], validity_end=window[1])
+        else:
+            # Full delete: all weeks for this retailer
+            delete_retailer_promos_pg(canonical)
+
+    # Ingest each PDF (auto_delete=False since we already cleaned up above)
     all_items = []
     for idx, ref in enumerate(pdf_refs):
         label = f"{ref['store_id']}/{ref['week']}/{ref['filename']}"
@@ -226,8 +210,6 @@ def main():
             pdf_data=pdf_data,
             promo_folder_url=meta.get("promo_folder_url"),
             dry_run=args.dry_run,
-            clear_index=args.clear_index if idx == 0 else False,
-            auto_delete=idx == 0,
             pdf_label=label,
         )
         all_items.extend(items)

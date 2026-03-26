@@ -136,18 +136,10 @@ class PromoReportService:
                 report_date=candidates_row.report_date,
             )
 
-        # 2. Score and rank — relevance-first, savings as tiebreaker
-        for item in items:
-            relevance = item.get("relevance_score") or 0.6
-            urgency = min(item.get("restock_urgency") or 0.5, 3.0)
-            freq_factor = 30 / max(item.get("purchase_frequency_days") or 30, 1)
-            savings_bonus = min(item.get("savings", 0), 5.0)
+        # 2. Sort by pre-computed score (from candidate generation)
+        items.sort(key=lambda x: x.get("score", 0), reverse=True)
 
-            item["_score"] = relevance * urgency * freq_factor + (savings_bonus * 0.1)
-
-        items.sort(key=lambda x: x.get("_score", 0), reverse=True)
-
-        # 3. Group all items by store
+        # 3. Group all items by store, preserving bucket assignment
         stores_dict: dict[str, list[dict]] = {}
         for item in items:
             store_name = item.get("store_name", "Unknown")
@@ -156,12 +148,12 @@ class PromoReportService:
             stores_dict[store_name].append({
                 "item_key": item.get("item_key"),
                 "brand": item.get("brand", ""),
-                "product_name": item.get("product_name", ""),
+                "product_name": item.get("display_name", ""),
                 "original_price": item.get("original_price", 0),
                 "promo_price": item.get("promo_price", 0),
                 "savings": item.get("savings_amount") or item.get("savings", 0),
                 "discount_percentage": item.get("discount_percentage", 0),
-                "mechanism": item.get("mechanism", ""),
+                "mechanism": item.get("display_mechanism", ""),
                 "validity_start": item.get("validity_start", ""),
                 "validity_end": item.get("validity_end", ""),
                 "promo_folder_url": item.get("promo_folder_url"),
@@ -171,6 +163,8 @@ class PromoReportService:
                 "display_unit_price": item.get("display_unit_price"),
                 "display_savings_label": item.get("display_savings_label"),
                 "savings_amount": item.get("savings_amount", 0),
+                "bucket": item.get("bucket", ""),
+                "bucket_label": item.get("bucket_label", ""),
             })
 
         stores = []

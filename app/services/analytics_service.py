@@ -31,18 +31,17 @@ from app.schemas.analytics import (
     YearCategorySpending,
     YearSummaryResponse,
     PieChartCategory,
+    PieChartGroup,
     PieChartStore,
     PieChartSummaryResponse,
-    get_category_color,
 )
 from app.core.categories import (
     get_display_name,
     get_category_id,
     get_category_info,
+    get_category_color,
     get_group_color,
     get_group_icon,
-    GROUP_COLORS,
-    GROUP_ICONS,
     EXCLUDED_CATEGORIES,
 )
 
@@ -100,7 +99,7 @@ class AnalyticsService:
             dates = [t.date for t in transactions]
             unique_receipt_ids = set(t.receipt_id for t in transactions if t.receipt_id)
 
-        tx_amounts = [(t, t.item_price) for t in transactions if not t.is_discount and not t.is_deposit]
+        tx_amounts = [(t, -t.item_price if t.is_discount else t.item_price) for t in transactions if not t.is_deposit]
 
         # Calculate totals
         total_spend = sum(amount for _, amount in tx_amounts)
@@ -178,7 +177,7 @@ class AnalyticsService:
         result = await self.db.execute(query)
         transactions = list(result.scalars().all())
 
-        tx_amounts = [(t, t.item_price) for t in transactions if not t.is_discount and not t.is_deposit]
+        tx_amounts = [(t, -t.item_price if t.is_discount else t.item_price) for t in transactions if not t.is_deposit]
 
         # Calculate total spend
         total_spend = sum(amount for _, amount in tx_amounts)
@@ -194,12 +193,12 @@ class AnalyticsService:
         # Use the net total (including discounts) for accurate percentages and total
         # Excluded categories are hidden from the pie chart but still affect the total
 
-        # Build category list with color_hex
+        # Build category list with color_hex and group info
         categories = []
         for category_name, data in category_data.items():
             percentage = (data["amount"] / total_spend * 100) if total_spend > 0 else 0
-            # Get color from group-based color mapping
             color_hex = get_category_color(category_name)
+            info = get_category_info(category_name)
 
             categories.append(
                 PieChartCategory(
@@ -209,11 +208,46 @@ class AnalyticsService:
                     color_hex=color_hex,
                     percentage=round(percentage, 1),
                     transaction_count=data["count"],
+                    group=info.group.get("en") if info else None,
+                    group_color_hex=info.color_hex if info else None,
+                    group_icon=info.icon if info else None,
                 )
             )
 
         # Sort by total_spent descending
         categories.sort(key=lambda x: x.total_spent, reverse=True)
+
+        # Build group-level aggregation
+        group_map: Dict[str, dict] = {}
+        for cat in categories:
+            if cat.group not in group_map:
+                group_map[cat.group] = {
+                    "group_name": cat.group,
+                    "group_icon": cat.group_icon or "",
+                    "group_color_hex": cat.group_color_hex or "#8E8E93",
+                    "total_spent": 0.0,
+                    "transaction_count": 0,
+                    "categories": [],
+                }
+            group_map[cat.group]["total_spent"] += cat.total_spent
+            group_map[cat.group]["transaction_count"] += cat.transaction_count
+            group_map[cat.group]["categories"].append(cat)
+
+        groups = []
+        for g in group_map.values():
+            percentage = (g["total_spent"] / total_spend * 100) if total_spend > 0 else 0
+            groups.append(
+                PieChartGroup(
+                    group_name=g["group_name"],
+                    group_icon=g["group_icon"],
+                    group_color_hex=g["group_color_hex"],
+                    total_spent=round(g["total_spent"], 2),
+                    percentage=round(percentage, 1),
+                    transaction_count=g["transaction_count"],
+                    categories=g["categories"],
+                )
+            )
+        groups.sort(key=lambda x: x.total_spent, reverse=True)
 
         # Group by store
         store_data = defaultdict(lambda: {"amount": 0.0, "receipts": set()})
@@ -243,6 +277,7 @@ class AnalyticsService:
             year=year,
             total_spent=round(total_spend, 2),
             categories=categories,
+            groups=groups,
             stores=stores,
         )
 
@@ -292,7 +327,7 @@ class AnalyticsService:
             actual_start = start_date
             actual_end = end_date
 
-        tx_amounts = [(t, t.item_price) for t in transactions if not t.is_discount and not t.is_deposit]
+        tx_amounts = [(t, -t.item_price if t.is_discount else t.item_price) for t in transactions if not t.is_deposit]
 
         # Calculate totals
         total_spend = sum(amount for _, amount in tx_amounts)
@@ -376,7 +411,7 @@ class AnalyticsService:
             actual_start = start_date
             actual_end = end_date
 
-        tx_amounts = [(t, t.item_price) for t in transactions if not t.is_discount and not t.is_deposit]
+        tx_amounts = [(t, -t.item_price if t.is_discount else t.item_price) for t in transactions if not t.is_deposit]
 
         # Calculate totals
         total_spend = sum(amount for _, amount in tx_amounts)
@@ -384,7 +419,7 @@ class AnalyticsService:
         receipt_ids = set(t.receipt_id for t in transactions if t.receipt_id)
 
         # Calculate average item price
-        total_raw_spend = sum(t.item_price for t in transactions if not t.is_discount and not t.is_deposit)
+        total_raw_spend = sum(t.item_price for t in transactions if not t.is_discount and not t.is_deposit)  # gross prices for avg item price
         average_item_price = round(total_raw_spend / total_items, 2) if total_items > 0 else None
 
         # Group by category
@@ -416,9 +451,9 @@ class AnalyticsService:
         enriched_categories = []
         for cat in categories:
             info = get_category_info(cat.name)
-            group_name = info.group if info else None
-            group_color = GROUP_COLORS.get(group_name, "#BDC3C7") if group_name else None
-            group_icon = GROUP_ICONS.get(group_name, "square.grid.2x2.fill") if group_name else None
+            group_name = info.group.get("en") if info else None
+            group_color = get_group_color(cat.name)
+            group_icon = get_group_icon(cat.name)
             enriched_categories.append(
                 CategorySpending(
                     name=cat.name,
@@ -483,7 +518,7 @@ class AnalyticsService:
         if not transactions:
             return TrendsResponse(trends=[], period_type=period_type)
 
-        tx_amounts = [(t, t.item_price) for t in transactions if not t.is_discount and not t.is_deposit]
+        tx_amounts = [(t, -t.item_price if t.is_discount else t.item_price) for t in transactions if not t.is_deposit]
 
         # Group transactions by period
         period_data = defaultdict(lambda: {
@@ -584,7 +619,7 @@ class AnalyticsService:
         if not transactions:
             return TrendsResponse(trends=[], period_type=period_type)
 
-        tx_amounts = [(t, t.item_price) for t in transactions if not t.is_discount and not t.is_deposit]
+        tx_amounts = [(t, -t.item_price if t.is_discount else t.item_price) for t in transactions if not t.is_deposit]
 
         # Group transactions by period
         period_data = defaultdict(lambda: {
@@ -684,7 +719,7 @@ class AnalyticsService:
         if not transactions:
             return PeriodsResponse(periods=[], total_periods=0)
 
-        tx_amounts = [(t, t.item_price) for t in transactions if not t.is_discount and not t.is_deposit]
+        tx_amounts = [(t, -t.item_price if t.is_discount else t.item_price) for t in transactions if not t.is_deposit]
 
         # Group transactions by period
         period_data = defaultdict(lambda: {
@@ -897,7 +932,7 @@ class AnalyticsService:
                 top_stores=[],
             )
 
-        tx_amounts = [(t, t.item_price) for t in transactions if not t.is_discount and not t.is_deposit]
+        tx_amounts = [(t, -t.item_price if t.is_discount else t.item_price) for t in transactions if not t.is_deposit]
 
         # Calculate totals
         total_spend = sum(amount for _, amount in tx_amounts)
@@ -907,7 +942,7 @@ class AnalyticsService:
         total_receipts = len(receipt_ids)
 
         # Calculate raw total for average item price
-        total_raw_spend = sum(t.item_price for t in transactions if not t.is_discount and not t.is_deposit)
+        total_raw_spend = sum(t.item_price for t in transactions if not t.is_discount and not t.is_deposit)  # gross prices for avg item price
 
         # Calculate number of actual periods with data for accurate averages
         periods_with_data = await self._count_periods_with_data(
@@ -1000,18 +1035,25 @@ class AnalyticsService:
 
         period_col = func.date_trunc(trunc_interval, Transaction.date).label('period_start')
 
-        # Get aggregates per period
+        # Get aggregates per period (subtract discounts instead of excluding them)
+        from sqlalchemy import case
+        spend_expr = func.sum(
+            case(
+                (Transaction.is_discount == True, -Transaction.item_price),
+                else_=Transaction.item_price,
+            )
+        ).label('total_spend')
+
         query = (
             select(
                 period_col,
-                func.sum(Transaction.item_price).label('total_spend'),
+                spend_expr,
             )
             .where(
                 and_(
                     Transaction.user_id == user_id,
                     Transaction.date >= start_date,
                     Transaction.date <= end_date,
-                    Transaction.is_discount == False,
                     Transaction.is_deposit == False,
                 )
             )
@@ -1161,9 +1203,10 @@ class AnalyticsService:
         category_data = defaultdict(lambda: {"amount": 0.0, "count": 0})
 
         for t in transactions:
-            if t.is_discount or t.is_deposit:
+            if t.is_deposit:
                 continue
-            category_data[t.category]["amount"] += t.item_price
+            amount = -t.item_price if t.is_discount else t.item_price
+            category_data[t.category]["amount"] += amount
             category_data[t.category]["count"] += 1
 
         categories = []
@@ -1193,9 +1236,10 @@ class AnalyticsService:
         store_data = defaultdict(lambda: {"amount": 0.0, "receipt_ids": set()})
 
         for t in transactions:
-            if t.is_discount or t.is_deposit:
+            if t.is_deposit:
                 continue
-            store_data[t.store_name]["amount"] += t.item_price
+            amount = -t.item_price if t.is_discount else t.item_price
+            store_data[t.store_name]["amount"] += amount
             if t.receipt_id:
                 store_data[t.store_name]["receipt_ids"].add(t.receipt_id)
 
@@ -1313,7 +1357,7 @@ class AnalyticsService:
                 last_receipt_date=None,
             )
 
-        tx_amounts = [(t, t.item_price) for t in transactions if not t.is_discount and not t.is_deposit]
+        tx_amounts = [(t, -t.item_price if t.is_discount else t.item_price) for t in transactions if not t.is_deposit]
 
         # Calculate totals
         total_spend = sum(amount for _, amount in tx_amounts)
@@ -1324,7 +1368,7 @@ class AnalyticsService:
 
         # Calculate averages
         # Note: average_item_price uses raw prices - it's the actual item cost
-        total_raw_spend = sum(t.item_price for t in transactions if not t.is_discount and not t.is_deposit)
+        total_raw_spend = sum(t.item_price for t in transactions if not t.is_discount and not t.is_deposit)  # gross prices for avg item price
         average_item_price = round(total_raw_spend / total_items, 2) if total_items > 0 else None
 
         # Calculate first and last receipt dates
@@ -1462,7 +1506,7 @@ class AnalyticsService:
                 top_categories=[],
             )
 
-        tx_amounts = [(t, t.item_price) for t in transactions if not t.is_discount and not t.is_deposit]
+        tx_amounts = [(t, -t.item_price if t.is_discount else t.item_price) for t in transactions if not t.is_deposit]
 
         # Calculate totals
         total_spend = sum(amount for _, amount in tx_amounts)

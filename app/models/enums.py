@@ -101,6 +101,20 @@ class LotteryDrawingStatus(str, Enum):
     PUBLISHED = "published"
 
 
+class LoyaltyStatus(str, Enum):
+    STRICTLY_LOYAL = "strictly_loyal"   # top brand >= 80% AND events >= 3
+    SOFT_LOYAL = "soft_loyal"           # top brand 60-80%
+    BRAND_AGNOSTIC = "brand_agnostic"   # top brand < 60% OR >= 3 brands
+    NEW = "new"                         # events < 3
+
+
+class PromoBucket(str, Enum):
+    STAPLES = "staples"
+    STOCK_UP = "stock_up"
+    ENDING_SOON = "ending_soon"
+    DISCOVER = "discover"
+
+
 class PromoReportStatus(str, Enum):
     READY = "ready"
     NO_ENRICHED_PROFILE = "no_enriched_profile"

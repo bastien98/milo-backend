@@ -13,7 +13,8 @@ from app.models.streak import StreakReward
 from app.models.spin import SpinTransaction
 from app.models.promo_candidates import PromoCandidates
 from app.models.promo_report_event import PromoReportEvent
-from app.models.enums import PromoReportStatus, PromoReportEventType
+from app.models.promo_item import PromoItem
+from app.models.enums import PromoReportStatus, PromoReportEventType, LoyaltyStatus, PromoBucket
 from app.models.brand_cashback import BrandCashbackCampaign, BrandCashbackStoreLineItem, UserBrandCashbackClaim
 from app.models.charity_donation import CharityDonation
 from app.models.enums import CharityDonationStatus
@@ -42,6 +43,9 @@ __all__ = [
     "PromoReportEvent",
     "PromoReportStatus",
     "PromoReportEventType",
+    "PromoItem",
+    "LoyaltyStatus",
+    "PromoBucket",
     "BrandCashbackCampaign",
     "BrandCashbackStoreLineItem",
     "UserBrandCashbackClaim",

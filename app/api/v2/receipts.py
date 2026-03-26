@@ -207,7 +207,7 @@ async def list_receipts(
         total_amount = (
             receipt.total_amount
             if receipt.total_amount
-            else sum(t.item_price for t in txns if not t.is_discount and not t.is_deposit)
+            else sum((-t.item_price if t.is_discount else t.item_price) for t in txns if not t.is_deposit)
         )
 
         grouped_receipts.append(

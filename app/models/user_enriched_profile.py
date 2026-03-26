@@ -22,8 +22,8 @@ class UserEnrichedProfile(Base):
     # Aggregated shopping habits (JSONB for LLM consumption)
     shopping_habits: Mapped[Optional[Any]] = mapped_column(JSONB, nullable=True)
 
-    # Up to 25 items of promo interest, categorized
-    promo_interest_items: Mapped[Optional[Any]] = mapped_column(JSONB, nullable=True)
+    # Category-level purchase profiles for promo-first matching
+    category_profiles: Mapped[Optional[Any]] = mapped_column(JSONB, nullable=True)
 
     # Data window
     data_period_start: Mapped[Optional[date_type]] = mapped_column(Date, nullable=True)

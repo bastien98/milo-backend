@@ -9,19 +9,13 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.cache import invalidate_user
 from app.models.transaction import Transaction
 from app.models.receipt import Receipt
-from app.models.enums import ReceiptStatus
+from app.models.enums import LoyaltyStatus, ReceiptStatus
 from app.db.repositories.enriched_profile_repo import EnrichedProfileRepository
 
 logger = logging.getLogger(__name__)
 
 # How many days of history to aggregate
-LOOKBACK_DAYS = 120
-# Max promo interest items
-MAX_INTEREST_ITEMS = 25
-# Category-level brand loyalty: if top brand holds >= this share of purchases
-# within a granular_category, items are classified brand_loyal; otherwise price_switcher.
-CATEGORY_BRAND_LOYAL_THRESHOLD = 0.65
-CATEGORY_BRAND_MIN_PURCHASES = 3
+LOOKBACK_DAYS = 180
 
 
 class EnrichedProfileService:
@@ -69,7 +63,7 @@ class EnrichedProfileService:
 
             # Build aggregated data
             shopping_habits = _build_shopping_habits(transactions, receipt_count, cutoff, receipts)
-            promo_items = _build_promo_interest_items(transactions, cutoff)
+            category_profiles = _build_category_profiles(transactions, cutoff)
 
             # Determine actual date range from data
             if transactions:
@@ -84,7 +78,7 @@ class EnrichedProfileService:
             await repo.upsert(
                 user_id=user_id,
                 shopping_habits=shopping_habits,
-                promo_interest_items=promo_items,
+                category_profiles=category_profiles,
                 data_period_start=period_start,
                 data_period_end=period_end,
                 receipts_analyzed=receipt_count,
@@ -96,7 +90,7 @@ class EnrichedProfileService:
             logger.info(
                 f"Enriched profile rebuilt for user {user_id}: "
                 f"{receipt_count} receipts, {len(transactions)} transactions, "
-                f"{len(promo_items)} interest items"
+                f"{len(category_profiles)} category profiles"
             )
         except Exception:
             logger.exception(f"Failed to rebuild enriched profile for user {user_id}")
@@ -130,17 +124,19 @@ def _build_shopping_habits(
             "payment_insights": None,
         }
 
-    total_spend = sum(t.item_price for t in transactions if not t.is_discount and not t.is_deposit)
+    total_spend = sum((-t.item_price if t.is_discount else t.item_price) for t in transactions if not t.is_deposit)
     weeks_in_period = max((date.today() - cutoff).days / 7, 1)
 
     # Store aggregation
     store_data: dict[str, dict] = defaultdict(lambda: {"spend": 0.0, "visits": set(), "items": 0})
     for t in transactions:
-        if t.is_discount or t.is_deposit:
+        if t.is_deposit:
             continue
-        store_data[t.store_name]["spend"] += t.item_price
+        amount = -t.item_price if t.is_discount else t.item_price
+        store_data[t.store_name]["spend"] += amount
         store_data[t.store_name]["visits"].add((t.receipt_id, t.date))
-        store_data[t.store_name]["items"] += 1
+        if not t.is_discount:
+            store_data[t.store_name]["items"] += 1
 
     preferred_stores = sorted(
         [
@@ -159,11 +155,13 @@ def _build_shopping_habits(
     # Category aggregation
     cat_data: dict[str, dict] = defaultdict(lambda: {"spend": 0.0, "count": 0})
     for t in transactions:
-        if t.is_discount or t.is_deposit:
+        if t.is_deposit:
             continue
         cat_val = t.category if t.category else "Other"
-        cat_data[cat_val]["spend"] += t.item_price
-        cat_data[cat_val]["count"] += 1
+        amount = -t.item_price if t.is_discount else t.item_price
+        cat_data[cat_val]["spend"] += amount
+        if not t.is_discount:
+            cat_data[cat_val]["count"] += 1
 
     # Filter out "Other" category (contains discounts/deposits) and negative spend
     category_breakdown = sorted(
@@ -291,7 +289,7 @@ def _build_shopping_habits(
         weekend_totals = []
         for rid, r_txns in receipt_groups.items():
             non_discount_deposit_count = sum(1 for t in r_txns if not t.is_discount and not t.is_deposit)
-            receipt_total = sum(t.item_price for t in r_txns if not t.is_discount and not t.is_deposit)
+            receipt_total = sum((-t.item_price if t.is_discount else t.item_price) for t in r_txns if not t.is_deposit)
             receipt_date_val = r_txns[0].date
 
             if non_discount_deposit_count < 5:
@@ -459,354 +457,113 @@ def _build_shopping_habits(
     }
 
 
-def _build_promo_interest_items(
+
+# ---------------------------------------------------------------------------
+# Category profiles for promo-first matching
+# ---------------------------------------------------------------------------
+# Loyalty thresholds
+_STRICTLY_LOYAL_THRESHOLD = 0.80
+_SOFT_LOYAL_THRESHOLD = 0.60
+_MIN_EVENTS_FOR_LOYALTY = 3
+
+
+def _build_category_profiles(
     transactions: list[Transaction],
     cutoff: date,
-) -> list[dict[str, Any]]:
-    """Build a ranked list of up to 25 items most relevant for promotions."""
+) -> dict[str, dict[str, Any]]:
+    """Build per-granular-category purchase profiles for promo recommendation.
+
+    Returns a dict keyed by granular_category with purchase frequency,
+    brand loyalty, and restock urgency signals.
+    """
     if not transactions:
-        return []
+        return {}
 
-    weeks_in_period = max((date.today() - cutoff).days / 7, 1)
-
-    # Aggregate per normalized_name
-    item_data: dict[str, dict] = defaultdict(
+    # Aggregate per granular_category
+    cat_data: dict[str, dict] = defaultdict(
         lambda: {
-            "count": 0,
             "total_spend": 0.0,
-            "total_quantity": 0,
+            "total_items": 0,
             "receipt_ids": set(),
-            "brands": set(),
-            "store_names": Counter(),
-            "is_premium_count": 0,
-            "categories": set(),
-            "granular_categories": set(),
+            "brand_counts": Counter(),
+            "premium_count": 0,
             "dates": [],
-            "product_names_no_brand": Counter(),
         }
     )
 
     for t in transactions:
-        name = t.normalized_name or t.item_name
-        if not name:
+        if not t.granular_category or t.granular_category in ("Other", "Discount"):
             continue
-        name_lower = name.lower().strip()
-        # Skip deposits and discounts (they don't represent actual products)
         if t.is_deposit or t.is_discount:
             continue
-        # Skip items with "Other" granular_category — these are utility items
-        # (carrier bags, etc.) that produce garbage promo search results
-        if not t.granular_category or t.granular_category == "Other":
+
+        cat = t.granular_category
+        cat_data[cat]["total_spend"] += t.item_price
+        cat_data[cat]["total_items"] += t.quantity or 1
+        if t.receipt_id:
+            cat_data[cat]["receipt_ids"].add(t.receipt_id)
+        if t.normalized_brand and not t.normalized_brand.endswith("-housebrand"):
+            cat_data[cat]["brand_counts"][t.normalized_brand] += 1
+        if t.is_premium:
+            cat_data[cat]["premium_count"] += 1
+        cat_data[cat]["dates"].append(t.date)
+
+    profiles: dict[str, dict[str, Any]] = {}
+
+    for cat, data in cat_data.items():
+        total_purchase_events = len(data["receipt_ids"]) or len(data["dates"])
+        if total_purchase_events == 0:
             continue
 
-        item_data[name_lower]["count"] += 1
-        item_data[name_lower]["total_spend"] += t.item_price
-        item_data[name_lower]["total_quantity"] += t.quantity or 1
-        if t.receipt_id:
-            item_data[name_lower]["receipt_ids"].add(t.receipt_id)
-        if t.normalized_brand:
-            item_data[name_lower]["brands"].add(t.normalized_brand)
-        if t.store_name:
-            item_data[name_lower]["store_names"][t.store_name] += 1
-        if t.is_premium:
-            item_data[name_lower]["is_premium_count"] += 1
-        if t.category:
-            item_data[name_lower]["categories"].add(t.category)
-        if t.granular_category:
-            item_data[name_lower]["granular_categories"].add(t.granular_category)
-        item_data[name_lower]["dates"].append(t.date)
-        if t.dp_product_name_no_brand:
-            item_data[name_lower]["product_names_no_brand"][t.dp_product_name_no_brand] += 1
-
-    # Pre-compute category-level brand counts for loyalty classification
-    # Exclude housebrand placeholders — they represent unbranded deli/bakery
-    # items and would pollute brand analysis (no promo matches these).
-    category_brand_counts: dict[str, Counter] = defaultdict(Counter)
-    for t in transactions:
-        if (t.granular_category
-                and t.granular_category != "Other"
-                and t.normalized_brand
-                and t.normalized_brand != "in-house"
-                and not t.normalized_brand.endswith("-housebrand")
-                and not t.is_deposit
-                and not t.is_discount):
-            category_brand_counts[t.granular_category][t.normalized_brand] += 1
-
-    # Precompute cross-item metrics for relative tags
-    all_receipt_ids = {t.receipt_id for t in transactions if t.receipt_id}
-    total_receipts_in_window = len(all_receipt_ids)
-    item_prices = sorted(
-        t.item_price for t in transactions
-        if not t.is_deposit and not t.is_discount and t.item_price > 0
-    )
-    median_item_price = item_prices[len(item_prices) // 2] if item_prices else 0
-
-    # Classify items into interest categories
-    staples = []       # bought frequently (weekly+)
-    high_spend = []    # top spend items
-    brand_loyal = []   # consistently same premium brand
-    bulk_buys = []     # items bought in bulk (multiple units per trip)
-    price_switchers = []  # items bought across multiple brands — open to deals
-    tried_recently = []   # items tried 1-2 times in last 30 days
-
-    for name, data in item_data.items():
-        trip_count = len(data["receipt_ids"]) or data["count"]
-        freq_per_week = trip_count / weeks_in_period
-        avg_price = data["total_spend"] / data["count"] if data["count"] else 0
-        avg_units_per_trip = data["total_quantity"] / trip_count if trip_count else 0
-
-        tags = []
-        if freq_per_week >= 1:
-            tags.append("weekly")
-        elif freq_per_week >= 0.5:
-            tags.append("biweekly")
-        if data["is_premium_count"] > 0:
-            tags.append("premium_brand")
-        if avg_units_per_trip >= 2:
-            tags.append("bulk")
-        weekend_purchases = sum(1 for d in data["dates"] if d.weekday() >= 5)
-        if data["dates"] and weekend_purchases / len(data["dates"]) >= 0.6:
-            tags.append("weekend_buy")
-        if total_receipts_in_window and trip_count / total_receipts_in_window >= 0.7:
-            tags.append("basket_anchor")
-        if median_item_price > 0 and avg_price >= median_item_price * 2:
-            tags.append("splurge")
-
-        # Temporal signals
         sorted_dates = sorted(set(data["dates"]))
-        last_purchased = sorted_dates[-1]
-        days_since = (date.today() - last_purchased).days
+        last_purchase = sorted_dates[-1]
+        days_since = (date.today() - last_purchase).days
 
-        avg_gap: float | None = None
+        # Average days between purchases (true historical average, O(1))
+        avg_days_between: float | None = None
+        restock_urgency: float | None = None
         if len(sorted_dates) >= 2:
-            gaps = [
-                (sorted_dates[i + 1] - sorted_dates[i]).days
-                for i in range(len(sorted_dates) - 1)
-            ]
-            avg_gap = round(sum(gaps) / len(gaps), 1)
+            span = (sorted_dates[-1] - sorted_dates[0]).days
+            avg_days_between = round(span / (len(sorted_dates) - 1), 1)
 
-        # Restock soon: approaching typical repurchase interval
-        if avg_gap is not None and days_since >= avg_gap * 0.8:
-            tags.append("restock_soon")
+            if avg_days_between > 0:
+                raw_urgency = days_since / avg_days_between
+                # Churn cutoff: if they missed 3+ expected cycles, they abandoned it
+                restock_urgency = round(raw_urgency, 2) if raw_urgency <= 3.0 else 0.0
 
-        # Trend detection: compare recent purchase gaps to overall
-        if len(sorted_dates) >= 4 and avg_gap is not None and avg_gap > 0:
-            recent_gaps = [
-                (sorted_dates[i + 1] - sorted_dates[i]).days
-                for i in range(len(sorted_dates) - 3, len(sorted_dates) - 1)
-            ]
-            avg_recent_gap = sum(recent_gaps) / len(recent_gaps)
-            if avg_recent_gap > avg_gap * 1.5:
-                tags.append("declining")
-            elif avg_recent_gap < avg_gap * 0.6:
-                tags.append("increasing")
+        # Brand loyalty classification
+        brand_counts = data["brand_counts"]
+        total_branded = sum(brand_counts.values())
+        preferred_brand: str | None = None
 
-        # Day-of-week distribution — pick top 1-2 days (>= 25% of trips)
-        dow_counts = Counter(d.strftime("%A") for d in data["dates"])
-        total_dow = sum(dow_counts.values())
-        preferred_days = [
-            day
-            for day, cnt in dow_counts.most_common()
-            if cnt / total_dow >= 0.25
-        ][:2]
+        if total_purchase_events < _MIN_EVENTS_FOR_LOYALTY:
+            loyalty_status = LoyaltyStatus.NEW.value
+        elif total_branded == 0:
+            # All purchases are housebrands or unbranded
+            loyalty_status = LoyaltyStatus.BRAND_AGNOSTIC.value
+        else:
+            top_brand, top_count = brand_counts.most_common(1)[0]
+            brand_share = top_count / total_branded
+            if brand_share >= _STRICTLY_LOYAL_THRESHOLD:
+                loyalty_status = LoyaltyStatus.STRICTLY_LOYAL.value
+                preferred_brand = top_brand
+            elif brand_share >= _SOFT_LOYAL_THRESHOLD:
+                loyalty_status = LoyaltyStatus.SOFT_LOYAL.value
+                preferred_brand = top_brand
+            else:
+                loyalty_status = LoyaltyStatus.BRAND_AGNOSTIC.value
 
-        # Determine primary store_name (most frequent)
-        primary_store = data["store_names"].most_common(1)[0][0] if data["store_names"] else None
-
-        # Build metrics dictionary with raw values (safe division)
-        # Note for LLM: null values mean "insufficient data to calculate"
-        total_spend = data["total_spend"]
-        total_units = data["total_quantity"]
-        restock_urgency = round(days_since / avg_gap, 2) if avg_gap and avg_gap > 0 else None
-        metrics = {
-            "total_spend": round(total_spend, 2),
-            "trip_count": trip_count,
-            "total_units": total_units,
-            "avg_unit_price": round(total_spend / total_units, 2) if total_units > 0 else None,
-            "avg_units_per_trip": round(total_units / trip_count, 2) if trip_count > 0 else None,
-            "avg_spend_per_trip": round(total_spend / trip_count, 2) if trip_count > 0 else None,
-            "purchase_frequency_days": avg_gap,  # avg days between purchases, null if < 2 purchases
-            "days_since_last_purchase": days_since,
-            "restock_urgency": restock_urgency,  # >1.0 = overdue, <1.0 = not yet due, null = insufficient data
+        profiles[cat] = {
+            "total_purchase_events": total_purchase_events,
+            "average_days_between": avg_days_between,
+            "avg_price_paid": round(data["total_spend"] / data["total_items"], 2) if data["total_items"] > 0 else None,
+            "total_spend": round(data["total_spend"], 2),
+            "brand_tally": dict(brand_counts),
+            "loyalty_status": loyalty_status,
+            "preferred_brand": preferred_brand,
+            "is_premium_buyer": data["premium_count"] / data["total_items"] > 0.5 if data["total_items"] > 0 else False,
+            "last_purchase_date": last_purchase.isoformat(),
+            "restock_urgency": restock_urgency,
         }
 
-        entry = {
-            "normalized_name": name,
-            "product_name_no_brand": data["product_names_no_brand"].most_common(1)[0][0] if data["product_names_no_brand"] else None,
-            "brands": sorted(data["brands"]) if data["brands"] else [],
-            "store_name": primary_store,
-            "granular_category": next(iter(data["granular_categories"]), None),
-            "tags": tags,
-            "metrics": metrics,
-            "last_purchased": last_purchased.isoformat(),
-            "preferred_days": preferred_days,
-        }
-
-        # Classify into interest buckets (copy entry so each bucket owns its dict)
-        if freq_per_week >= 0.35 and trip_count >= 3:
-            staples.append((trip_count, entry.copy()))
-
-        if trip_count >= 2:
-            high_spend.append((data["total_spend"], entry.copy()))
-
-        # Brand analysis: use CATEGORY-level brand concentration
-        # (not product-level, which is almost always single-brand)
-        if data["brands"] and data["count"] >= 2 and trip_count >= 2:
-            item_cat = next(iter(data["granular_categories"]), None)
-            if item_cat:
-                cat_brands = category_brand_counts.get(item_cat)
-                if cat_brands and sum(cat_brands.values()) >= CATEGORY_BRAND_MIN_PURCHASES:
-                    top_count = cat_brands.most_common(1)[0][1]
-                    brand_share = top_count / sum(cat_brands.values())
-                    if brand_share >= CATEGORY_BRAND_LOYAL_THRESHOLD:
-                        brand_loyal.append((trip_count, entry.copy()))
-                    elif len(cat_brands) >= 2:
-                        e = entry.copy()
-                        e["category_brands"] = sorted(cat_brands.keys())
-                        price_switchers.append((trip_count, e))
-
-        if avg_units_per_trip >= 2 and trip_count >= 2:
-            bulk_buys.append((avg_units_per_trip, entry.copy()))
-
-        # Tried recently: 1-2 purchases in the last 30 days, not frequent enough for staple
-        recent_cutoff = date.today() - timedelta(days=30)
-        recent_purchases = [d for d in sorted_dates if d >= recent_cutoff]
-        if len(recent_purchases) in (1, 2) and freq_per_week < 0.5:
-            tried_recently.append((-days_since, entry.copy()))
-
-    # Sort each bucket and deduplicate across categories
-    def _recency_key(x):
-        """Primary metric first, then prefer more recently purchased items."""
-        return (x[0], -x[1]["metrics"]["days_since_last_purchase"])
-
-    staples.sort(key=_recency_key, reverse=True)
-    high_spend.sort(key=_recency_key, reverse=True)
-    brand_loyal.sort(key=_recency_key, reverse=True)
-    bulk_buys.sort(key=_recency_key, reverse=True)
-    price_switchers.sort(key=_recency_key, reverse=True)
-    tried_recently.sort(key=lambda x: x[0], reverse=True)  # most recent first
-
-    # Allocate slots with guaranteed minimum of 1 per non-empty bucket
-    result = []
-    seen_names: set[str] = set()
-    category_counts: dict[str, int] = defaultdict(int)  # track per-category totals across passes
-
-    def _add_items(bucket: list, category: str, max_count: int) -> int:
-        added = 0
-        for _, entry in bucket:
-            if len(result) >= MAX_INTEREST_ITEMS:
-                break
-            if category_counts[category] >= max_count:
-                break
-            if entry["normalized_name"] in seen_names:
-                continue
-            seen_names.add(entry["normalized_name"])
-            entry["interest_category"] = category
-            result.append(entry)
-            added += 1
-            category_counts[category] += 1
-        return added
-
-    # Bucket definitions: (list, category_name, max_slots)
-    buckets = [
-        (staples, "staple", 8),
-        (high_spend, "top_purchase", 6),
-        (brand_loyal, "brand_loyal", 4),
-        (price_switchers, "price_switcher", 4),
-        (bulk_buys, "bulk_buy", 3),
-        (tried_recently, "tried_recently", 2),
-    ]
-
-    # Pass 1: guarantee at least 1 item per non-empty bucket
-    for bucket, category, _ in buckets:
-        _add_items(bucket, category, 1)
-
-    # Pass 2: fill remaining slots up to each bucket's max
-    for bucket, category, max_count in buckets:
-        _add_items(bucket, category, max_count)
-
-    # Pass 3: Add category-level interests if we have sparse item-level data
-    # This helps users with few receipts still get relevant promo recommendations
-    MIN_ITEMS_BEFORE_CATEGORY_FALLBACK = 5
-    MAX_CATEGORY_ITEMS = 3
-
-    if len(result) < MIN_ITEMS_BEFORE_CATEGORY_FALLBACK:
-        # Aggregate category-level data (excluding Discounts and Other)
-        category_data: dict[str, dict] = defaultdict(
-            lambda: {
-                "total_spend": 0.0,
-                "total_units": 0,
-                "receipt_ids": set(),
-                "dates": [],
-            }
-        )
-        for t in transactions:
-            if t.granular_category and t.granular_category not in ("Discounts", "Other"):
-                if not t.is_deposit and not t.is_discount:
-                    category_data[t.granular_category]["total_spend"] += t.item_price
-                    category_data[t.granular_category]["total_units"] += t.quantity or 1
-                    if t.receipt_id:
-                        category_data[t.granular_category]["receipt_ids"].add(t.receipt_id)
-                    category_data[t.granular_category]["dates"].append(t.date)
-
-        # Get categories already represented in results
-        represented_categories = {item.get("granular_category") for item in result}
-
-        # Sort by spend and add category-level items
-        sorted_categories = sorted(
-            category_data.items(), key=lambda x: x[1]["total_spend"], reverse=True
-        )
-        category_items_added = 0
-
-        for cat, data in sorted_categories:
-            if len(result) >= MAX_INTEREST_ITEMS:
-                break
-            if category_items_added >= MAX_CATEGORY_ITEMS:
-                break
-            if cat in represented_categories:
-                continue
-
-            # Compute category-level metrics
-            cat_spend = data["total_spend"]
-            cat_units = data["total_units"]
-            cat_trip_count = len(data["receipt_ids"]) or len(data["dates"])
-            cat_dates = sorted(set(data["dates"])) if data["dates"] else []
-            cat_last_purchased = cat_dates[-1] if cat_dates else None
-            cat_days_since = (date.today() - cat_last_purchased).days if cat_last_purchased else None
-
-            # Compute avg days between purchases for category
-            cat_avg_gap: float | None = None
-            if len(cat_dates) >= 2:
-                gaps = [(cat_dates[i + 1] - cat_dates[i]).days for i in range(len(cat_dates) - 1)]
-                cat_avg_gap = round(sum(gaps) / len(gaps), 1)
-
-            # Compute restock urgency
-            cat_restock_urgency = round(cat_days_since / cat_avg_gap, 2) if cat_avg_gap and cat_avg_gap > 0 and cat_days_since else None
-
-            # Add a category-level interest item (no specific product)
-            result.append({
-                "normalized_name": cat.lower(),  # Use category name as search term
-                "brands": [],
-                "store_name": None,
-                "granular_category": cat,
-                "tags": ["category_level"],
-                "is_category_fallback": True,  # Explicit flag for LLM
-                "metrics": {
-                    "total_spend": round(cat_spend, 2),
-                    "trip_count": cat_trip_count,
-                    "total_units": cat_units,
-                    "avg_unit_price": round(cat_spend / cat_units, 2) if cat_units > 0 else None,
-                    "avg_units_per_trip": round(cat_units / cat_trip_count, 2) if cat_trip_count > 0 else None,
-                    "avg_spend_per_trip": round(cat_spend / cat_trip_count, 2) if cat_trip_count > 0 else None,
-                    "purchase_frequency_days": cat_avg_gap,  # null if < 2 purchases
-                    "days_since_last_purchase": cat_days_since,
-                    "restock_urgency": cat_restock_urgency,  # >1.0 = overdue, null = insufficient data
-                },
-                "last_purchased": cat_last_purchased.isoformat() if cat_last_purchased else None,
-                "preferred_days": [],
-                "interest_category": "category_fallback",
-            })
-            represented_categories.add(cat)
-            category_items_added += 1
-
-    return result
+    return profiles

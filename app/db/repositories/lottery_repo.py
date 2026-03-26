@@ -2,6 +2,7 @@ import uuid
 from typing import Optional
 
 from sqlalchemy import select, update
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.lottery import LotteryDrawing, LotteryEntry
@@ -20,13 +21,17 @@ class LotteryRepository:
     async def get_or_create_drawing(self, month: str) -> LotteryDrawing:
         drawing = await self.get_drawing_by_month(month)
         if drawing is None:
-            drawing = LotteryDrawing(
-                id=str(uuid.uuid4()),
-                month=month,
-                status="pending",
-            )
-            self.db.add(drawing)
-            await self.db.flush()
+            try:
+                drawing = LotteryDrawing(
+                    id=str(uuid.uuid4()),
+                    month=month,
+                    status="pending",
+                )
+                self.db.add(drawing)
+                await self.db.flush()
+            except IntegrityError:
+                await self.db.rollback()
+                drawing = await self.get_drawing_by_month(month)
         return drawing
 
     async def update_drawing(self, drawing: LotteryDrawing, **kwargs) -> LotteryDrawing:
