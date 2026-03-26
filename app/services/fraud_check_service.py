@@ -97,6 +97,7 @@ class FraudCheckService:
             select(func.count()).where(
                 CashbackTransaction.user_id == user_id,
                 CashbackTransaction.status == CashbackStatus.CONFIRMED,
+                CashbackTransaction.is_referral_reward == False,
             )
         )
         count = result.scalar() or 0

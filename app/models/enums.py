@@ -67,6 +67,11 @@ class WithdrawalStatus(str, Enum):
     PAID_OUT = "paid_out"
 
 
+class CharityDonationStatus(str, Enum):
+    PENDING = "pending"
+    TRANSFERRED = "transferred"
+
+
 class StreakRewardStatus(str, Enum):
     CLAIMABLE = "claimable"
     CLAIMED = "claimed"

@@ -40,6 +40,7 @@ class CashbackTransaction(Base):
     kickstart_bonus_points: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
     is_kickstart: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default="false")
     is_streak_saver: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default="false")
+    is_referral_reward: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default="false")
     spin_type: Mapped[Optional[SpinType]] = mapped_column(
         SAEnum(SpinType, name="spintype", values_callable=lambda e: [m.value for m in e]),
         nullable=True,

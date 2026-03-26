@@ -153,33 +153,39 @@ class WithdrawalRepository:
         return list(result.scalars().all())
 
     async def deduct_balance(self, user_id: str, amount: float) -> bool:
-        """Atomically deduct amount from current_balance. Returns False if insufficient."""
+        """Atomically deduct euro amount from points_balance. Returns False if insufficient."""
+        points_to_deduct = round(amount * 1000)
         result = await self.db.execute(
             update(CashbackBalance)
             .where(
                 CashbackBalance.user_id == user_id,
-                CashbackBalance.current_balance >= amount,
+                CashbackBalance.points_balance >= points_to_deduct,
             )
-            .values(current_balance=CashbackBalance.current_balance - amount)
+            .values(points_balance=CashbackBalance.points_balance - points_to_deduct)
         )
         await self.db.flush()
         return result.rowcount > 0
 
     async def refund_balance(self, user_id: str, amount: float) -> None:
-        """Refund amount back to current_balance (on rejection)."""
+        """Refund euro amount back to points_balance (on rejection)."""
+        points_to_refund = round(amount * 1000)
         await self.db.execute(
             update(CashbackBalance)
             .where(CashbackBalance.user_id == user_id)
-            .values(current_balance=CashbackBalance.current_balance + amount)
+            .values(points_balance=CashbackBalance.points_balance + points_to_refund)
         )
         await self.db.flush()
 
     async def mark_paid_out_balance(self, user_id: str, amount: float) -> None:
-        """Increment total_paid_out when withdrawal is paid."""
+        """Increment total_points_paid_out when withdrawal is paid."""
+        points = round(amount * 1000)
         await self.db.execute(
             update(CashbackBalance)
             .where(CashbackBalance.user_id == user_id)
-            .values(total_paid_out=CashbackBalance.total_paid_out + amount)
+            .values(
+                total_points_paid_out=CashbackBalance.total_points_paid_out + points,
+                total_paid_out=CashbackBalance.total_paid_out + amount,
+            )
         )
         await self.db.flush()
 

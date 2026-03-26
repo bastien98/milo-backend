@@ -15,6 +15,8 @@ from app.models.promo_candidates import PromoCandidates
 from app.models.promo_report_event import PromoReportEvent
 from app.models.enums import PromoReportStatus, PromoReportEventType
 from app.models.brand_cashback import BrandCashbackCampaign, BrandCashbackStoreLineItem, UserBrandCashbackClaim
+from app.models.charity_donation import CharityDonation
+from app.models.enums import CharityDonationStatus
 
 __all__ = [
     "User",
@@ -43,4 +45,6 @@ __all__ = [
     "BrandCashbackCampaign",
     "BrandCashbackStoreLineItem",
     "UserBrandCashbackClaim",
+    "CharityDonation",
+    "CharityDonationStatus",
 ]

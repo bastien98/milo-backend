@@ -1,7 +1,7 @@
 from fastapi import APIRouter
 
 # Import v2-specific endpoints (using Gemini)
-from app.api.v2 import auth, chat, receipts, periods, budgets, wallet_pass, categories, promos, cashback, spin, referral, withdrawal, streak, lottery, brand_cashback
+from app.api.v2 import auth, chat, receipts, periods, budgets, wallet_pass, categories, promos, cashback, spin, referral, withdrawal, streak, lottery, brand_cashback, charity
 
 # Reuse v1 endpoints that don't interact with LLMs
 from app.api.v1 import health, transactions, analytics, profile
@@ -66,3 +66,6 @@ api_router.include_router(lottery.router, prefix="/lottery", tags=["v2 - lottery
 
 # Brand cashback - FMCG deal campaigns with receipt line-item matching
 api_router.include_router(brand_cashback.router, prefix="/brand-cashback", tags=["v2 - brand-cashback"])
+
+# Charity donations - donate wallet balance to Belgian charities
+api_router.include_router(charity.router, prefix="/charity", tags=["v2 - charity"])

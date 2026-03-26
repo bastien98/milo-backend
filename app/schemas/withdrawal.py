@@ -36,6 +36,7 @@ class WithdrawalInfoResponse(BaseModel):
     last_iban_last4: Optional[str] = None
     can_withdraw: bool
     cannot_withdraw_reason: Optional[str] = None
+    confirmed_cashback_count: int = 0
 
 
 class WithdrawalCreateResponse(BaseModel):
