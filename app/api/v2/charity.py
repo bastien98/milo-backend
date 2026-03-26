@@ -114,6 +114,38 @@ async def admin_list_all(
     ]
 
 
+@router.post("/admin/{donation_id}/approve")
+async def admin_approve_donation(
+    donation_id: str,
+    db: AsyncSession = Depends(get_db),
+    _admin: User = Depends(require_admin),
+):
+    """Admin: approve a pending_review donation, moving it to pending."""
+    svc = CharityService(db)
+    try:
+        donation = await svc.approve_donation(donation_id)
+        await db.commit()
+        return CharityDonationItem.model_validate(donation)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@router.post("/admin/{donation_id}/reject")
+async def admin_reject_donation(
+    donation_id: str,
+    db: AsyncSession = Depends(get_db),
+    _admin: User = Depends(require_admin),
+):
+    """Admin: reject a pending_review donation and refund the user's balance."""
+    svc = CharityService(db)
+    try:
+        donation = await svc.reject_donation(donation_id)
+        await db.commit()
+        return CharityDonationItem.model_validate(donation)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
 @router.post("/admin/{donation_id}/transferred")
 async def admin_mark_transferred(
     donation_id: str,
@@ -145,7 +177,17 @@ async def admin_transfer_all_for_charity(
 
 # ────────────────── HTML Admin Panel ──────────────────
 
-_STATUS_COLOR = {"pending": "#f59e0b", "transferred": "#10b981"}
+_STATUS_COLOR = {"pending_review": "#ef4444", "pending": "#f59e0b", "transferred": "#10b981", "rejected": "#64748b"}
+_STATUS_LABEL = {"pending_review": "Fraud Review", "pending": "Pending Transfer", "transferred": "Transferred", "rejected": "Rejected"}
+_FRAUD_CHECK_LABELS = {
+    "account_age": "Account age ≥14 days",
+    "receipt_count": "≥5 confirmed receipts",
+    "accumulation_period": "Receipts span ≥7 days",
+    "grocery_stores": "≥60% recognized stores",
+    "receipt_totals": "Receipt totals in range",
+    "no_previous_rejection": "No prior rejections",
+    "no_duplicate_patterns": "No duplicate receipts",
+}
 _CHARITY_ICONS = {
     "rode_kruis":    "❤️",
     "msf_belgium":   "🩺",
@@ -163,6 +205,8 @@ def _render_admin_html(summary: list[dict], recent: list, base_url: str) -> str:
     cards_html = ""
     for item in summary:
         icon = _CHARITY_ICONS.get(item["charity_id"], "🤝")
+        pending_review_total = item.get("pending_review_total", 0.0)
+        pending_review_count = item.get("pending_review_count", 0)
         pending_total = item["pending_total"]
         transferred_total = item["transferred_total"]
         pending_count = item["pending_count"]
@@ -173,6 +217,7 @@ def _render_admin_html(summary: list[dict], recent: list, base_url: str) -> str:
             <span class="charity-name">{item["charity_name"]}</span>
           </div>
           <div class="stats">
+            {"" if pending_review_count == 0 else f'<div class="stat fraud-review"><div class="stat-value">€{pending_review_total:.2f}</div><div class="stat-label">Fraud Review ({pending_review_count})</div></div>'}
             <div class="stat pending">
               <div class="stat-value">€{pending_total:.2f}</div>
               <div class="stat-label">Pending ({pending_count} donations)</div>
@@ -192,17 +237,52 @@ def _render_admin_html(summary: list[dict], recent: list, base_url: str) -> str:
     # Recent donations table rows
     rows_html = ""
     for d in recent[:50]:
-        status_color = _STATUS_COLOR.get(d.status.value if hasattr(d.status, "value") else str(d.status), "#94a3b8")
+        status_val = d.status.value if hasattr(d.status, "value") else str(d.status)
+        status_color = _STATUS_COLOR.get(status_val, "#94a3b8")
+        status_label = _STATUS_LABEL.get(status_val, status_val)
         email = d.user.email if d.user else "—"
         date_str = d.created_at.strftime("%Y-%m-%d %H:%M") if d.created_at else "—"
         icon = _CHARITY_ICONS.get(d.charity_id, "🤝")
+
+        # Fraud cell: show passed/failed with tooltip listing failed checks
+        if d.fraud_check_passed:
+            fraud_cell = '<span class="fraud-ok">✓ Passed</span>'
+        else:
+            details = d.fraud_check_details or {}
+            failed = [
+                _FRAUD_CHECK_LABELS.get(k, k)
+                for k, v in details.items()
+                if isinstance(v, dict) and v.get("passed") is False
+            ]
+            tooltip = " | ".join(failed) if failed else "details unavailable"
+            fraud_cell = f'<span class="fraud-fail" title="{tooltip}">✗ Failed ({len(failed)})</span>'
+
+        # Action buttons for pending_review
+        if status_val == "pending_review":
+            actions = (
+                f'<form method="POST" action="{base_url}/charity/admin/{d.id}/approve" style="display:inline;margin-right:4px">'
+                f'<button type="submit" class="btn-approve">✓ Approve</button></form>'
+                f'<form method="POST" action="{base_url}/charity/admin/{d.id}/reject" style="display:inline">'
+                f'<button type="submit" class="btn-reject">✗ Reject</button></form>'
+            )
+        else:
+            actions = ""
+
+        # Email cell with copy button
+        email_cell = (
+            f'<span class="email-text">{email}</span>'
+            f'<button class="btn-copy" onclick="copyEmail(\'{email}\')" title="Copy email">⎘</button>'
+            if email != "—" else "—"
+        )
+
         rows_html += f"""
-        <tr>
+        <tr{"" if status_val not in ("pending_review",) else ' class="row-review"'}>
           <td>{date_str}</td>
-          <td>{email}</td>
+          <td>{email_cell}</td>
           <td>{icon} {d.charity_name}</td>
           <td>€{d.amount:.2f}</td>
-          <td><span class="badge" style="background:{status_color}">{d.status.value if hasattr(d.status, "value") else d.status}</span></td>
+          <td>{fraud_cell}</td>
+          <td><span class="badge" style="background:{status_color}">{status_label}</span>{" " + actions if actions else ""}</td>
         </tr>
         """
 
@@ -230,6 +310,7 @@ def _render_admin_html(summary: list[dict], recent: list, base_url: str) -> str:
     .stats {{ display: flex; gap: 16px; }}
     .stat {{ flex: 1; }}
     .stat-value {{ font-size: 22px; font-weight: 800; font-variant-numeric: tabular-nums; }}
+    .stat.fraud-review .stat-value {{ color: #ef4444; }}
     .stat.pending .stat-value {{ color: #f59e0b; }}
     .stat.transferred .stat-value {{ color: #10b981; }}
     .stat-label {{ font-size: 11px; color: #64748b; margin-top: 2px; }}
@@ -237,6 +318,21 @@ def _render_admin_html(summary: list[dict], recent: list, base_url: str) -> str:
                     padding: 10px 16px; font-size: 13px; font-weight: 700; cursor: pointer;
                     width: 100%; transition: opacity 0.2s; }}
     .btn-transfer:hover {{ opacity: 0.85; }}
+    .btn-approve {{ background: #10b981; color: white; border: none; border-radius: 6px;
+                   padding: 4px 10px; font-size: 11px; font-weight: 700; cursor: pointer; }}
+    .btn-approve:hover {{ opacity: 0.85; }}
+    .btn-reject {{ background: #ef4444; color: white; border: none; border-radius: 6px;
+                  padding: 4px 10px; font-size: 11px; font-weight: 700; cursor: pointer; }}
+    .btn-reject:hover {{ opacity: 0.85; }}
+    .btn-copy {{ background: none; border: 1px solid #334155; border-radius: 4px; color: #94a3b8;
+                font-size: 11px; cursor: pointer; padding: 1px 5px; margin-left: 6px;
+                vertical-align: middle; }}
+    .btn-copy:hover {{ background: #334155; color: #e2e8f0; }}
+    .email-text {{ font-family: monospace; font-size: 12px; user-select: all; }}
+    .fraud-ok {{ color: #10b981; font-size: 12px; font-weight: 700; }}
+    .fraud-fail {{ color: #ef4444; font-size: 12px; font-weight: 700; cursor: help;
+                  border-bottom: 1px dashed #ef4444; }}
+    .row-review {{ background: rgba(239,68,68,0.04); }}
     table {{ width: 100%; border-collapse: collapse; background: #1e293b;
              border-radius: 16px; overflow: hidden; border: 1px solid #334155; }}
     th {{ text-align: left; padding: 12px 16px; font-size: 11px; font-weight: 700;
@@ -252,6 +348,14 @@ def _render_admin_html(summary: list[dict], recent: list, base_url: str) -> str:
   </style>
 </head>
 <body>
+  <script>
+    function copyEmail(email) {{
+      navigator.clipboard.writeText(email).then(() => {{
+        const btns = document.querySelectorAll('.btn-copy');
+        btns.forEach(b => {{ if (b.getAttribute('onclick') === `copyEmail('${{email}}')`) {{ b.textContent = '✓'; setTimeout(() => b.textContent = '⎘', 1200); }} }});
+      }});
+    }}
+  </script>
   <h1>🤝 Charity Donations</h1>
   <p class="subtitle">Milo Admin Panel · Last loaded: {now} ·
     <a href="{base_url}/charity/admin/panel" class="refresh-link">Refresh</a></p>
@@ -263,7 +367,7 @@ def _render_admin_html(summary: list[dict], recent: list, base_url: str) -> str:
   <table>
     <thead>
       <tr>
-        <th>Date</th><th>User</th><th>Charity</th><th>Amount</th><th>Status</th>
+        <th>Date</th><th>User</th><th>Charity</th><th>Amount</th><th>Fraud</th><th>Status</th>
       </tr>
     </thead>
     <tbody>{rows_html}</tbody>
