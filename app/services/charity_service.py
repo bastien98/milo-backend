@@ -146,13 +146,18 @@ class CharityService:
         if result.rowcount == 0:
             raise ValueError("Insufficient balance (concurrent modification)")
 
+        status = (
+            CharityDonationStatus.PENDING if fraud_passed
+            else CharityDonationStatus.PENDING_REVIEW
+        )
+
         # Create donation record
         donation = CharityDonation(
             user_id=user.id,
             charity_id=charity_id,
             charity_name=charity["name"],
             amount=amount,
-            status=CharityDonationStatus.PENDING,
+            status=status,
             fraud_check_passed=fraud_passed,
             fraud_check_details=fraud_details,
         )
@@ -185,14 +190,56 @@ class CharityService:
         return donations, total
 
     async def get_all_pending(self) -> list[CharityDonation]:
-        """Admin: all pending donations with user info."""
+        """Admin: all actionable donations (pending + pending_review) with user info."""
         result = await self.db.execute(
             select(CharityDonation)
             .options(selectinload(CharityDonation.user))
-            .where(CharityDonation.status == CharityDonationStatus.PENDING)
+            .where(CharityDonation.status.in_([
+                CharityDonationStatus.PENDING,
+                CharityDonationStatus.PENDING_REVIEW,
+            ]))
             .order_by(CharityDonation.created_at.asc())
         )
         return list(result.scalars().all())
+
+    async def approve_donation(self, donation_id: str) -> CharityDonation:
+        """Admin: approve a pending_review donation, moving it to pending."""
+        result = await self.db.execute(
+            select(CharityDonation).where(CharityDonation.id == donation_id)
+        )
+        donation = result.scalar_one_or_none()
+        if not donation:
+            raise ValueError("Donation not found")
+        if donation.status != CharityDonationStatus.PENDING_REVIEW:
+            raise ValueError(f"Donation is not pending review (status: {donation.status.value})")
+
+        donation.status = CharityDonationStatus.PENDING
+        await self.db.flush()
+        return donation
+
+    async def reject_donation(self, donation_id: str) -> CharityDonation:
+        """Admin: reject a pending_review donation and refund the user's balance."""
+        from app.models.cashback import CashbackBalance
+        result = await self.db.execute(
+            select(CharityDonation).where(CharityDonation.id == donation_id)
+        )
+        donation = result.scalar_one_or_none()
+        if not donation:
+            raise ValueError("Donation not found")
+        if donation.status != CharityDonationStatus.PENDING_REVIEW:
+            raise ValueError(f"Can only reject pending_review donations (status: {donation.status.value})")
+
+        # Refund balance
+        points_to_refund = round(donation.amount * POINTS_PER_EURO)
+        await self.db.execute(
+            update(CashbackBalance)
+            .where(CashbackBalance.user_id == donation.user_id)
+            .values(points_balance=CashbackBalance.points_balance + points_to_refund)
+        )
+
+        donation.status = CharityDonationStatus.REJECTED
+        await self.db.flush()
+        return donation
 
     async def get_all_donations(self) -> list[CharityDonation]:
         """Admin: all donations with user info."""
@@ -254,16 +301,24 @@ class CharityService:
                 summary[row.charity_id] = {
                     "charity_id": row.charity_id,
                     "charity_name": row.charity_name,
+                    "pending_review_total": 0.0,
+                    "pending_review_count": 0,
                     "pending_total": 0.0,
                     "pending_count": 0,
                     "transferred_total": 0.0,
                     "transferred_count": 0,
+                    "rejected_count": 0,
                 }
-            if row.status == CharityDonationStatus.PENDING:
+            if row.status == CharityDonationStatus.PENDING_REVIEW:
+                summary[row.charity_id]["pending_review_total"] = round(row.total, 2)
+                summary[row.charity_id]["pending_review_count"] = row.count
+            elif row.status == CharityDonationStatus.PENDING:
                 summary[row.charity_id]["pending_total"] = round(row.total, 2)
                 summary[row.charity_id]["pending_count"] = row.count
             elif row.status == CharityDonationStatus.TRANSFERRED:
                 summary[row.charity_id]["transferred_total"] = round(row.total, 2)
                 summary[row.charity_id]["transferred_count"] = row.count
+            elif row.status == CharityDonationStatus.REJECTED:
+                summary[row.charity_id]["rejected_count"] = row.count
 
         return list(summary.values())

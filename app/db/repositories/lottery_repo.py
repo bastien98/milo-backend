@@ -123,16 +123,23 @@ class LotteryRepository:
         return result.scalar_one_or_none()
 
     async def declare_share(self, drawing_id: str, user_id: str) -> None:
-        await self.db.execute(
-            update(LotteryEntry)
-            .where(
+        result = await self.db.execute(
+            select(LotteryEntry).where(
                 LotteryEntry.drawing_id == drawing_id,
                 LotteryEntry.user_id == user_id,
             )
-            .values(
+        )
+        entry = result.scalar_one_or_none()
+        if entry is None:
+            entry = LotteryEntry(
+                id=str(uuid.uuid4()),
+                drawing_id=drawing_id,
+                user_id=user_id,
                 proof_status="pending_review",
             )
-        )
+            self.db.add(entry)
+        else:
+            entry.proof_status = "pending_review"
         await self.db.flush()
 
     async def approve_proof(self, entry_id: str, approved: bool) -> None:

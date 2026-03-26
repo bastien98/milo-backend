@@ -264,26 +264,14 @@ async def process_receipt_background(
                     logger.warning(f"Streak update failed (non-fatal): {streak_err}")
                     await session.rollback()
 
-            # Step 8: Complete referral if this is referee's first receipt
-            try:
-                t0 = time.monotonic()
-                from app.services.referral_service import ReferralService
-                referral_svc = ReferralService(session)
-                referral_completed = await referral_svc.complete_referral_on_first_receipt(user_id)
-                await session.commit()
-                if referral_completed:
-                    logger.info(f"⏱ bg_referral_completed: {time.monotonic() - t0:.3f}s")
-            except Exception as ref_err:
-                logger.warning(f"Referral completion check failed (non-fatal): {ref_err}")
-                await session.rollback()
-
             # Step 9: Check brand cashback deals (non-fatal)
+            brand_cashback_earned_count = 0
             try:
                 t0 = time.monotonic()
                 from app.services.brand_cashback_service import BrandCashbackService
                 brand_cb_svc = BrandCashbackService(session)
                 receipt_item_names = [item.item_name for item in extraction_result.line_items]
-                await brand_cb_svc.check_receipt_for_brand_cashback(
+                brand_cashback_earned_count = await brand_cb_svc.check_receipt_for_brand_cashback(
                     receipt_id=receipt_id,
                     user_id=user_id,
                     receipt_line_items=receipt_item_names,
@@ -294,6 +282,20 @@ async def process_receipt_background(
             except Exception as brand_cb_err:
                 logger.warning(f"Brand cashback check failed (non-fatal): {brand_cb_err}")
                 await session.rollback()
+
+            # Step 10: Complete referral if brand cashback was earned (non-fatal)
+            if brand_cashback_earned_count > 0:
+                try:
+                    t0 = time.monotonic()
+                    from app.services.referral_service import ReferralService
+                    referral_svc = ReferralService(session)
+                    completed = await referral_svc.complete_referral_on_brand_cashback_earned(user_id)
+                    await session.commit()
+                    if completed:
+                        logger.info(f"⏱ bg_referral_complete: {time.monotonic() - t0:.3f}s — referral completed for user {user_id}")
+                except Exception as referral_err:
+                    logger.warning(f"Referral completion check failed (non-fatal): {referral_err}")
+                    await session.rollback()
 
             invalidate_user(user_id)
 

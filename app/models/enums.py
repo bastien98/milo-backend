@@ -68,8 +68,10 @@ class WithdrawalStatus(str, Enum):
 
 
 class CharityDonationStatus(str, Enum):
+    PENDING_REVIEW = "pending_review"
     PENDING = "pending"
     TRANSFERRED = "transferred"
+    REJECTED = "rejected"
 
 
 class StreakRewardStatus(str, Enum):
@@ -124,6 +126,7 @@ class PromoReportStatus(str, Enum):
 class PromoReportEventType(str, Enum):
     REPORT_VIEWED = "report_viewed"
     DEAL_OPENED = "deal_opened"
+    DEAL_CLAIMED = "deal_claimed"
     FOLDER_OPENED = "folder_opened"
     STORE_SECTION_OPENED = "store_section_opened"
     FEEDBACK_POSITIVE = "feedback_positive"

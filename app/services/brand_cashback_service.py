@@ -100,7 +100,7 @@ class BrandCashbackService:
         user_id: str,
         receipt_line_items: list[str],
         store_name: Optional[str],
-    ) -> None:
+    ) -> int:
         """
         For each 'claimed' deal the user has, try to find a matching line item
         on the receipt. On match, mark the claim as earned and credit the user's
@@ -108,7 +108,9 @@ class BrandCashbackService:
         """
         pending_claims = await self.repo.get_user_claimed_claims(user_id)
         if not pending_claims:
-            return
+            return 0
+
+        earned_count = 0
 
         cashback_repo = CashbackRepository(self.db)
 
@@ -170,8 +172,11 @@ class BrandCashbackService:
             # 50 cents = 500 points = €0.50
             points_to_award = campaign.cashback_amount_cents * 10
             await cashback_repo.upsert_points_increment(user_id, points_to_award)
+            earned_count += 1
 
             logger.info(
                 f"Brand cashback earned: user={user_id} campaign={campaign.id} "
                 f"store='{store_name}' amount_cents={campaign.cashback_amount_cents}"
             )
+
+        return earned_count

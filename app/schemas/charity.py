@@ -73,6 +73,8 @@ class CharityAdminDonationItem(BaseModel):
 class CharityAdminSummaryItem(BaseModel):
     charity_id: str
     charity_name: str
+    pending_review_total: float = 0.0
+    pending_review_count: int = 0
     pending_total: float
     pending_count: int
     transferred_total: float

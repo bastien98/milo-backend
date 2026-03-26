@@ -11,7 +11,7 @@ from app.models.user import User
 from app.services.cashback_service import CashbackService
 from app.services.kickstart_service import get_kickstart_progress
 from app.services.tier_service import get_user_tier
-from app.services.referral_service import REWARD_EUROS, REWARD_SPINS
+from app.services.referral_service import REWARD_EUROS
 from app.schemas.cashback import (
     CashbackBalanceResponse,
     CashbackSummaryResponse,
@@ -121,7 +121,7 @@ async def get_summary(
                 created_at=ref.completed_at or ref.created_at,
                 store_name="Referral Bonus",
                 cashback_amount=REWARD_EUROS,
-                spins_awarded=REWARD_SPINS,
+                spins_awarded=0,
                 is_referral_reward=True,
             )
         )

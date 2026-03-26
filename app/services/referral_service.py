@@ -9,17 +9,16 @@ from datetime import datetime, timezone
 from sqlalchemy import select, func, or_, and_
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.models.brand_cashback import UserBrandCashbackClaim
 from app.models.referral import Referral
 from app.models.user import User
 from app.models.user_profile import UserProfile
-from app.models.receipt import Receipt
-from app.models.enums import ReferralStatus, ReceiptStatus
+from app.models.enums import ReferralStatus
 from app.db.repositories.cashback_repo import CashbackRepository
 
 logger = logging.getLogger(__name__)
 
 REWARD_EUROS = 1.0
-REWARD_SPINS = 3
 
 
 class ReferralService:
@@ -214,16 +213,16 @@ class ReferralService:
         referrer_name = referrer_profile.nickname or referrer_profile.first_name
         return {
             "success": True,
-            "message": "Referral code applied! You'll both earn rewards after your first receipt over \u20ac50.",
+            "message": "Referral code applied! You'll both earn rewards once you claim a cashback deal and earn it by uploading a receipt.",
             "referrer_name": referrer_name,
         }
 
     # ------------------------------------------------------------------
-    # Complete referral on first receipt
+    # Complete referral on brand cashback earned
     # ------------------------------------------------------------------
 
-    async def complete_referral_on_first_receipt(self, user_id: str) -> bool:
-        """Called from background worker after receipt completes.
+    async def complete_referral_on_brand_cashback_earned(self, user_id: str) -> bool:
+        """Called after a referee earns brand cashback (uploaded a receipt matching a claimed deal).
 
         user_id is users.id (not firebase_uid).
         Marks referral as COMPLETED but does NOT credit rewards.
@@ -241,16 +240,15 @@ class ReferralService:
         if not referral:
             return False
 
-        # Verify the referee has at least one completed receipt over €50
+        # Verify the referee has at least one earned brand cashback claim
         result = await self.db.execute(
-            select(func.count()).select_from(Receipt).where(
-                Receipt.user_id == user_id,
-                Receipt.status == ReceiptStatus.COMPLETED,
-                Receipt.total_amount >= 50,
+            select(func.count()).select_from(UserBrandCashbackClaim).where(
+                UserBrandCashbackClaim.user_id == user_id,
+                UserBrandCashbackClaim.status == "earned",
             )
         )
-        qualifying_count = result.scalar() or 0
-        if qualifying_count < 1:
+        earned_count = result.scalar() or 0
+        if earned_count < 1:
             return False
 
         # Mark referral as completed (rewards ready to claim, not auto-credited)
@@ -259,7 +257,7 @@ class ReferralService:
         await self.db.flush()
 
         logger.info(
-            f"Referral completed (rewards ready to claim): referee={user_id}, "
+            f"Referral completed via brand cashback earned: referee={user_id}, "
             f"referrer={referral.referrer_id}, code={referral.referral_code}"
         )
         return True
@@ -288,7 +286,6 @@ class ReferralService:
         # Credit reward to this user
         cashback_repo = CashbackRepository(self.db)
         await cashback_repo.upsert_balance_increment(user.id, REWARD_EUROS)
-        await cashback_repo.add_spins(user.id, REWARD_SPINS)
 
         # Mark this side as claimed
         if role == "referrer":
@@ -307,13 +304,13 @@ class ReferralService:
 
         logger.info(
             f"Referral reward claimed: user={user.id}, role={role}, "
-            f"referral={referral.id}, EUR {REWARD_EUROS} + {REWARD_SPINS} spins"
+            f"referral={referral.id}, EUR {REWARD_EUROS}"
         )
 
         return {
             "success": True,
-            "message": f"You earned EUR {REWARD_EUROS:.2f} + {REWARD_SPINS} free spins!",
+            "message": f"You earned EUR {REWARD_EUROS:.2f}!",
             "euros_credited": REWARD_EUROS,
-            "spins_credited": REWARD_SPINS,
+            "spins_credited": 0,
             "new_balance": balance.current_balance,
         }
