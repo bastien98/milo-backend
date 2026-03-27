@@ -19,6 +19,7 @@ from app.db.repositories.cashback_repo import CashbackRepository
 logger = logging.getLogger(__name__)
 
 REWARD_EUROS = 1.0
+REWARD_SPINS = 0
 
 
 class ReferralService:

@@ -1,8 +1,8 @@
 """merge_heads
 
-Revision ID: 8581df09ffe7
-Revises: 054_merge_parallel_branches, 055_add_charity_rejected_status
-Create Date: 2026-03-27 18:38:53.751283
+Revision ID: 056_merge_heads
+Revises: 055_add_charity_rejected_status, 054_merge_parallel_branches
+Create Date: 2026-03-27
 
 """
 from typing import Sequence, Union
@@ -13,7 +13,7 @@ import sqlalchemy as sa
 
 # revision identifiers, used by Alembic.
 revision: str = '056_merge_heads'
-down_revision: Union[str, None] = ('054_merge_parallel_branches', '055_add_charity_rejected_status')
+down_revision: Union[str, None] = ('055_add_charity_rejected_status', '054_merge_parallel_branches')
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 
