@@ -54,6 +54,49 @@ def _confirm(prompt: str) -> bool:
     return response == "yes"
 
 
+def _check_duplicate_pdfs(
+    r2: R2PromoStorage,
+    store_id: str,
+    target_week: str,
+    pdf_refs: list[dict],
+) -> None:
+    """Check if any target week PDFs already exist in the last 3 other weeks.
+
+    Uses HEAD requests (ETags) — no PDF bytes are downloaded.
+    Prompts for confirmation if duplicates are found.
+    """
+    # Get ETags for target week's PDFs
+    target_etags = {}
+    for ref in pdf_refs:
+        etag = r2.get_pdf_etag(store_id, target_week, ref["filename"])
+        target_etags[ref["filename"]] = etag
+
+    # Get last 3 other weeks (excluding target)
+    all_weeks = r2.list_store_weeks(store_id)
+    other_weeks = [w for w in all_weeks if w != target_week][-3:]
+
+    if not other_weeks:
+        return
+
+    # HEAD each PDF in other weeks, compare ETags
+    duplicates = []
+    for week in other_weeks:
+        for pdf in r2.list_week_pdfs(store_id, week):
+            etag = r2.get_pdf_etag(store_id, week, pdf)
+            for target_file, target_etag in target_etags.items():
+                if etag == target_etag:
+                    duplicates.append((target_file, target_week, pdf, week))
+
+    if duplicates:
+        for t_file, t_week, o_file, o_week in duplicates:
+            logger.warning(
+                f"Duplicate PDF detected: {store_id}/{t_week}/{t_file} "
+                f"has same content as {store_id}/{o_week}/{o_file}"
+            )
+        if not _confirm("Duplicate PDF(s) detected. Continue anyway?"):
+            sys.exit(1)
+
+
 def _collect_pdfs_from_r2(
     r2: R2PromoStorage,
     store_id: str,
@@ -176,6 +219,10 @@ def main():
         sys.exit(1)
 
     logger.info(f"Will ingest {len(pdf_refs)} PDF(s) for store '{args.store}'")
+
+    # Duplicate check: compare ETags against last 3 other weeks
+    if args.week:
+        _check_duplicate_pdfs(r2, args.store, args.week, pdf_refs)
 
     # Clean slate: delete existing promos before ingesting (idempotent)
     if not args.dry_run:

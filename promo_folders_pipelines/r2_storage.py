@@ -83,6 +83,12 @@ class R2PromoStorage:
         response = self.client.get_object(Bucket=R2_BUCKET, Key=key)
         return response["Body"].read()
 
+    def get_pdf_etag(self, store_id: str, week: str, filename: str) -> str:
+        """Get the ETag (content hash) of a PDF via HEAD request — no file download."""
+        key = f"{R2_PREFIX}{store_id}/{week}/{filename}"
+        response = self.client.head_object(Bucket=R2_BUCKET, Key=key)
+        return response["ETag"].strip('"')
+
     def download_metadata(self, store_id: str, week: str) -> Optional[dict]:
         """Download and parse metadata.json for a store's week directory.
 
