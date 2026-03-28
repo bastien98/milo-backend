@@ -53,11 +53,15 @@ REQUEST_TIMEOUT = 300  # 5 minutes per Gemini call
 # ---------------------------------------------------------------------------
 class _PromoItemSchema(PydanticBaseModel):
     # --- Display fields (all required except display_unit_price) ---
-    display_name: str = Field(description="Clean Title Case product label: Brand + product + variant + size. ALWAYS include size/quantity when visible (e.g., '4 x 125 g' not just '125 g'). For drinks, volume is CRITICAL (e.g., '33 cl', '6 x 25 cl', '1,5 L'). No promo text or pricing. Examples: 'Oîkos Yoghurt Appel-Kaneel 4 x 115 g', 'Coca-Cola Zero 1,5 L', 'Jupiler Pils 24 x 25 cl'.")
+    display_name: str = Field(description="Clean Title Case product label: product + variant + size. Omit brand when product is identifiable without it (e.g., 'Chips Explosions Salt & Pepper 150 g' not 'Croky Chips...'). Keep brand when it IS the product identity (e.g., 'Coca-Cola Zero 1,5 L' — 'Zero 1,5 L' alone is meaningless). ALWAYS include size/quantity when visible. For drinks, volume is CRITICAL (e.g., '33 cl', '6 x 25 cl', '1,5 L'). No promo text or pricing.")
     display_mechanism: str = Field(description="Standardized promo label. Title case, consistent formatting. For conditional percentage discounts, ALWAYS include the condition (e.g., '-25% Vanaf 2 Verpakkingen', NOT just '-25%'). Only use bare '-25%' if the discount applies to a single item with no minimum purchase. Examples: '1+1 Gratis', '-25%', '-25% Vanaf 2 Verpakkingen', '-20% Vanaf 3 Flessen', '-30% Vanaf 12 Blikken', '2e aan Halve Prijs', '2+1 Gratis', 'Prijsverlaging'.")
     display_description: str = Field(description="Plain-language Dutch explanation of the deal (~80 chars max). Explain what the shopper needs to DO and what they GET. Examples: 'Koop 2 en krijg de 3e gratis', 'Nu €0.80 goedkoper per stuk'. Must be understandable without seeing the folder.")
     display_savings_label: str = Field(description="Human-friendly savings text. Examples: '1 Gratis Item', 'Bespaar €3.00', 'Tot -25% Korting', '2e aan Halve Prijs'.")
     display_unit_price: Optional[str] = Field(default=None, description="Price per standard unit computed from promo_price and size info visible on the page. Use Belgian units: €/L for drinks, €/kg for food, €/stuk for countable items, €/rol for paper products, €/stuk for tea bags/tabs/doekjes. For wine assume 75 cl, for beer blik assume 33 cl. Format: '€X.XX/unit'. null ONLY if no size info whatsoever.")
+
+    # --- Brand identification ---
+    normalized_brand: Optional[str] = Field(default=None, description="Lowercase brand/manufacturer name only. Use the EXACT same format as receipt brand extraction: 'jupiler', 'coca-cola', 'boni', 'boni selection', 'milbona', 'lay\\'s', 'delhaize', '365'. For store/house brands use their actual name (e.g., 'boni', '365', 'everyday', 'milbona', 'pikok'), NEVER 'in-house'. null only for truly unbranded generic assortment promos (very rare in promo folders).")
+    display_brand: Optional[str] = Field(default=None, description="Brand name in clean Title Case for UI display: 'Jupiler', 'Coca-Cola', 'Boni Selection', 'Lay\\'s', '365'. null when normalized_brand is null.")
 
     # --- Price reasoning (scratchpad — generated before prices to improve accuracy) ---
     price_reasoning: str = Field(description="Show your work: what is the promo mechanism, what prices are visible on the page, and how you calculated promo_price and savings_amount step by step. This field is not displayed to users.")
@@ -334,6 +338,14 @@ def parse_promo_items(
         min_purchase_qty = max(1, int(raw.get("min_purchase_qty", 1)))
         promo_depth = compute_promo_depth(savings_amount, original_price, min_purchase_qty)
 
+        # Brand extraction (quality gate — promo folders always show branded products)
+        normalized_brand = (raw.get("normalized_brand") or "").strip().lower() or None
+        display_brand = (raw.get("display_brand") or "").strip() or None
+        if not normalized_brand:
+            logger.warning(f"Skipping '{display_name}': missing normalized_brand")
+            skipped += 1
+            continue
+
         # Category validation
         granular = raw.get("granular_category", "Other")
         if granular not in GRANULAR_CATEGORIES:
@@ -353,6 +365,8 @@ def parse_promo_items(
                 savings_amount=savings_amount,
                 min_purchase_qty=min_purchase_qty,
                 promo_depth=promo_depth,
+                normalized_brand=normalized_brand,
+                display_brand=display_brand,
                 granular_category=granular,
                 parent_category=parent,
                 validity_start=validity_start,
@@ -422,11 +436,12 @@ def upsert_to_postgres(items: list[PromoItem]) -> int:
                 INSERT INTO promo_items (
                     id, display_name, display_name_lower, display_mechanism,
                     display_description, display_savings_label, display_unit_price,
+                    normalized_brand, display_brand,
                     original_price, promo_price, savings_amount, min_purchase_qty, promo_depth,
                     granular_category, source_retailer, source_type,
                     page_number, promo_folder_url, validity_start, validity_end
                 ) VALUES (
-                    %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s
+                    %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s
                 )
                 ON CONFLICT (id) DO UPDATE SET
                     display_name = EXCLUDED.display_name,
@@ -435,6 +450,8 @@ def upsert_to_postgres(items: list[PromoItem]) -> int:
                     display_description = EXCLUDED.display_description,
                     display_savings_label = EXCLUDED.display_savings_label,
                     display_unit_price = EXCLUDED.display_unit_price,
+                    normalized_brand = EXCLUDED.normalized_brand,
+                    display_brand = EXCLUDED.display_brand,
                     original_price = EXCLUDED.original_price,
                     promo_price = EXCLUDED.promo_price,
                     savings_amount = EXCLUDED.savings_amount,
@@ -456,6 +473,8 @@ def upsert_to_postgres(items: list[PromoItem]) -> int:
                     item.display_description,
                     item.display_savings_label,
                     item.display_unit_price,
+                    item.normalized_brand,
+                    item.display_brand,
                     item.original_price,
                     item.promo_price,
                     item.savings_amount,

@@ -129,20 +129,24 @@ Only extract items that are **time-limited promotional deals** with clear pricin
 
 1. **display_name**: Clean, human-readable product label for the consumer app.
    - Title Case (capitalize first letter of each significant word)
-   - Format: "[Brand] [Product Type] [Variant/Flavour] [Size Info]"
-   - ALWAYS include the brand name (even for house brands)
+   - Format: "[Product Type] [Variant/Flavour] [Size Info]"
+   - The brand is extracted separately in the display_brand field, so OMIT the brand from
+     display_name when the product is still clearly identifiable without it.
+   - However, KEEP the brand in display_name when it is essential to identify the product
+     (e.g., "Coca-Cola Zero" makes no sense as just "Zero", "Jupiler Pils" is too generic as just "Pils").
    - ALWAYS include size/quantity info when visible (e.g., "4 x 125 g" not just "125 g")
    - For drinks (beer, soda, wine, water, juice): volume is CRITICAL — always include it
      (e.g., "33 cl", "50 cl", "1,5 L", "6 x 25 cl"). If a can/bottle ("blik"/"fles") is shown
      but no explicit volume, infer from the unit price or context on the page.
    - Include variant/flavour if applicable
    - Do NOT include promo text, pricing, or mechanism info
-   - Examples:
-     - "Oîkos Yoghurt Appel-Kaneel 4 x 115 g"
-     - "Croky Chips Explosions Salt & Pepper 150 g"
-     - "Coca-Cola Zero 1,5 L"
-     - "Boni Selection Serranoham Reserva 200 g"
-     - "Jupiler Pils 24 x 25 cl"
+   - Examples (brand omitted — shown separately):
+     - "Yoghurt Appel-Kaneel 4 x 115 g" (brand "Oikos" shown separately)
+     - "Chips Explosions Salt & Pepper 150 g" (brand "Croky" shown separately)
+     - "Serranoham Reserva 200 g" (brand "Boni Selection" shown separately)
+   - Examples (brand kept — essential for identity):
+     - "Coca-Cola Zero 1,5 L" (just "Zero 1,5 L" is meaningless)
+     - "Jupiler Pils 24 x 25 cl" (just "Pils 24 x 25 cl" is too generic)
 
 2. **original_price**: Regular price before promo (float, comma→dot). REQUIRED — skip item if not visible.
    Round to 2 decimal places.{price_table}
@@ -205,6 +209,32 @@ Only extract items that are **time-limited promotional deals** with clear pricin
 9. **granular_category**: Assign ONE from this list. Use "Other" if nothing fits.
 {categories_list}
 
+10. **normalized_brand**: Lowercase brand/manufacturer name for matching against user purchase history.
+   - Output the brand name ONLY, lowercase, no product type or variant
+   - Use the EXACT same conventions as receipt brand extraction:
+     - Hyphenated brands: "coca-cola" (not "coca cola"), "lay's" (keep apostrophes)
+     - Multi-word store brands: "boni selection" (not just "boni" when it's Boni Selection)
+     - Single-word brands: "jupiler", "danone", "heinz", "nestlé"
+   - For store/house brands, use their ACTUAL brand name — NEVER use "in-house" or generic labels:
+     - Colruyt house brands: "boni", "boni selection", "boni bio", "everyday", "cru", "boni plan't"
+     - Delhaize house brands: "365", "delhaize", "p'tits lions"
+     - Carrefour house brands: "simpl", "carrefour bio", "carrefour classic"
+     - Lidl house brands: "milbona", "pikok", "chef select", "deluxe", "freeway", "vemondo", "solevita", "alesto", "snack day", "combino", "trattoria alfredo", "fin carré"
+     - Aldi house brands: "milsani", "moser roth", "gourmet", "cucina", "lyttos", "barissimo", "river", "sun snacks", "bon gelati", "choceur"
+   - null ONLY for truly unbranded generic assortment promos (very rare in promo folders)
+   - Examples:
+     - "Jupiler Pils 24 x 25 cl" → normalized_brand: "jupiler"
+     - "Coca-Cola Zero 1,5 L" → normalized_brand: "coca-cola"
+     - "Boni Selection Serranoham Reserva 200 g" → normalized_brand: "boni selection"
+     - "Milbona Volle Melk 1 L" → normalized_brand: "milbona"
+     - "Croky Chips Explosions 150 g" → normalized_brand: "croky"
+     - "Everyday Afwasmiddel 1 L" → normalized_brand: "everyday"
+
+11. **display_brand**: Brand name in clean Title Case for display in the consumer app.
+   - Same brand as normalized_brand, but properly capitalized
+   - Examples: "Jupiler", "Coca-Cola", "Boni Selection", "Milbona", "Lay's", "365"
+   - null when normalized_brand is null
+
 ### IMPORTANT RULES
 - Each unique product appears ONCE — deduplicate across languages if bilingual
 - **Multi-brand promos**: When a promo groups multiple brands together (e.g., "Sprite en Fanta", "Coca-Cola, Fanta of Sprite"), create a SEPARATE item for EACH brand. Each item gets its own display_name but MUST inherit shared attributes from the page: size/volume, pricing, and mechanism. Do NOT drop size info just because it appears once for the group rather than per brand."""
@@ -230,6 +260,8 @@ def _build_validation_checklist(config: Dict[str, Any]) -> str:
         "- granular_category is from the provided list",
         "- Item is a TIME-LIMITED promo, not a permanent price guarantee",
         "- If multiple brands share a promo, split into separate items",
+        "- normalized_brand is lowercase, matches the brand visible on the page (NEVER 'in-house')",
+        "- display_brand is Title Case version of normalized_brand",
     ]
     for item in checklist:
         lines.append(f"- {item}")

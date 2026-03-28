@@ -12,6 +12,8 @@ class PromoStoreItem(BaseModel):
     promo_price: float
     savings: float
     savings_amount: Optional[float] = None
+    min_purchase_qty: int = 1
+    effective_unit_price: Optional[float] = None
     discount_percentage: int
     mechanism: str
     validity_start: str

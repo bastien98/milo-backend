@@ -26,11 +26,11 @@ from app.models.promo_item import PromoItem
 
 logger = logging.getLogger(__name__)
 
-# Scoring weights (tunable)
-W_FREQUENCY = 0.25
-W_DISCOUNT = 0.25
-W_URGENCY = 0.25
-W_BRAND = 0.25
+# Scoring weights — certainty-weighted (brand > frequency > urgency > discount)
+W_FREQUENCY = 0.30
+W_DISCOUNT = 0.05
+W_URGENCY = 0.15
+W_BRAND = 0.50
 
 # Bucket sizes per store (total = 15)
 BUCKET_SIZES = {
@@ -42,6 +42,14 @@ BUCKET_SIZES = {
 
 # "Ending Soon" window in days
 ENDING_SOON_DAYS = 2
+
+# Per-bucket minimum score — promos below these thresholds are dropped (quality > quantity)
+BUCKET_MIN_SCORES = {
+    PromoBucket.STAPLES: 0.4,
+    PromoBucket.STOCK_UP: 0.3,
+    PromoBucket.ENDING_SOON: 0.3,
+    PromoBucket.DISCOVER: 0.15,
+}
 
 BUCKET_LABELS = {
     PromoBucket.STAPLES: "Your Everyday Staples",
@@ -162,7 +170,7 @@ def _score_promos_for_user(
 def _compute_score(promo: PromoItem, cat_profile: dict) -> tuple[float, str]:
     """Compute the recommendation score for a promo-category pair."""
     avg_days = cat_profile.get("average_days_between")
-    frequency = min(14.0 / max(avg_days, 1), 1.0) if avg_days and avg_days > 0 else 0.1
+    frequency = min(14.0 / max(avg_days, 1), 1.0) if avg_days and avg_days > 0 else 0.0
 
     discount_depth = (promo.promo_depth / 100.0) if promo.promo_depth else 0.0
     discount_depth = min(discount_depth, 1.0)
@@ -190,24 +198,25 @@ def _compute_score(promo: PromoItem, cat_profile: dict) -> tuple[float, str]:
 
 
 def _compute_brand_bonus(promo: PromoItem, cat_profile: dict) -> float:
-    """Compute brand affinity bonus (0.0 to 1.0)."""
-    # Extract brand from promo display_name (lowercase)
-    promo_name_lower = promo.display_name.lower()
+    """Compute brand affinity bonus (0.0 to 1.0) using exact brand matching."""
+    promo_brand = (promo.normalized_brand or "").lower()
+    if not promo_brand:
+        return 0.0
+
     loyalty = cat_profile.get("loyalty_status", "")
-    preferred_brand = cat_profile.get("preferred_brand")
+    preferred_brand = cat_profile.get("preferred_brand", "")
     brand_tally = cat_profile.get("brand_tally", {})
 
-    # Check if preferred brand appears in promo name
-    if preferred_brand and preferred_brand.lower() in promo_name_lower:
+    # Exact match on preferred brand
+    if preferred_brand and promo_brand == preferred_brand.lower():
         if loyalty == LoyaltyStatus.STRICTLY_LOYAL.value:
             return 1.0
         elif loyalty == LoyaltyStatus.SOFT_LOYAL.value:
             return 0.5
 
-    # Check if any purchased brand appears in promo name
-    for brand in brand_tally:
-        if brand.lower() in promo_name_lower:
-            return 0.3
+    # Check if user has purchased this exact brand
+    if promo_brand in {b.lower() for b in brand_tally}:
+        return 0.3
 
     return 0.0
 
@@ -279,19 +288,7 @@ def _assign_buckets(
             else:
                 stock_up_candidates.append(p)
 
-        # Fill Ending Soon first, then cascade overflow back by match_type
-        ending_soon_max = BUCKET_SIZES[PromoBucket.ENDING_SOON]
-        for overflow in ending_soon_candidates[ending_soon_max:]:
-            mt = overflow.get("match_type", "")
-            if mt == "affinity":
-                discover_candidates.append(overflow)
-            elif mt == "loyal":
-                staple_candidates.append(overflow)
-            else:
-                stock_up_candidates.append(overflow)
-        ending_soon_candidates = ending_soon_candidates[:ending_soon_max]
-
-        # Fill buckets with fixed distribution
+        # Fill buckets with quality gate — no cascade overflow, empty buckets are OK
         store_candidates = []
 
         for bucket, candidates, max_items in [
@@ -300,7 +297,9 @@ def _assign_buckets(
             (PromoBucket.ENDING_SOON, ending_soon_candidates, BUCKET_SIZES[PromoBucket.ENDING_SOON]),
             (PromoBucket.DISCOVER, discover_candidates, BUCKET_SIZES[PromoBucket.DISCOVER]),
         ]:
-            for c in candidates[:max_items]:
+            min_score = BUCKET_MIN_SCORES[bucket]
+            qualified = [c for c in candidates if c.get("score", 0) >= min_score]
+            for c in qualified[:max_items]:
                 key = c.get("item_key", "")
                 if key in seen_keys:
                     continue
@@ -329,7 +328,16 @@ def _promo_to_dict(
     original_price = promo.original_price or 0
     promo_price = promo.promo_price or 0
     savings_amount = promo.savings_amount or 0
+    min_purchase_qty = promo.min_purchase_qty or 1
     discount_pct = round((savings_amount / original_price) * 100) if original_price > 0 else 0
+
+    # For multi-buy deals (e.g. 2+2 gratis), compute effective per-unit cost
+    if min_purchase_qty >= 1 and original_price > 0:
+        effective_unit_price = round(
+            (original_price * min_purchase_qty - savings_amount) / min_purchase_qty, 2
+        )
+    else:
+        effective_unit_price = promo_price
 
     item_key = _build_item_key(promo)
 
@@ -337,6 +345,9 @@ def _promo_to_dict(
         "item_key": item_key,
         "score": score,
         "match_type": match_type,
+        # Brand
+        "brand": promo.display_brand or "",
+        "normalized_brand": promo.normalized_brand or "",
         # Display fields
         "display_name": promo.display_name,
         "display_mechanism": promo.display_mechanism,
@@ -349,6 +360,8 @@ def _promo_to_dict(
         "savings_amount": savings_amount,
         "discount_percentage": discount_pct,
         "promo_depth": promo.promo_depth,
+        "min_purchase_qty": min_purchase_qty,
+        "effective_unit_price": effective_unit_price,
         # Category & source
         "granular_category": promo.granular_category,
         "store_name": promo.source_retailer,

@@ -465,6 +465,7 @@ def _build_shopping_habits(
 _STRICTLY_LOYAL_THRESHOLD = 0.80
 _SOFT_LOYAL_THRESHOLD = 0.60
 _MIN_EVENTS_FOR_LOYALTY = 3
+_MIN_EVENTS_FOR_PROFILE = 2  # Need >=2 events to compute avg_days_between
 
 
 def _build_category_profiles(
@@ -512,7 +513,7 @@ def _build_category_profiles(
 
     for cat, data in cat_data.items():
         total_purchase_events = len(data["receipt_ids"]) or len(data["dates"])
-        if total_purchase_events == 0:
+        if total_purchase_events < _MIN_EVENTS_FOR_PROFILE:
             continue
 
         sorted_dates = sorted(set(data["dates"]))

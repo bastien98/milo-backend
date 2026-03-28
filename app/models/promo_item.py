@@ -31,6 +31,9 @@ class PromoItem(Base):
     display_savings_label: Mapped[str] = mapped_column(String, nullable=False, default="")
     display_unit_price: Mapped[Optional[str]] = mapped_column(String, nullable=True)
 
+    normalized_brand: Mapped[Optional[str]] = mapped_column(String(255), nullable=True, index=True)
+    display_brand: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+
     original_price: Mapped[float] = mapped_column(Float, nullable=False)
     promo_price: Mapped[float] = mapped_column(Float, nullable=False)
     savings_amount: Mapped[float] = mapped_column(Float, nullable=False)

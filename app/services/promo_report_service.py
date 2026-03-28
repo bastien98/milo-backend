@@ -163,6 +163,8 @@ class PromoReportService:
                 "display_unit_price": item.get("display_unit_price"),
                 "display_savings_label": item.get("display_savings_label"),
                 "savings_amount": item.get("savings_amount", 0),
+                "min_purchase_qty": item.get("min_purchase_qty", 1),
+                "effective_unit_price": item.get("effective_unit_price"),
                 "bucket": item.get("bucket", ""),
                 "bucket_label": item.get("bucket_label", ""),
             })

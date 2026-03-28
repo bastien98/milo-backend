@@ -29,6 +29,10 @@ class PromoItem:
     min_purchase_qty: int = 1                    # Min items to complete the deal
     promo_depth: float = 0.0                     # Effective per-item discount %
 
+    # --- Brand identification ---
+    normalized_brand: Optional[str] = None     # Lowercase brand name (matches receipt extraction)
+    display_brand: Optional[str] = None        # Title Case brand for UI display
+
     # --- Category (for search/filtering) ---
     granular_category: str = ""                # From 238-item category list
     parent_category: str = ""                  # Derived from granular
