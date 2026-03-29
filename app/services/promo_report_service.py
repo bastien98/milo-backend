@@ -68,10 +68,20 @@ class PromoReportService:
         # Fetch user's current preferred_stores
         preferred_stores = await self._fetch_preferred_stores(user_id)
 
+        # No stores selected → tell the user to pick stores
+        if preferred_stores is not None and len(preferred_stores) == 0:
+            resp = build_empty_promo_response(
+                report_status=PromoReportStatus.READY,
+                message="Select at least one store in the Deals tab to see personalised deals.",
+                report_date=report_date,
+            )
+            resp["preferred_stores"] = []
+            return resp
+
         # Assemble deterministically
         return self._assemble_report(
             candidates_row=candidates_row,
-            preferred_stores=preferred_stores,
+            preferred_stores=preferred_stores or [],
             promo_week=promo_week,
             report_date=report_date,
         )
@@ -99,17 +109,20 @@ class PromoReportService:
             metadata_json=metadata,
         )
 
-    async def _fetch_preferred_stores(self, user_id: str) -> list[str]:
-        """Fetch preferred_stores from UserProfile (joined via firebase_uid)."""
+    async def _fetch_preferred_stores(self, user_id: str) -> list[str] | None:
+        """Fetch preferred_stores from UserProfile (joined via firebase_uid).
+
+        Returns the list (possibly empty) or None if no profile exists.
+        """
         result = await self.db.execute(
             select(UserProfile.preferred_stores)
             .join(User, User.firebase_uid == UserProfile.user_id)
             .where(User.id == user_id)
         )
         row = result.one_or_none()
-        if row and row[0]:
-            return row[0]
-        return []
+        if row is None:
+            return None
+        return row[0] if row[0] is not None else []
 
     def _assemble_report(
         self,
@@ -125,7 +138,7 @@ class PromoReportService:
         # 0. Filter out expired promos (validity_end < today)
         items = [i for i in items if (i.get("validity_end") or "") >= today_str]
 
-        # 1. Filter by preferred_stores ([] = all stores)
+        # 1. Filter by preferred_stores (empty list is handled before this method)
         #    Resolve display names → canonical names defensively (handles both old and new format)
         canonical_preferred = [resolve_store_name(s) or s.lower() for s in preferred_stores] if preferred_stores else []
         if canonical_preferred:
@@ -135,7 +148,7 @@ class PromoReportService:
         if not items:
             resp = build_empty_promo_response(
                 report_status=PromoReportStatus.READY,
-                message="No active deals matched your habits this week.",
+                message="No deals matched your shopping habits this week. Upload more receipts so we can find better deals for you!",
                 report_date=candidates_row.report_date,
             )
             resp["preferred_stores"] = canonical_preferred
