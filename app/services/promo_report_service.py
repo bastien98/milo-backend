@@ -5,11 +5,14 @@ current preferred_stores, and assembles the response deterministically.
 No Pinecone search or Gemini calls happen at request time.
 """
 
+import logging
 from datetime import date
 from typing import Optional
 
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
+
+logger = logging.getLogger(__name__)
 
 from app.core.promo_reports import (
     build_empty_promo_response,
@@ -107,6 +110,7 @@ class PromoReportService:
             .where(User.id == user_id)
         )
         row = result.one_or_none()
+        logger.info(f"_fetch_preferred_stores(user_id={user_id}): row={row}, row[0]={row[0] if row else 'N/A'}")
         if row and row[0]:
             return row[0]
         return []

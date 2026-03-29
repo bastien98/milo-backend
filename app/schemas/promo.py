@@ -67,6 +67,7 @@ class PromoRecommendationResponse(BaseModel):
     deal_count: int
     promo_week: PromoWeek
     stores: List[PromoStore]
+    preferred_stores: List[str] = []
     summary: PromoSummary
 
 
