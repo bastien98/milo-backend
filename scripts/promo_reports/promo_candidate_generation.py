@@ -26,11 +26,11 @@ from app.models.promo_item import PromoItem
 
 logger = logging.getLogger(__name__)
 
-# Scoring weights — certainty-weighted (brand > frequency > urgency > discount)
-W_FREQUENCY = 0.30
-W_DISCOUNT = 0.05
-W_URGENCY = 0.15
-W_BRAND = 0.50
+# Scoring weights — certainty-weighted (brand > discount > frequency > urgency)
+W_FREQUENCY = 0.20
+W_DISCOUNT = 0.30
+W_URGENCY = 0.05
+W_BRAND = 0.45
 
 # Bucket sizes per store (total = 15)
 BUCKET_SIZES = {

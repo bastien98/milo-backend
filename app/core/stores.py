@@ -41,7 +41,7 @@ _STORES = [
     # ── Carrefour ──
     {
         "name": "carrefour",
-        "display_name": "Carrefour",
+        "display_name": "Carrefour Hypermarket",
         "aliases": [
             "carrefour hypermarché",
             "carrefour hypermarkt",

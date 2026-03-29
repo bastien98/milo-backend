@@ -16,6 +16,7 @@ from app.core.promo_reports import (
     compute_promo_week,
     current_brussels_date,
 )
+from app.core.stores import resolve_store_name
 from app.db.repositories.enriched_profile_repo import EnrichedProfileRepository
 from app.db.repositories.promo_report_event_repo import PromoReportEventRepository
 from app.db.repositories.promo_candidates_repo import PromoCandidatesRepository
@@ -125,16 +126,20 @@ class PromoReportService:
         items = [i for i in items if (i.get("validity_end") or "") >= today_str]
 
         # 1. Filter by preferred_stores ([] = all stores)
-        if preferred_stores:
-            store_set = {s.lower() for s in preferred_stores}
+        #    Resolve display names → canonical names defensively (handles both old and new format)
+        canonical_preferred = [resolve_store_name(s) or s.lower() for s in preferred_stores] if preferred_stores else []
+        if canonical_preferred:
+            store_set = set(canonical_preferred)
             items = [i for i in items if i.get("store_name", "").lower() in store_set]
 
         if not items:
-            return build_empty_promo_response(
+            resp = build_empty_promo_response(
                 report_status=PromoReportStatus.READY,
                 message="No active deals matched your habits this week.",
                 report_date=candidates_row.report_date,
             )
+            resp["preferred_stores"] = canonical_preferred
+            return resp
 
         # 2. Sort by pre-computed score (from candidate generation)
         items.sort(key=lambda x: x.get("score", 0), reverse=True)
@@ -183,8 +188,12 @@ class PromoReportService:
                 "items": store_items,
             })
 
-        # Sort stores by total_savings descending
-        stores.sort(key=lambda s: s["total_savings"], reverse=True)
+        # Sort stores by preferred_stores order (array index = display order)
+        if preferred_stores:
+            store_order = {(resolve_store_name(name) or name.lower()): i for i, name in enumerate(preferred_stores)}
+            stores.sort(key=lambda s: store_order.get(s["store_name"].lower(), len(preferred_stores)))
+        else:
+            stores.sort(key=lambda s: s["total_savings"], reverse=True)
 
         # 6. Compute summary
         all_savings = [i.get("savings", 0) for i in items]
@@ -206,7 +215,12 @@ class PromoReportService:
                 "items": data["items"],
                 "savings": round(data["savings"], 2),
             })
-        stores_breakdown.sort(key=lambda x: x["savings"], reverse=True)
+        # Sort breakdown to match store display order
+        if preferred_stores:
+            store_order = {(resolve_store_name(name) or name.lower()): i for i, name in enumerate(preferred_stores)}
+            stores_breakdown.sort(key=lambda x: store_order.get(x["store"].lower(), len(preferred_stores)))
+        else:
+            stores_breakdown.sort(key=lambda x: x["savings"], reverse=True)
 
         best_value = stores_breakdown[0] if stores_breakdown else None
 
@@ -228,5 +242,6 @@ class PromoReportService:
             "deal_count": deal_count,
             "promo_week": promo_week,
             "stores": stores,
+            "preferred_stores": canonical_preferred if preferred_stores else [],
             "summary": summary,
         }

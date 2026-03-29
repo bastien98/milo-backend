@@ -91,7 +91,10 @@ class UserProfileRepository:
         if language is not None:
             profile.language = language
         if preferred_stores is not None:
-            profile.preferred_stores = preferred_stores
+            from app.core.stores import resolve_store_name
+            profile.preferred_stores = [
+                resolve_store_name(s) or s for s in preferred_stores
+            ]
         if instagram_handle is not None:
             profile.instagram_handle = instagram_handle
 

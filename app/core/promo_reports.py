@@ -42,6 +42,7 @@ def build_empty_promo_response(
         "promo_week": week,
         "top_picks": [],
         "stores": [],
+        "preferred_stores": [],
         "smart_switch": None,
         "summary": {
             "total_items": 0,
