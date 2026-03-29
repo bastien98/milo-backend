@@ -182,6 +182,11 @@ def main():
         "--output",
         help="Path to write extracted items as JSON (defaults to ./extracted_promos.json in dry-run mode)",
     )
+    parser.add_argument(
+        "--skip-candidates",
+        action="store_true",
+        help="Skip promo candidate regeneration after ingestion",
+    )
     args = parser.parse_args()
 
     # --- Environment override ---
@@ -298,6 +303,18 @@ def main():
                 ensure_ascii=False,
             )
         logger.info(f"Wrote {len(all_items)} items to {output_path}")
+
+    # Regenerate promo candidates
+    if not args.dry_run and not args.skip_candidates and all_items:
+        logger.info("Regenerating promo candidates for all users...")
+        import asyncio
+        from scripts.promo_reports.generate_promo_candidates import generate_candidates_for_users
+        try:
+            asyncio.run(generate_candidates_for_users())
+            logger.info("Promo candidate regeneration complete")
+        except Exception as e:
+            logger.error(f"Promo candidate regeneration failed: {e}", exc_info=True)
+            sys.exit(1)
 
 
 if __name__ == "__main__":

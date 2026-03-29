@@ -297,6 +297,17 @@ async def process_receipt_background(
                     logger.warning(f"Referral completion check failed (non-fatal): {referral_err}")
                     await session.rollback()
 
+            # Step 11: Rebuild enriched profile (non-fatal)
+            try:
+                t0 = time.monotonic()
+                from app.services.enriched_profile_service import EnrichedProfileService
+                await EnrichedProfileService.rebuild_profile(user_id, session)
+                await session.commit()
+                logger.info(f"⏱ bg_enriched_profile_rebuild: {time.monotonic() - t0:.3f}s")
+            except Exception as profile_err:
+                logger.warning(f"Enriched profile rebuild failed (non-fatal): {profile_err}")
+                await session.rollback()
+
             invalidate_user(user_id)
 
             logger.info(
