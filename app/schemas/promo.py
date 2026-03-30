@@ -19,6 +19,7 @@ class PromoStoreItem(BaseModel):
     validity_start: str
     validity_end: str
     promo_folder_url: Optional[str] = None
+    page_number: Optional[int] = None
     display_name: Optional[str] = None
     display_mechanism: Optional[str] = None
     display_description: Optional[str] = None

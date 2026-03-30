@@ -175,6 +175,7 @@ class PromoReportService:
                 "validity_start": item.get("validity_start", ""),
                 "validity_end": item.get("validity_end", ""),
                 "promo_folder_url": item.get("promo_folder_url"),
+                "page_number": item.get("page_number"),
                 "display_name": item.get("display_name", ""),
                 "display_mechanism": item.get("display_mechanism", ""),
                 "display_description": item.get("display_description", ""),
