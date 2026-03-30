@@ -329,7 +329,7 @@ def _promo_to_dict(
     promo_price = promo.promo_price or 0
     savings_amount = promo.savings_amount or 0
     min_purchase_qty = promo.min_purchase_qty or 1
-    discount_pct = round((savings_amount / original_price) * 100) if original_price > 0 else 0
+    discount_pct = int(round(promo.promo_depth)) if promo.promo_depth else 0
 
     # For multi-buy deals (e.g. 2+2 gratis), compute effective per-unit cost
     if min_purchase_qty >= 1 and original_price > 0:
