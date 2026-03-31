@@ -221,6 +221,7 @@ async def list_receipts(
                 store_branch=receipt.store_branch,
                 items_count=len(txns),
                 source=receipt.source or ReceiptSource.RECEIPT_UPLOAD,
+                created_at=receipt.created_at,
                 transactions=[
                     GroupedReceiptTransaction(
                         item_id=t.id,

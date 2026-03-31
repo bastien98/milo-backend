@@ -63,7 +63,7 @@ class ReceiptRepository:
         result = await self.db.execute(
             select(Receipt)
             .where(and_(*conditions))
-            .order_by(Receipt.receipt_date.desc(), Receipt.created_at.desc())
+            .order_by(Receipt.created_at.desc())
             .offset(offset)
             .limit(page_size)
         )
@@ -233,7 +233,7 @@ class ReceiptRepository:
             select(Receipt)
             .options(selectinload(Receipt.transactions))
             .where(and_(*conditions))
-            .order_by(Receipt.receipt_date.desc(), Receipt.created_at.desc())
+            .order_by(Receipt.created_at.desc())
             .offset(offset)
             .limit(page_size)
         )

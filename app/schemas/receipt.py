@@ -128,6 +128,7 @@ class GroupedReceipt(BaseModel):
     store_branch: Optional[str] = None
     items_count: int
     source: ReceiptSource  # receipt_upload or bank_import
+    created_at: datetime  # When the receipt was added to the app
     transactions: List[GroupedReceiptTransaction]
 
 
