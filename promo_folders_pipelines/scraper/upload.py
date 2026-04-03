@@ -8,10 +8,52 @@ import json
 import logging
 from datetime import datetime, timezone
 
+from botocore.exceptions import ClientError
+
 from promo_folders_pipelines.r2_storage import R2PromoStorage, R2_BUCKET, R2_PREFIX
 from .scrape import FolderPages
 
 logger = logging.getLogger(__name__)
+
+
+def get_existing_folder_uuids(r2: R2PromoStorage, store_id: str) -> set[str]:
+    """Read all metadata.json files for a store and return their folder_uuids.
+
+    Used for change detection: compare discovered UUIDs against this set
+    to determine which folders are new and need Gemini extraction.
+    """
+    safe_id = store_id.replace(" ", "_")
+    prefix = f"{R2_PREFIX}{safe_id}/"
+    uuids = set()
+
+    # List all objects to find metadata.json files
+    continuation_token = None
+    while True:
+        kwargs = {"Bucket": R2_BUCKET, "Prefix": prefix}
+        if continuation_token:
+            kwargs["ContinuationToken"] = continuation_token
+
+        response = r2.client.list_objects_v2(**kwargs)
+
+        for obj in response.get("Contents", []):
+            key = obj["Key"]
+            if key.endswith("/metadata.json"):
+                try:
+                    meta_response = r2.client.get_object(Bucket=R2_BUCKET, Key=key)
+                    metadata = json.loads(meta_response["Body"].read())
+                    folder_uuid = metadata.get("folder_uuid")
+                    if folder_uuid:
+                        uuids.add(folder_uuid)
+                        logger.debug(f"Found existing folder UUID: {folder_uuid} in {key}")
+                except (ClientError, json.JSONDecodeError, KeyError) as e:
+                    logger.warning(f"Failed to read metadata from {key}: {e}")
+
+        if not response.get("IsTruncated"):
+            break
+        continuation_token = response.get("NextContinuationToken")
+
+    logger.info(f"Found {len(uuids)} existing folder UUID(s) for '{store_id}' in R2")
+    return uuids
 
 
 def _store_prefix(store_id: str) -> str:

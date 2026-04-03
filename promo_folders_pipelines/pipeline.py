@@ -212,6 +212,158 @@ def extract_batch(
     return {"items": []}
 
 
+def extract_batch_images(
+    client: genai.Client,
+    images: list[tuple[int, bytes]],
+    batch_num: int,
+    system_prompt: str,
+    display_name: str,
+) -> dict:
+    """Extract promo items from a batch of page images via Gemini structured output.
+
+    Args:
+        images: List of (page_number, webp_bytes) tuples (1-indexed page numbers)
+        batch_num: Batch sequence number for logging
+    """
+    for attempt in range(1, MAX_RETRIES + 1):
+        delay = RETRY_BASE_DELAY * (2 ** (attempt - 1))
+        label = f"[Batch {batch_num}]"
+        total_bytes = sum(len(b) for _, b in images)
+        page_nums = [p for p, _ in images]
+
+        if attempt == 1:
+            logger.info(f"{label} Sending pages {page_nums} to Gemini ({total_bytes:,} bytes)...")
+        else:
+            logger.info(f"{label} Retry {attempt}/{MAX_RETRIES} after {delay}s backoff...")
+            time.sleep(delay)
+
+        start_time = time.time()
+
+        # Build content parts: one image per page + text instruction
+        parts = []
+        for _, img_bytes in images:
+            parts.append(types.Part.from_bytes(data=img_bytes, mime_type="image/webp"))
+        parts.append(
+            types.Part.from_text(
+                text=f"Extract all promotional product offers from these {display_name} promo folder pages."
+            )
+        )
+
+        try:
+            response = client.models.generate_content(
+                model=GEMINI_MODEL,
+                contents=parts,
+                config=types.GenerateContentConfig(
+                    system_instruction=system_prompt,
+                    max_output_tokens=MAX_OUTPUT_TOKENS,
+                    temperature=0.0,
+                    thinking_config=types.ThinkingConfig(thinking_level="high"),
+                    response_mime_type="application/json",
+                    response_schema=_PromoFolderSchema,
+                    media_resolution=types.MediaResolution.MEDIA_RESOLUTION_HIGH,
+                ),
+            )
+        except Exception as e:
+            elapsed = time.time() - start_time
+            logger.warning(f"{label} API error after {elapsed:.1f}s: {e}")
+            if attempt == MAX_RETRIES:
+                raise
+            continue
+
+        elapsed = time.time() - start_time
+        response_text = response.text
+        if not response_text:
+            logger.warning(f"{label} Empty response after {elapsed:.1f}s")
+            if attempt == MAX_RETRIES:
+                raise RuntimeError(f"Batch {batch_num} returned empty after {MAX_RETRIES} retries")
+            continue
+
+        cleaned = re.sub(r',\s*([}\]])', r'\1', response_text)
+        try:
+            data = json.loads(cleaned)
+        except json.JSONDecodeError as e:
+            logger.warning(f"{label} JSON parse error: {e}")
+            if attempt == MAX_RETRIES:
+                raise
+            continue
+
+        # Adjust page numbers: batch-relative → absolute page number
+        first_page = page_nums[0]
+        for item in data.get("items", []):
+            batch_page = item.get("page_number")
+            if batch_page is not None:
+                item["page_number"] = first_page + batch_page - 1
+
+        item_count = len(data.get("items", []))
+        logger.info(f"{label} Done in {elapsed:.1f}s — {item_count} items extracted")
+        return data
+
+    return {"items": []}
+
+
+def extract_promos_from_images(
+    page_images: list[tuple[int, bytes]],
+    config: Dict[str, Any],
+) -> dict:
+    """Extract promo items from page images via Gemini (batched, 2 pages per call).
+
+    Args:
+        page_images: List of (page_number, webp_bytes) tuples, 1-indexed
+        config: Store YAML config dict
+
+    Returns:
+        Dict with keys: validity_start, validity_end, items
+    """
+    system_prompt = build_system_prompt(config, CATEGORIES_PROMPT_LIST)
+    client = genai.Client(
+        api_key=GEMINI_API_KEY,
+        http_options={"timeout": REQUEST_TIMEOUT * 1000},
+    )
+    display_name = config["display_name"]
+
+    # Batch images in pairs (2 per call)
+    batches = []
+    for i in range(0, len(page_images), PAGES_PER_BATCH):
+        batches.append(page_images[i : i + PAGES_PER_BATCH])
+
+    logger.info(f"Processing {len(batches)} image batches ({len(page_images)} pages) sequentially...")
+    start_time = time.time()
+
+    all_items = []
+    validity_start = None
+    validity_end = None
+
+    for i, batch in enumerate(batches):
+        data = extract_batch_images(client, batch, i + 1, system_prompt, display_name)
+        if data.get("validity_start") and not validity_start:
+            validity_start = data["validity_start"]
+            validity_end = data.get("validity_end")
+        all_items.extend(data.get("items", []))
+
+    elapsed = time.time() - start_time
+    logger.info(f"All batches complete in {elapsed:.1f}s — {len(all_items)} total items")
+
+    # Deduplicate by display_name (keep first occurrence)
+    seen = set()
+    deduped = []
+    for item in all_items:
+        name = (item.get("display_name") or "").lower().strip()
+        if name and name not in seen:
+            seen.add(name)
+            deduped.append(item)
+        elif name in seen:
+            logger.debug(f"Dedup: skipping duplicate '{name}'")
+
+    if len(deduped) < len(all_items):
+        logger.info(f"Deduplicated: {len(all_items)} → {len(deduped)} items")
+
+    return {
+        "validity_start": validity_start,
+        "validity_end": validity_end,
+        "items": deduped,
+    }
+
+
 def extract_promos_from_pdf(pdf_data: bytes, config: Dict[str, Any]) -> dict:
     """Split PDF into batches and extract promo items sequentially."""
     batches = split_pdf_into_batches(pdf_data)
