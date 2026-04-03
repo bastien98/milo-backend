@@ -81,6 +81,16 @@ def _select_folders(
     """Classify and filter folders for a retailer."""
     max_folders = config["max_folders"]
 
+    # Name-based filter (e.g. Colruyt → only "Alle Acties" folder)
+    name_filter = config.get("folder_name_filter")
+    if name_filter:
+        matched = [f for f in folders if name_filter.lower() in f.name.lower()]
+        if matched:
+            logger.info(f"Name filter '{name_filter}': matched {len(matched)}/{len(folders)} folder(s)")
+            return matched[:max_folders]
+        else:
+            logger.warning(f"Name filter '{name_filter}' matched 0/{len(folders)} folders, falling back to classification")
+
     if len(folders) == 1:
         logger.info("Single folder found, skipping classification")
         return folders
