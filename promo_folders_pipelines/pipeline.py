@@ -613,7 +613,7 @@ def generate_record_id(item: PromoItem) -> str:
 # ---------------------------------------------------------------------------
 # Image enhancement via Gemini
 # ---------------------------------------------------------------------------
-GEMINI_IMAGE_MODEL = "gemini-3-pro-image-preview"
+GEMINI_IMAGE_MODEL = "gemini-3.1-flash-image-preview"
 
 _ENHANCE_PROMPT = (
     "Edit this product image from a supermarket promotional flyer. "

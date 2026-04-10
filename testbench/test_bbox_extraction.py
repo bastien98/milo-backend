@@ -180,7 +180,7 @@ VALIDATION: Before outputting each bbox, verify x_min < x_max and y_min < y_max.
 """
 
 
-GEMINI_IMAGE_MODEL = "gemini-3-pro-image-preview"
+GEMINI_IMAGE_MODEL = "gemini-3.1-flash-image-preview"
 
 ENHANCE_PROMPT = (
     "Edit this product image from a supermarket promotional flyer. "
