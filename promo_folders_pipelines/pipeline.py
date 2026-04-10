@@ -613,17 +613,15 @@ def generate_record_id(item: PromoItem) -> str:
 # ---------------------------------------------------------------------------
 # Image enhancement via Gemini
 # ---------------------------------------------------------------------------
+GEMINI_IMAGE_MODEL = "gemini-3-pro-image-preview"
+
 _ENHANCE_PROMPT = (
-    "You are a product image editor. The input image is a cropped promotional tile "
-    "from a supermarket flyer. It contains a product photo along with overlaid text, "
-    "price labels, promo badges, stickers, and a busy background.\n\n"
-    "Your task:\n"
-    "1. Remove ALL text, price tags, promo badges, stickers, and logos from the image.\n"
-    "2. Isolate the product itself — keep only the physical product.\n"
-    "3. Place the product on a clean, solid white background.\n"
-    "4. Enhance image quality: sharpen details, correct colors, improve resolution.\n"
-    "5. Center the product in the frame with some padding.\n\n"
-    "Return ONLY the cleaned product image, no text."
+    "Edit this product image from a supermarket promotional flyer. "
+    "Remove all text, price tags, promotional badges, stickers, logos, and any overlay graphics. "
+    "Keep only the physical product itself. "
+    "Place the product centered on a clean, solid white background with some padding around it. "
+    "Enhance the image quality: sharpen product details, correct colors, and improve resolution. "
+    "The result should look like a clean e-commerce product photo on a white background."
 )
 
 
@@ -632,26 +630,17 @@ def enhance_item_image(
     crop: Image.Image,
     item_label: str = "",
 ) -> Image.Image:
-    """Enhance a cropped product image using Gemini image generation.
+    """Enhance a cropped product image using Gemini image editing.
 
-    Removes text overlays, isolates the product on a white background, and
-    enhances quality. Raises on failure after retries.
+    Uses gemini-3-pro-image-preview to remove text overlays, isolate the
+    product on a white background, and enhance quality.
+    Raises on failure after retries.
     """
     w, h = crop.size
     if w < 64 or h < 64:
         raise RuntimeError(
             f"Crop too small ({w}x{h}) for enhancement: {item_label}"
         )
-
-    # Convert crop to WebP bytes for the API
-    buf = io.BytesIO()
-    crop.save(buf, format="WEBP", quality=90)
-    crop_bytes = buf.getvalue()
-
-    parts = [
-        types.Part.from_bytes(data=crop_bytes, mime_type="image/webp"),
-        types.Part.from_text(text=_ENHANCE_PROMPT),
-    ]
 
     for attempt in range(1, MAX_RETRIES + 1):
         delay = RETRY_BASE_DELAY * (2 ** (attempt - 1))
@@ -662,19 +651,20 @@ def enhance_item_image(
             time.sleep(delay)
 
         try:
+            # Send PIL Image directly + text prompt (SDK handles conversion)
             response = client.models.generate_content(
-                model=GEMINI_MODEL,
-                contents=parts,
+                model=GEMINI_IMAGE_MODEL,
+                contents=[_ENHANCE_PROMPT, crop],
                 config=types.GenerateContentConfig(
-                    response_modalities=["IMAGE", "TEXT"],
-                    temperature=0.0,
+                    response_modalities=["TEXT", "IMAGE"],
                 ),
             )
 
             # Extract image from response parts
-            for part in response.candidates[0].content.parts:
-                if part.inline_data and part.inline_data.mime_type.startswith("image/"):
-                    enhanced = Image.open(io.BytesIO(part.inline_data.data)).convert("RGB")
+            for part in response.parts:
+                if part.inline_data is not None:
+                    enhanced = part.as_image()
+                    enhanced = enhanced.convert("RGB")
                     logger.info(f"{label} Enhanced successfully ({enhanced.size[0]}x{enhanced.size[1]})")
                     return enhanced
 

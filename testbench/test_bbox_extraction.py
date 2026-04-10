@@ -180,17 +180,15 @@ VALIDATION: Before outputting each bbox, verify x_min < x_max and y_min < y_max.
 """
 
 
+GEMINI_IMAGE_MODEL = "gemini-3-pro-image-preview"
+
 ENHANCE_PROMPT = (
-    "You are a product image editor. The input image is a cropped promotional tile "
-    "from a supermarket flyer. It contains a product photo along with overlaid text, "
-    "price labels, promo badges, stickers, and a busy background.\n\n"
-    "Your task:\n"
-    "1. Remove ALL text, price tags, promo badges, stickers, and logos from the image.\n"
-    "2. Isolate the product itself — keep only the physical product.\n"
-    "3. Place the product on a clean, solid white background.\n"
-    "4. Enhance image quality: sharpen details, correct colors, improve resolution.\n"
-    "5. Center the product in the frame with some padding.\n\n"
-    "Return ONLY the cleaned product image, no text."
+    "Edit this product image from a supermarket promotional flyer. "
+    "Remove all text, price tags, promotional badges, stickers, logos, and any overlay graphics. "
+    "Keep only the physical product itself. "
+    "Place the product centered on a clean, solid white background with some padding around it. "
+    "Enhance the image quality: sharpen product details, correct colors, and improve resolution. "
+    "The result should look like a clean e-commerce product photo on a white background."
 )
 
 
@@ -312,35 +310,31 @@ def enhance_image(
 ) -> Optional[bytes]:
     """Send a cropped product image to Gemini for enhancement.
 
-    Removes text overlays, isolates the product on a white background,
-    and enhances quality. Returns WebP bytes or None on failure.
+    Uses gemini-3-pro-image-preview to remove text overlays, isolate the
+    product on a white background, and enhance quality.
+    Returns WebP bytes or None on failure.
     """
-    # Skip very small crops — Gemini can't do much with them
+    # Skip very small crops
     img = Image.open(io.BytesIO(crop_bytes))
     if img.width < 64 or img.height < 64:
         logger.warning(f"  Skipping enhancement — crop too small ({img.width}x{img.height})")
         return None
 
-    parts = [
-        types.Part.from_bytes(data=crop_bytes, mime_type="image/webp"),
-        types.Part.from_text(text=ENHANCE_PROMPT),
-    ]
-
     for attempt in range(1, 4):
         try:
+            # Send PIL Image directly + text prompt (SDK handles conversion)
             response = client.models.generate_content(
-                model=GEMINI_MODEL,
-                contents=parts,
+                model=GEMINI_IMAGE_MODEL,
+                contents=[ENHANCE_PROMPT, img],
                 config=types.GenerateContentConfig(
-                    response_modalities=["IMAGE", "TEXT"],
-                    temperature=0.0,
+                    response_modalities=["TEXT", "IMAGE"],
                 ),
             )
 
             # Extract image from response parts
-            for part in response.candidates[0].content.parts:
-                if part.inline_data and part.inline_data.mime_type.startswith("image/"):
-                    enhanced_img = Image.open(io.BytesIO(part.inline_data.data)).convert("RGB")
+            for part in response.parts:
+                if part.inline_data is not None:
+                    enhanced_img = part.as_image().convert("RGB")
                     out = io.BytesIO()
                     enhanced_img.save(out, format="WEBP", quality=90)
                     return out.getvalue()
