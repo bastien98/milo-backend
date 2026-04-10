@@ -183,12 +183,18 @@ VALIDATION: Before outputting each bbox, verify x_min < x_max and y_min < y_max.
 GEMINI_IMAGE_MODEL = "gemini-3.1-flash-image-preview"
 
 ENHANCE_PROMPT = (
-    "Edit this product image from a supermarket promotional flyer. "
-    "Remove all text, price tags, promotional badges, stickers, logos, and any overlay graphics. "
-    "Keep only the physical product itself. "
-    "Place the product centered on a clean, solid white background with some padding around it. "
-    "Enhance the image quality: sharpen product details, correct colors, and improve resolution. "
-    "The result should look like a clean e-commerce product photo on a white background."
+    "Edit this product image. This is a cropped tile from a supermarket promotional flyer. "
+    "CRITICAL REQUIREMENTS: "
+    "1. Remove absolutely ALL text from the image — every price label, product name, brand text, "
+    "promotional badge, sticker, percentage sign, euro sign, and any other written characters. "
+    "There must be ZERO text remaining in the output image. "
+    "2. Keep ONLY the physical product (the bottle, box, package, food item, etc.). "
+    "3. Center the product precisely in the middle of the image with equal padding on all sides. "
+    "The product should occupy roughly 70-80% of the image area, with uniform white space around it. "
+    "4. Replace the entire background with a clean, solid white (#FFFFFF) background. "
+    "5. Enhance the product: sharpen details, correct colors, improve clarity. "
+    "The final result must look like a professional e-commerce product photo — "
+    "just the product, perfectly centered, on a pure white background, with no text whatsoever."
 )
 
 
