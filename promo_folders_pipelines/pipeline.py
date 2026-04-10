@@ -663,8 +663,7 @@ def enhance_item_image(
             # Extract image from response parts
             for part in response.parts:
                 if part.inline_data is not None:
-                    enhanced = part.as_image()
-                    enhanced = enhanced.convert("RGB")
+                    enhanced = Image.open(io.BytesIO(part.inline_data.data)).convert("RGB")
                     logger.info(f"{label} Enhanced successfully ({enhanced.size[0]}x{enhanced.size[1]})")
                     return enhanced
 

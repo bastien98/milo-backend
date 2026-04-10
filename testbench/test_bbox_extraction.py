@@ -334,7 +334,7 @@ def enhance_image(
             # Extract image from response parts
             for part in response.parts:
                 if part.inline_data is not None:
-                    enhanced_img = part.as_image().convert("RGB")
+                    enhanced_img = Image.open(io.BytesIO(part.inline_data.data)).convert("RGB")
                     out = io.BytesIO()
                     enhanced_img.save(out, format="WEBP", quality=90)
                     return out.getvalue()
