@@ -61,6 +61,9 @@ class PromoItemRepository:
                 "promo_folder_url": stmt.excluded.promo_folder_url,
                 "validity_start": stmt.excluded.validity_start,
                 "validity_end": stmt.excluded.validity_end,
+                "thumbnail_url": stmt.excluded.thumbnail_url,
+                "image_url": stmt.excluded.image_url,
+                "hero_url": stmt.excluded.hero_url,
             },
         )
         result = await self.db.execute(stmt)

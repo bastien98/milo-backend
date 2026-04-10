@@ -61,3 +61,6 @@ WalletCerts/
 
 # Gemini debug dumps
 debug_dumps/
+
+# Testbench output
+testbench/bbox_test_output/

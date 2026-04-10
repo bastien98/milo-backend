@@ -47,9 +47,13 @@ except ImportError:
     sys.exit(1)
 
 from promo_folders_pipelines.r2_storage import R2PromoStorage
+from google import genai
 from promo_folders_pipelines.pipeline import (
+    GEMINI_API_KEY,
+    REQUEST_TIMEOUT,
     extract_promos_from_images,
     parse_promo_items,
+    crop_and_upload_item_images,
     upsert_to_postgres,
     delete_retailer_promos_pg,
 )
@@ -217,6 +221,15 @@ def process_retailer(
         # Step 6: Parse & validate
         source_url = f"https://www.promopromo.be/nl/{folder.shop_slug}-folder/{folder.uuid}/0"
         items = parse_promo_items(raw_data, canonical_store_id, source_url)
+
+        # Step 6.5: Crop item images, enhance via Gemini, and upload to R2
+        page_images_dict = {num: img for num, img in page_images}
+        gemini_client = genai.Client(
+            api_key=GEMINI_API_KEY,
+            http_options={"timeout": REQUEST_TIMEOUT * 1000},
+        )
+        crop_and_upload_item_images(items, page_images_dict, r2, canonical_store_id, gemini_client)
+
         all_items.extend(items)
         result["items_extracted"] += len(items)
 

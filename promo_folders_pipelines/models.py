@@ -44,3 +44,11 @@ class PromoItem:
     source_type: str = "folder"
     page_number: Optional[int] = None           # Page in the PDF where this item appears
     promo_folder_url: Optional[str] = None
+
+    # --- Bounding box (transit only — not persisted to DB) ---
+    bbox: Optional[dict] = None                  # Normalized 0-1 coords from Gemini
+
+    # --- Product image URLs (persisted to DB, served from R2) ---
+    thumbnail_url: Optional[str] = None          # 200px max dimension
+    image_url: Optional[str] = None              # 400px max dimension
+    hero_url: Optional[str] = None               # 800px max dimension

@@ -89,6 +89,15 @@ class R2PromoStorage:
         response = self.client.head_object(Bucket=R2_BUCKET, Key=key)
         return response["ETag"].strip('"')
 
+    def upload_image(self, key: str, data: bytes) -> None:
+        """Upload an image to R2 with public-read content type."""
+        self.client.put_object(
+            Bucket=R2_BUCKET,
+            Key=key,
+            Body=data,
+            ContentType="image/webp",
+        )
+
     def download_metadata(self, store_id: str, week: str) -> Optional[dict]:
         """Download and parse metadata.json for a store's week directory.
 

@@ -6,6 +6,7 @@ parsing, and PostgreSQL upsert.
 """
 
 import hashlib
+import io
 import json
 import logging
 import os
@@ -17,6 +18,7 @@ from typing import Any, Dict, List, Optional
 import fitz  # PyMuPDF
 from google import genai
 from google.genai import types
+from PIL import Image
 from pydantic import BaseModel as PydanticBaseModel, Field
 
 from app.core.categories import (
@@ -27,6 +29,7 @@ from app.core.categories import (
 from promo_folders_pipelines.models import PromoItem
 from promo_folders_pipelines.promo_depth import compute_promo_depth
 from promo_folders_pipelines.prompt_builder import build_system_prompt
+from promo_folders_pipelines.r2_storage import R2PromoStorage
 from promo_folders_pipelines.stores import load_store_config
 
 logger = logging.getLogger(__name__)
@@ -48,9 +51,33 @@ RETRY_BASE_DELAY = 5  # seconds, doubles each retry
 REQUEST_TIMEOUT = 300  # 5 minutes per Gemini call
 
 
+R2_PUBLIC_BASE_URL = os.environ.get("R2_PUBLIC_BASE_URL", "")
+
+# Appended to the system prompt to instruct Gemini to return bounding boxes
+_BBOX_PROMPT_SUFFIX = """
+
+## BOUNDING BOX
+For EVERY item, populate the `bbox` field with the tight bounding box of its complete product tile
+(product photo + name + price labels + promo badge). Coordinates normalized 0-1:
+  x_min=0 → left edge, x_max=1 → right edge
+  y_min=0 → top edge,  y_max=1 → bottom edge
+Rules:
+- x_min < x_max and y_min < y_max (set null if uncertain)
+- Include the full tile; do not clip any part of it
+- One bbox per item even if the product appears in multiple places on the page
+"""
+
+
 # ---------------------------------------------------------------------------
 # Pydantic schemas for Gemini structured output
 # ---------------------------------------------------------------------------
+class _BboxSchema(PydanticBaseModel):
+    x_min: float = Field(ge=0.0, le=1.0, description="Left edge, normalized 0-1")
+    y_min: float = Field(ge=0.0, le=1.0, description="Top edge, normalized 0-1")
+    x_max: float = Field(ge=0.0, le=1.0, description="Right edge, normalized 0-1")
+    y_max: float = Field(ge=0.0, le=1.0, description="Bottom edge, normalized 0-1")
+
+
 class _PromoItemSchema(PydanticBaseModel):
     # --- Display fields (all required except display_unit_price) ---
     display_name: str = Field(description="Clean Title Case product label: product + variant + size. Omit brand when product is identifiable without it (e.g., 'Chips Explosions Salt & Pepper 150 g' not 'Croky Chips...'). Keep brand when it IS the product identity (e.g., 'Coca-Cola Zero 1,5 L' — 'Zero 1,5 L' alone is meaningless). ALWAYS include size/quantity when visible. For drinks, volume is CRITICAL (e.g., '33 cl', '6 x 25 cl', '1,5 L'). No promo text or pricing.")
@@ -79,6 +106,17 @@ class _PromoItemSchema(PydanticBaseModel):
 
     # --- Page reference ---
     page_number: int = Field(ge=1, description="Page number within the current PDF batch, 1-indexed.")
+
+    # --- Bounding box (for image cropping) ---
+    bbox: Optional[_BboxSchema] = Field(
+        default=None,
+        description=(
+            "Tight bounding box of the ENTIRE product tile on the page: photo, "
+            "product name, price labels, and promo badge. Normalized 0-1 relative "
+            "to the full page image (x=0 left, y=0 top). x_min < x_max, y_min < y_max. "
+            "null if the item tile cannot be clearly located."
+        ),
+    )
 
 
 class _PromoFolderSchema(PydanticBaseModel):
@@ -144,6 +182,7 @@ def extract_batch(
     display_name: str,
 ) -> dict:
     """Extract promo items from a single PDF batch via Gemini structured output."""
+    full_system_prompt = system_prompt + _BBOX_PROMPT_SUFFIX
     for attempt in range(1, MAX_RETRIES + 1):
         delay = RETRY_BASE_DELAY * (2 ** (attempt - 1))
         label = f"[Batch {batch_num}]"
@@ -164,7 +203,7 @@ def extract_batch(
                     f"Extract all promotional product offers from these {display_name} promo folder pages.",
                 ],
                 config=types.GenerateContentConfig(
-                    system_instruction=system_prompt,
+                    system_instruction=full_system_prompt,
                     max_output_tokens=MAX_OUTPUT_TOKENS,
                     temperature=0.0,
                     thinking_config=types.ThinkingConfig(thinking_level="high"),
@@ -225,6 +264,7 @@ def extract_batch_images(
         images: List of (page_number, webp_bytes) tuples (1-indexed page numbers)
         batch_num: Batch sequence number for logging
     """
+    full_system_prompt = system_prompt + _BBOX_PROMPT_SUFFIX
     for attempt in range(1, MAX_RETRIES + 1):
         delay = RETRY_BASE_DELAY * (2 ** (attempt - 1))
         label = f"[Batch {batch_num}]"
@@ -254,7 +294,7 @@ def extract_batch_images(
                 model=GEMINI_MODEL,
                 contents=parts,
                 config=types.GenerateContentConfig(
-                    system_instruction=system_prompt,
+                    system_instruction=full_system_prompt,
                     max_output_tokens=MAX_OUTPUT_TOKENS,
                     temperature=0.0,
                     thinking_config=types.ThinkingConfig(thinking_level="high"),
@@ -505,6 +545,21 @@ def parse_promo_items(
             granular = "Other"
         parent = get_parent_category(granular)
 
+        # Extract bbox (transit-only field — not persisted to DB)
+        raw_bbox = raw.get("bbox")
+        bbox_dict = None
+        if raw_bbox and isinstance(raw_bbox, dict):
+            x_min = raw_bbox.get("x_min")
+            y_min = raw_bbox.get("y_min")
+            x_max = raw_bbox.get("x_max")
+            y_max = raw_bbox.get("y_max")
+            if (
+                x_min is not None and y_min is not None
+                and x_max is not None and y_max is not None
+                and x_min < x_max and y_min < y_max
+            ):
+                bbox_dict = raw_bbox
+
         items.append(
             PromoItem(
                 display_name=display_name,
@@ -527,6 +582,7 @@ def parse_promo_items(
                 source_type="folder",
                 page_number=raw.get("page_number"),
                 promo_folder_url=promo_folder_url,
+                bbox=bbox_dict,
             )
         )
 
@@ -552,6 +608,208 @@ def generate_record_id(item: PromoItem) -> str:
         f"{item.validity_start}:{item.validity_end}"
     )
     return hashlib.sha256(key.encode()).hexdigest()[:16]
+
+
+# ---------------------------------------------------------------------------
+# Image enhancement via Gemini
+# ---------------------------------------------------------------------------
+_ENHANCE_PROMPT = (
+    "You are a product image editor. The input image is a cropped promotional tile "
+    "from a supermarket flyer. It contains a product photo along with overlaid text, "
+    "price labels, promo badges, stickers, and a busy background.\n\n"
+    "Your task:\n"
+    "1. Remove ALL text, price tags, promo badges, stickers, and logos from the image.\n"
+    "2. Isolate the product itself — keep only the physical product.\n"
+    "3. Place the product on a clean, solid white background.\n"
+    "4. Enhance image quality: sharpen details, correct colors, improve resolution.\n"
+    "5. Center the product in the frame with some padding.\n\n"
+    "Return ONLY the cleaned product image, no text."
+)
+
+
+def enhance_item_image(
+    client: genai.Client,
+    crop: Image.Image,
+    item_label: str = "",
+) -> Image.Image:
+    """Enhance a cropped product image using Gemini image generation.
+
+    Removes text overlays, isolates the product on a white background, and
+    enhances quality. Raises on failure after retries.
+    """
+    w, h = crop.size
+    if w < 64 or h < 64:
+        raise RuntimeError(
+            f"Crop too small ({w}x{h}) for enhancement: {item_label}"
+        )
+
+    # Convert crop to WebP bytes for the API
+    buf = io.BytesIO()
+    crop.save(buf, format="WEBP", quality=90)
+    crop_bytes = buf.getvalue()
+
+    parts = [
+        types.Part.from_bytes(data=crop_bytes, mime_type="image/webp"),
+        types.Part.from_text(text=_ENHANCE_PROMPT),
+    ]
+
+    for attempt in range(1, MAX_RETRIES + 1):
+        delay = RETRY_BASE_DELAY * (2 ** (attempt - 1))
+        label = f"[Enhance {item_label}]" if item_label else "[Enhance]"
+
+        if attempt > 1:
+            logger.info(f"{label} Retry {attempt}/{MAX_RETRIES} after {delay}s backoff...")
+            time.sleep(delay)
+
+        try:
+            response = client.models.generate_content(
+                model=GEMINI_MODEL,
+                contents=parts,
+                config=types.GenerateContentConfig(
+                    response_modalities=["IMAGE", "TEXT"],
+                    temperature=0.0,
+                ),
+            )
+
+            # Extract image from response parts
+            for part in response.candidates[0].content.parts:
+                if part.inline_data and part.inline_data.mime_type.startswith("image/"):
+                    enhanced = Image.open(io.BytesIO(part.inline_data.data)).convert("RGB")
+                    logger.info(f"{label} Enhanced successfully ({enhanced.size[0]}x{enhanced.size[1]})")
+                    return enhanced
+
+            logger.warning(f"{label} Attempt {attempt}: no image in Gemini response")
+
+        except Exception as e:
+            logger.warning(f"{label} Attempt {attempt} failed: {e}")
+            if attempt == MAX_RETRIES:
+                raise RuntimeError(
+                    f"Image enhancement failed after {MAX_RETRIES} retries for: {item_label}"
+                ) from e
+
+    raise RuntimeError(f"Image enhancement failed after {MAX_RETRIES} retries for: {item_label}")
+
+
+# ---------------------------------------------------------------------------
+# Page image rendering + item image cropping
+# ---------------------------------------------------------------------------
+def _render_pdf_pages(pdf_data: bytes, dpi: int = 150) -> dict[int, bytes]:
+    """Render each PDF page to a WebP image at the given DPI.
+
+    Returns {page_number: webp_bytes} (1-indexed).
+    150 DPI on A4 ≈ 1240×1754px — sufficient for 800px crops.
+    """
+    doc = fitz.open(stream=pdf_data, filetype="pdf")
+    pages = {}
+    for i in range(len(doc)):
+        pixmap = doc[i].get_pixmap(dpi=dpi)
+        pages[i + 1] = pixmap.tobytes("webp")
+    doc.close()
+    return pages
+
+
+def _resize_to_max(img: Image.Image, max_dim: int) -> Image.Image:
+    """Resize image so its largest dimension equals max_dim, preserving aspect ratio."""
+    w, h = img.size
+    if max(w, h) <= max_dim:
+        return img.copy()
+    scale = max_dim / max(w, h)
+    return img.resize((int(w * scale), int(h * scale)), Image.LANCZOS)
+
+
+def crop_and_upload_item_images(
+    items: list[PromoItem],
+    page_images: dict[int, bytes],
+    r2: R2PromoStorage,
+    store_id: str,
+    gemini_client: genai.Client = None,
+) -> None:
+    """Crop each item's product tile, enhance via Gemini, and upload 3 sizes to R2.
+
+    Sets thumbnail_url, image_url, hero_url on each item that has a valid bbox.
+    Items without a bbox are skipped gracefully. Enhancement is mandatory — raises
+    if Gemini image generation fails.
+    """
+    if not R2_PUBLIC_BASE_URL:
+        logger.warning("R2_PUBLIC_BASE_URL not set — skipping image upload")
+        return
+
+    uploaded = 0
+    skipped_no_bbox = 0
+    skipped_invalid = 0
+
+    for item in items:
+        if not item.bbox:
+            skipped_no_bbox += 1
+            continue
+
+        page_num = item.page_number
+        if not page_num or page_num not in page_images:
+            skipped_invalid += 1
+            continue
+
+        bbox = item.bbox
+        x_min = bbox.get("x_min", 0)
+        y_min = bbox.get("y_min", 0)
+        x_max = bbox.get("x_max", 0)
+        y_max = bbox.get("y_max", 0)
+
+        # Validate bbox geometry and minimum area (0.5% of page)
+        if x_min >= x_max or y_min >= y_max:
+            skipped_invalid += 1
+            continue
+        area = (x_max - x_min) * (y_max - y_min)
+        if area < 0.005:
+            skipped_invalid += 1
+            continue
+
+        # Open page image and crop
+        try:
+            page_img = Image.open(io.BytesIO(page_images[page_num])).convert("RGB")
+        except Exception as e:
+            logger.warning(f"Could not open page {page_num} image: {e}")
+            skipped_invalid += 1
+            continue
+
+        pw, ph = page_img.size
+        x1 = max(0, int(x_min * pw))
+        y1 = max(0, int(y_min * ph))
+        x2 = min(pw, int(x_max * pw))
+        y2 = min(ph, int(y_max * ph))
+
+        if (x2 - x1) < 30 or (y2 - y1) < 30:
+            skipped_invalid += 1
+            continue
+
+        crop = page_img.crop((x1, y1, x2, y2))
+
+        # Enhance the crop via Gemini (mandatory — raises on failure)
+        if gemini_client:
+            logger.info(f"Enhancing image for '{item.display_name[:40]}'...")
+            crop = enhance_item_image(gemini_client, crop, item_label=item.display_name[:50])
+
+        record_id = generate_record_id(item)
+        base_key = f"promo_item_images/{store_id}/{record_id}"
+
+        try:
+            for size, suffix in ((200, "thumb"), (400, "medium"), (800, "hero")):
+                resized = _resize_to_max(crop, size)
+                buf = io.BytesIO()
+                resized.save(buf, format="WEBP", quality=85)
+                r2.upload_image(f"{base_key}/{suffix}.webp", buf.getvalue())
+
+            item.thumbnail_url = f"{R2_PUBLIC_BASE_URL}/{base_key}/thumb.webp"
+            item.image_url = f"{R2_PUBLIC_BASE_URL}/{base_key}/medium.webp"
+            item.hero_url = f"{R2_PUBLIC_BASE_URL}/{base_key}/hero.webp"
+            uploaded += 1
+        except Exception as e:
+            logger.warning(f"Image upload failed for '{item.display_name}': {e}")
+
+    logger.info(
+        f"Item images: {uploaded} uploaded, "
+        f"{skipped_no_bbox} skipped (no bbox), "
+        f"{skipped_invalid} skipped (invalid bbox/page)"
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -591,9 +849,10 @@ def upsert_to_postgres(items: list[PromoItem]) -> int:
                     normalized_brand, display_brand,
                     original_price, promo_price, savings_amount, min_purchase_qty, promo_depth,
                     granular_category, source_retailer, source_type,
-                    page_number, promo_folder_url, validity_start, validity_end
+                    page_number, promo_folder_url, validity_start, validity_end,
+                    thumbnail_url, image_url, hero_url
                 ) VALUES (
-                    %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s
+                    %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s
                 )
                 ON CONFLICT (id) DO UPDATE SET
                     display_name = EXCLUDED.display_name,
@@ -615,7 +874,10 @@ def upsert_to_postgres(items: list[PromoItem]) -> int:
                     page_number = EXCLUDED.page_number,
                     promo_folder_url = EXCLUDED.promo_folder_url,
                     validity_start = EXCLUDED.validity_start,
-                    validity_end = EXCLUDED.validity_end
+                    validity_end = EXCLUDED.validity_end,
+                    thumbnail_url = EXCLUDED.thumbnail_url,
+                    image_url = EXCLUDED.image_url,
+                    hero_url = EXCLUDED.hero_url
                 """,
                 (
                     record_id,
@@ -639,6 +901,9 @@ def upsert_to_postgres(items: list[PromoItem]) -> int:
                     item.promo_folder_url,
                     item.validity_start,
                     item.validity_end,
+                    item.thumbnail_url,
+                    item.image_url,
+                    item.hero_url,
                 ),
             )
 
@@ -720,6 +985,15 @@ def run_pipeline(
     if not items:
         logger.warning("No items extracted. Exiting.")
         return []
+
+    # Step 2.5: Crop item images, enhance via Gemini, and upload to R2
+    page_images = _render_pdf_pages(pdf_data)
+    r2 = R2PromoStorage()
+    gemini_client = genai.Client(
+        api_key=GEMINI_API_KEY,
+        http_options={"timeout": REQUEST_TIMEOUT * 1000},
+    )
+    crop_and_upload_item_images(items, page_images, r2, canonical_store_id, gemini_client)
 
     # Step 3: Summary
     logger.info(f"\nExtracted {len(items)} high-quality promo items")

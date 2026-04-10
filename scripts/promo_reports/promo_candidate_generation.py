@@ -367,6 +367,9 @@ def _promo_to_dict(
         "store_name": promo.source_retailer,
         "promo_folder_url": promo.promo_folder_url,
         "page_number": promo.page_number,
+        # Product images
+        "thumbnail_url": promo.thumbnail_url,
+        "image_url": promo.image_url,
         # Validity
         "validity_start": promo.validity_start.isoformat() if promo.validity_start else "",
         "validity_end": promo.validity_end.isoformat() if promo.validity_end else "",

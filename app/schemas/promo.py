@@ -27,6 +27,8 @@ class PromoStoreItem(BaseModel):
     display_savings_label: Optional[str] = None
     bucket: Optional[str] = None
     bucket_label: Optional[str] = None
+    thumbnail_url: Optional[str] = None
+    image_url: Optional[str] = None
 
 
 class PromoStore(BaseModel):

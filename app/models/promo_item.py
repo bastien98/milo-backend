@@ -49,6 +49,10 @@ class PromoItem(Base):
     validity_start: Mapped[date_type] = mapped_column(Date, nullable=False)
     validity_end: Mapped[date_type] = mapped_column(Date, nullable=False)
 
+    thumbnail_url: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    image_url: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    hero_url: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
     )

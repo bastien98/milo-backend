@@ -186,6 +186,8 @@ class PromoReportService:
                 "effective_unit_price": item.get("effective_unit_price"),
                 "bucket": item.get("bucket", ""),
                 "bucket_label": item.get("bucket_label", ""),
+                "thumbnail_url": item.get("thumbnail_url"),
+                "image_url": item.get("image_url"),
             })
 
         stores = []
