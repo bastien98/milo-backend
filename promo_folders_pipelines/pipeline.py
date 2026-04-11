@@ -114,10 +114,10 @@ class _PromoItemSchema(PydanticBaseModel):
     bbox: Optional[_BboxSchema] = Field(
         default=None,
         description=(
-            "Tight bounding box of the ENTIRE product tile on the page: photo, "
-            "product name, price labels, and promo badge. Normalized 0-1 relative "
-            "to the full page image (x=0 left, y=0 top). x_min < x_max, y_min < y_max. "
-            "null if the item tile cannot be clearly located."
+            "Bounding box around the physical product only (bottle, box, package, can). "
+            "Exclude text, price labels, and promo badges. Leave a small margin around "
+            "the product. Normalized 0-1 (x=0 left, y=0 top). x_min < x_max, y_min < y_max. "
+            "null if the product cannot be clearly located."
         ),
     )
 
@@ -640,7 +640,7 @@ def enhance_item_image(
 ) -> Image.Image:
     """Enhance a cropped product image using Gemini image editing.
 
-    Uses gemini-3-pro-image-preview to remove text overlays, isolate the
+    Uses gemini-3.1-flash-image-preview to remove text overlays, isolate the
     product on a white background, and enhance quality.
     Raises on failure after retries.
     """
@@ -769,21 +769,30 @@ def crop_and_upload_item_images(
             continue
 
         pw, ph = page_img.size
-        x1 = max(0, int(x_min * pw))
-        y1 = max(0, int(y_min * ph))
-        x2 = min(pw, int(x_max * pw))
-        y2 = min(ph, int(y_max * ph))
 
-        if (x2 - x1) < 30 or (y2 - y1) < 30:
+        # Add 2% padding around bbox to avoid clipping product edges
+        pad_x = int(0.02 * pw)
+        pad_y = int(0.02 * ph)
+        x1 = max(0, int(x_min * pw) - pad_x)
+        y1 = max(0, int(y_min * ph) - pad_y)
+        x2 = min(pw, int(x_max * pw) + pad_x)
+        y2 = min(ph, int(y_max * ph) + pad_y)
+
+        if (x2 - x1) < 64 or (y2 - y1) < 64:
             skipped_invalid += 1
             continue
 
         crop = page_img.crop((x1, y1, x2, y2))
 
-        # Enhance the crop via Gemini (mandatory — raises on failure)
+        # Enhance the crop via Gemini
         if gemini_client:
-            logger.info(f"Enhancing image for '{item.display_name[:40]}'...")
-            crop = enhance_item_image(gemini_client, crop, item_label=item.display_name[:50])
+            try:
+                logger.info(f"Enhancing image for '{item.display_name[:40]}'...")
+                crop = enhance_item_image(gemini_client, crop, item_label=item.display_name[:50])
+            except Exception as e:
+                logger.warning(f"Enhancement failed for '{item.display_name[:40]}': {e} — skipping image")
+                skipped_invalid += 1
+                continue
 
         record_id = generate_record_id(item)
         base_key = f"promo_item_images/{store_id}/{record_id}"
