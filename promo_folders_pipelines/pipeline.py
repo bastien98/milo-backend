@@ -56,15 +56,18 @@ R2_PUBLIC_BASE_URL = os.environ.get("R2_PUBLIC_BASE_URL", "")
 # Appended to the system prompt to instruct Gemini to return bounding boxes
 _BBOX_PROMPT_SUFFIX = """
 
-## BOUNDING BOX
-For EVERY item, populate the `bbox` field with the tight bounding box of its complete product tile
-(product photo + name + price labels + promo badge). Coordinates normalized 0-1:
-  x_min=0 → left edge, x_max=1 → right edge
-  y_min=0 → top edge,  y_max=1 → bottom edge
-Rules:
-- x_min < x_max and y_min < y_max (set null if uncertain)
-- Include the full tile; do not clip any part of it
-- One bbox per item even if the product appears in multiple places on the page
+## BOUNDING BOX (PHYSICAL PRODUCT ONLY)
+For EVERY item, populate the `bbox` field with the tightest possible bounding box around the **physical product itself** (e.g., the actual bottle, box, can, or crate).
+
+CRITICAL RULES FOR BBOX:
+1. ISOLATE THE PRODUCT: Crop ONLY the pixels of the physical item.
+2. EXCLUDE TEXT: DO NOT include the product name, price labels, volume information, or health warnings located below, above, or beside the product.
+3. EXCLUDE PROMOS: DO NOT include promotional banners, ribbons, or discount badges unless they are physically printed onto the product packaging itself.
+4. Coordinates are normalized 0-1:
+   x_min=0 → left edge, x_max=1 → right edge
+   y_min=0 → top edge,  y_max=1 → bottom edge
+5. Validation: x_min < x_max and y_min < y_max (set to null if uncertain).
+6. One bbox per item, even if the product appears in multiple places on the page.
 """
 
 
