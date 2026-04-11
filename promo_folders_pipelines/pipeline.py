@@ -57,10 +57,10 @@ R2_PUBLIC_BASE_URL = os.environ.get("R2_PUBLIC_BASE_URL", "")
 _BBOX_PROMPT_SUFFIX = """
 
 ## BOUNDING BOX (PHYSICAL PRODUCT ONLY)
-For EVERY item, populate the `bbox` field with the tightest possible bounding box around the **physical product itself** (e.g., the actual bottle, box, can, or crate).
+For EVERY item, populate the `bbox` field with a bounding box that safely and fully encompasses the **physical product itself** (e.g., the actual bottle, box, can, or crate).
 
 CRITICAL RULES FOR BBOX:
-1. ISOLATE THE PRODUCT: Crop ONLY the pixels of the physical item.
+1. CAPTURE THE WHOLE PRODUCT: Ensure the entire physical product is inside the box. Do NOT clip or shave off the edges, caps, or sides of the product. Leave a tiny visual margin (padding) around the physical item to ensure it is 100% intact.
 2. EXCLUDE TEXT: DO NOT include the product name, price labels, volume information, or health warnings located below, above, or beside the product.
 3. EXCLUDE PROMOS: DO NOT include promotional banners, ribbons, or discount badges unless they are physically printed onto the product packaging itself.
 4. Coordinates are normalized 0-1:
