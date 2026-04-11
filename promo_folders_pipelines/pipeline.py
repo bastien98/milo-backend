@@ -616,18 +616,17 @@ def generate_record_id(item: PromoItem) -> str:
 GEMINI_IMAGE_MODEL = "gemini-3.1-flash-image-preview"
 
 _ENHANCE_PROMPT = (
-    "Edit this product image. This is a cropped tile from a supermarket promotional flyer. "
-    "CRITICAL REQUIREMENTS: "
-    "1. Remove absolutely ALL text from the image — every price label, product name, brand text, "
-    "promotional badge, sticker, percentage sign, euro sign, and any other written characters. "
-    "There must be ZERO text remaining in the output image. "
-    "2. Keep ONLY the physical product (the bottle, box, package, food item, etc.). "
-    "3. Center the product precisely in the middle of the image with equal padding on all sides. "
-    "The product should occupy roughly 70-80% of the image area, with uniform white space around it. "
-    "4. Replace the entire background with a clean, solid white (#FFFFFF) background. "
-    "5. Enhance the product: sharpen details, correct colors, improve clarity. "
-    "The final result must look like a professional e-commerce product photo — "
-    "just the product, perfectly centered, on a pure white background, with no text whatsoever."
+    "Transform this supermarket flyer crop into a clean, professional e-commerce product photo. "
+    "[SUBJECT]: The physical product only. PRESERVE all original packaging, printed text, logos, "
+    "and branding exactly as-is. DO NOT alter or translate the core product packaging. "
+    "[REMOVE]: Erase all promotional overlays, price tags, discount stickers (e.g., '-25%', '1+1'), "
+    "and flyer graphics. "
+    "[RECONSTRUCT]: Seamlessly fill in and reconstruct any parts of the product packaging or "
+    "labeling that were hidden beneath the removed promotional overlays. "
+    "[BACKGROUND]: Isolate the product on a pure, solid white background (#FFFFFF). Add a subtle, "
+    "realistic drop shadow beneath the product to ground it. "
+    "[COMPOSITION]: Center the product perfectly. It should occupy 80% of the canvas with uniform padding. "
+    "[STYLE]: Sharp focus, accurate true-to-life colors, clean even lighting."
 )
 
 
