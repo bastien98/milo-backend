@@ -617,7 +617,7 @@ def generate_record_id(item: PromoItem) -> str:
 
 
 # ---------------------------------------------------------------------------
-# Image enhancement via Replicate (background removal) + PIL compositing
+# Image enhancement via Recraft (upscale + background removal) + PIL compositing
 # ---------------------------------------------------------------------------
 REPLICATE_API_TOKEN = os.environ.get("REPLICATE_API_TOKEN", "")
 
@@ -628,9 +628,9 @@ _SHADOW_BLUR = 6
 
 
 def _upscale_image(crop: Image.Image, item_label: str = "") -> Image.Image:
-    """Upscale a cropped product image 2x using Real-ESRGAN on Replicate.
+    """Upscale a cropped product image 4x using Recraft Crisp Upscale on Replicate.
 
-    Returns an RGB image at double the input resolution.
+    Returns an RGB image at 4x the input resolution.
     """
     buf = io.BytesIO()
     crop.save(buf, format="PNG")
@@ -647,16 +647,12 @@ def _upscale_image(crop: Image.Image, item_label: str = "") -> Image.Image:
 
         try:
             output = replicate_lib.run(
-                "nightmareai/real-esrgan",
-                input={
-                    "image": image_data_uri,
-                    "scale": 2,
-                    "face_enhance": False,
-                },
+                "recraft-ai/recraft-crisp-upscale",
+                input={"image": image_data_uri},
             )
 
             image_url = output[0] if isinstance(output, list) else output
-            resp = httpx.get(str(image_url), timeout=60)
+            resp = httpx.get(str(image_url), timeout=120)
             resp.raise_for_status()
             result = Image.open(io.BytesIO(resp.content)).convert("RGB")
             logger.info(f"{label} Upscaled {crop.size[0]}x{crop.size[1]} → {result.size[0]}x{result.size[1]}")
@@ -673,7 +669,7 @@ def _upscale_image(crop: Image.Image, item_label: str = "") -> Image.Image:
 
 
 def _remove_background(crop: Image.Image, item_label: str = "") -> Image.Image:
-    """Remove background from a product crop using 851-labs/background-remover on Replicate.
+    """Remove background from a product crop using Recraft on Replicate.
 
     Returns an RGBA image with transparent background.
     """
@@ -692,11 +688,8 @@ def _remove_background(crop: Image.Image, item_label: str = "") -> Image.Image:
 
         try:
             output = replicate_lib.run(
-                "851-labs/background-remover:a029dff38972b5fda4ec5d75d7d1cd25aeff621d2cf4946a41055d7db66b80bc",
-                input={
-                    "image": image_data_uri,
-                    "background_type": "rgba",
-                },
+                "recraft-ai/recraft-remove-background",
+                input={"image": image_data_uri},
             )
 
             image_url = output[0] if isinstance(output, list) else output
@@ -756,8 +749,8 @@ def enhance_item_image(
 ) -> Image.Image:
     """Enhance a cropped product image: upscale + remove background + composite on white.
 
-    Step 1: Upscale 2x via Real-ESRGAN on Replicate
-    Step 2: Remove background via 851-labs/background-remover on Replicate
+    Step 1: Upscale 4x via Recraft Crisp Upscale on Replicate
+    Step 2: Remove background via Recraft on Replicate
     Step 3: Composite onto white canvas with drop shadow (pure PIL)
     Raises on failure after retries.
     """
@@ -769,7 +762,7 @@ def enhance_item_image(
 
     label = f"[Enhance {item_label}]" if item_label else "[Enhance]"
 
-    # Step 1: Upscale 2x via Real-ESRGAN
+    # Step 1: Upscale 4x via Recraft Crisp
     upscaled = _upscale_image(crop, item_label)
 
     # Step 2: Remove background
