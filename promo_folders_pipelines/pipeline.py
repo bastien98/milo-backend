@@ -647,7 +647,7 @@ def _remove_background(crop: Image.Image, item_label: str = "") -> Image.Image:
 
         try:
             output = replicate_lib.run(
-                "851-labs/background-remover",
+                "851-labs/background-remover:a029dff38972b5fda4ec5d75d7d1cd25aeff621d2cf4946a41055d7db66b80bc",
                 input={
                     "image": image_data_uri,
                     "background_type": "rgba",
