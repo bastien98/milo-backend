@@ -627,6 +627,51 @@ _SHADOW_OFFSET = (2, 4)  # x, y pixel offset
 _SHADOW_BLUR = 6
 
 
+def _upscale_image(crop: Image.Image, item_label: str = "") -> Image.Image:
+    """Upscale a cropped product image 2x using Real-ESRGAN on Replicate.
+
+    Returns an RGB image at double the input resolution.
+    """
+    buf = io.BytesIO()
+    crop.save(buf, format="PNG")
+    buf.seek(0)
+    image_data_uri = "data:image/png;base64," + base64.b64encode(buf.read()).decode()
+
+    for attempt in range(1, MAX_RETRIES + 1):
+        delay = RETRY_BASE_DELAY * (2 ** (attempt - 1))
+        label = f"[Upscale {item_label}]" if item_label else "[Upscale]"
+
+        if attempt > 1:
+            logger.info(f"{label} Retry {attempt}/{MAX_RETRIES} after {delay}s backoff...")
+            time.sleep(delay)
+
+        try:
+            output = replicate_lib.run(
+                "nightmareai/real-esrgan",
+                input={
+                    "image": image_data_uri,
+                    "scale": 2,
+                    "face_enhance": False,
+                },
+            )
+
+            image_url = output[0] if isinstance(output, list) else output
+            resp = httpx.get(str(image_url), timeout=60)
+            resp.raise_for_status()
+            result = Image.open(io.BytesIO(resp.content)).convert("RGB")
+            logger.info(f"{label} Upscaled {crop.size[0]}x{crop.size[1]} → {result.size[0]}x{result.size[1]}")
+            return result
+
+        except Exception as e:
+            logger.warning(f"{label} Attempt {attempt} failed: {e}")
+            if attempt == MAX_RETRIES:
+                raise RuntimeError(
+                    f"Upscale failed after {MAX_RETRIES} retries for: {item_label}"
+                ) from e
+
+    raise RuntimeError(f"Upscale failed after {MAX_RETRIES} retries for: {item_label}")
+
+
 def _remove_background(crop: Image.Image, item_label: str = "") -> Image.Image:
     """Remove background from a product crop using 851-labs/background-remover on Replicate.
 
@@ -709,10 +754,11 @@ def enhance_item_image(
     crop: Image.Image,
     item_label: str = "",
 ) -> Image.Image:
-    """Enhance a cropped product image: remove background + composite on white.
+    """Enhance a cropped product image: upscale + remove background + composite on white.
 
-    Step 1: Remove background via Replicate (lucataco/remove-bg)
-    Step 2: Composite onto white canvas with drop shadow (pure PIL)
+    Step 1: Upscale 2x via Real-ESRGAN on Replicate
+    Step 2: Remove background via 851-labs/background-remover on Replicate
+    Step 3: Composite onto white canvas with drop shadow (pure PIL)
     Raises on failure after retries.
     """
     w, h = crop.size
@@ -723,10 +769,13 @@ def enhance_item_image(
 
     label = f"[Enhance {item_label}]" if item_label else "[Enhance]"
 
-    # Step 1: Remove background via Replicate
-    foreground = _remove_background(crop, item_label)
+    # Step 1: Upscale 2x via Real-ESRGAN
+    upscaled = _upscale_image(crop, item_label)
 
-    # Step 2: Composite on white with drop shadow
+    # Step 2: Remove background
+    foreground = _remove_background(upscaled, item_label)
+
+    # Step 3: Composite on white with drop shadow
     enhanced = _composite_on_white(foreground)
     logger.info(f"{label} Enhanced successfully ({enhanced.size[0]}x{enhanced.size[1]})")
     return enhanced
