@@ -628,7 +628,7 @@ _SHADOW_BLUR = 6
 
 
 def _remove_background(crop: Image.Image, item_label: str = "") -> Image.Image:
-    """Remove background from a product crop using lucataco/remove-bg on Replicate.
+    """Remove background from a product crop using 851-labs/background-remover on Replicate.
 
     Returns an RGBA image with transparent background.
     """
@@ -647,8 +647,11 @@ def _remove_background(crop: Image.Image, item_label: str = "") -> Image.Image:
 
         try:
             output = replicate_lib.run(
-                "lucataco/remove-bg",
-                input={"image": image_data_uri},
+                "851-labs/background-remover",
+                input={
+                    "image": image_data_uri,
+                    "background_type": "rgba",
+                },
             )
 
             image_url = output[0] if isinstance(output, list) else output
