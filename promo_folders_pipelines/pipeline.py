@@ -5,6 +5,7 @@ Shared functions for PDF splitting, Gemini extraction (structured output),
 parsing, and PostgreSQL upsert.
 """
 
+import base64
 import hashlib
 import io
 import json
@@ -18,6 +19,8 @@ from typing import Any, Dict, List, Optional
 import fitz  # PyMuPDF
 from google import genai
 from google.genai import types
+import httpx
+import replicate as replicate_lib
 from PIL import Image
 from pydantic import BaseModel as PydanticBaseModel, Field
 
@@ -614,34 +617,100 @@ def generate_record_id(item: PromoItem) -> str:
 
 
 # ---------------------------------------------------------------------------
-# Image enhancement via Gemini
+# Image enhancement via Replicate (background removal) + PIL compositing
 # ---------------------------------------------------------------------------
-GEMINI_IMAGE_MODEL = "gemini-3.1-flash-image-preview"
+REPLICATE_API_TOKEN = os.environ.get("REPLICATE_API_TOKEN", "")
 
-_ENHANCE_PROMPT = (
-    "Transform this supermarket flyer crop into a clean, professional e-commerce product photo. "
-    "[SUBJECT]: The physical product only. PRESERVE all original packaging, printed text, logos, "
-    "and branding exactly as-is. DO NOT alter or translate the core product packaging. "
-    "[REMOVE]: Erase all promotional overlays, price tags, discount stickers (e.g., '-25%', '1+1'), "
-    "and flyer graphics. "
-    "[RECONSTRUCT]: Seamlessly fill in and reconstruct any parts of the product packaging or "
-    "labeling that were hidden beneath the removed promotional overlays. "
-    "[BACKGROUND]: Isolate the product on a pure, solid white background (#FFFFFF). Add a subtle, "
-    "realistic drop shadow beneath the product to ground it. "
-    "[COMPOSITION]: Center the product perfectly. It should occupy 80% of the canvas with uniform padding. "
-    "[STYLE]: Sharp focus, accurate true-to-life colors, clean even lighting."
-)
+# Drop shadow settings
+_SHADOW_COLOR = (0, 0, 0, 80)  # semi-transparent black
+_SHADOW_OFFSET = (2, 4)  # x, y pixel offset
+_SHADOW_BLUR = 6
+
+
+def _remove_background(crop: Image.Image, item_label: str = "") -> Image.Image:
+    """Remove background from a product crop using lucataco/remove-bg on Replicate.
+
+    Returns an RGBA image with transparent background.
+    """
+    buf = io.BytesIO()
+    crop.save(buf, format="PNG")
+    buf.seek(0)
+    image_data_uri = "data:image/png;base64," + base64.b64encode(buf.read()).decode()
+
+    for attempt in range(1, MAX_RETRIES + 1):
+        delay = RETRY_BASE_DELAY * (2 ** (attempt - 1))
+        label = f"[RemoveBG {item_label}]" if item_label else "[RemoveBG]"
+
+        if attempt > 1:
+            logger.info(f"{label} Retry {attempt}/{MAX_RETRIES} after {delay}s backoff...")
+            time.sleep(delay)
+
+        try:
+            output = replicate_lib.run(
+                "lucataco/remove-bg",
+                input={"image": image_data_uri},
+            )
+
+            image_url = output[0] if isinstance(output, list) else output
+            resp = httpx.get(str(image_url), timeout=60)
+            resp.raise_for_status()
+            result = Image.open(io.BytesIO(resp.content)).convert("RGBA")
+            logger.info(f"{label} Background removed ({result.size[0]}x{result.size[1]})")
+            return result
+
+        except Exception as e:
+            logger.warning(f"{label} Attempt {attempt} failed: {e}")
+            if attempt == MAX_RETRIES:
+                raise RuntimeError(
+                    f"Background removal failed after {MAX_RETRIES} retries for: {item_label}"
+                ) from e
+
+    raise RuntimeError(f"Background removal failed after {MAX_RETRIES} retries for: {item_label}")
+
+
+def _composite_on_white(foreground: Image.Image) -> Image.Image:
+    """Composite an RGBA foreground onto a white background with a drop shadow.
+
+    Centers the product at ~80% of the canvas and adds a subtle shadow.
+    """
+    from PIL import ImageFilter
+
+    fw, fh = foreground.size
+    # Canvas sized so product occupies ~80%
+    canvas_w = int(fw / 0.8)
+    canvas_h = int(fh / 0.8)
+    canvas_size = max(canvas_w, canvas_h)
+
+    # Create drop shadow from the alpha channel
+    alpha = foreground.split()[3]
+    shadow = Image.new("RGBA", (canvas_size, canvas_size), (0, 0, 0, 0))
+    # Position shadow with offset
+    sx = (canvas_size - fw) // 2 + _SHADOW_OFFSET[0]
+    sy = (canvas_size - fh) // 2 + _SHADOW_OFFSET[1]
+    shadow_layer = Image.new("RGBA", (canvas_size, canvas_size), (0, 0, 0, 0))
+    shadow_layer.paste(Image.new("RGBA", (fw, fh), _SHADOW_COLOR), (sx, sy), mask=alpha)
+    shadow = shadow_layer.filter(ImageFilter.GaussianBlur(radius=_SHADOW_BLUR))
+
+    # White background
+    canvas = Image.new("RGBA", (canvas_size, canvas_size), (255, 255, 255, 255))
+    # Composite shadow, then foreground
+    canvas = Image.alpha_composite(canvas, shadow)
+    # Center the product
+    px = (canvas_size - fw) // 2
+    py = (canvas_size - fh) // 2
+    canvas.paste(foreground, (px, py), mask=foreground.split()[3])
+
+    return canvas.convert("RGB")
 
 
 def enhance_item_image(
-    client: genai.Client,
     crop: Image.Image,
     item_label: str = "",
 ) -> Image.Image:
-    """Enhance a cropped product image using Gemini image editing.
+    """Enhance a cropped product image: remove background + composite on white.
 
-    Uses gemini-3.1-flash-image-preview to remove text overlays, isolate the
-    product on a white background, and enhance quality.
+    Step 1: Remove background via Replicate (lucataco/remove-bg)
+    Step 2: Composite onto white canvas with drop shadow (pure PIL)
     Raises on failure after retries.
     """
     w, h = crop.size
@@ -650,41 +719,15 @@ def enhance_item_image(
             f"Crop too small ({w}x{h}) for enhancement: {item_label}"
         )
 
-    for attempt in range(1, MAX_RETRIES + 1):
-        delay = RETRY_BASE_DELAY * (2 ** (attempt - 1))
-        label = f"[Enhance {item_label}]" if item_label else "[Enhance]"
+    label = f"[Enhance {item_label}]" if item_label else "[Enhance]"
 
-        if attempt > 1:
-            logger.info(f"{label} Retry {attempt}/{MAX_RETRIES} after {delay}s backoff...")
-            time.sleep(delay)
+    # Step 1: Remove background via Replicate
+    foreground = _remove_background(crop, item_label)
 
-        try:
-            # Send PIL Image directly + text prompt (SDK handles conversion)
-            response = client.models.generate_content(
-                model=GEMINI_IMAGE_MODEL,
-                contents=[_ENHANCE_PROMPT, crop],
-                config=types.GenerateContentConfig(
-                    response_modalities=["TEXT", "IMAGE"],
-                ),
-            )
-
-            # Extract image from response parts
-            for part in response.parts:
-                if part.inline_data is not None:
-                    enhanced = Image.open(io.BytesIO(part.inline_data.data)).convert("RGB")
-                    logger.info(f"{label} Enhanced successfully ({enhanced.size[0]}x{enhanced.size[1]})")
-                    return enhanced
-
-            logger.warning(f"{label} Attempt {attempt}: no image in Gemini response")
-
-        except Exception as e:
-            logger.warning(f"{label} Attempt {attempt} failed: {e}")
-            if attempt == MAX_RETRIES:
-                raise RuntimeError(
-                    f"Image enhancement failed after {MAX_RETRIES} retries for: {item_label}"
-                ) from e
-
-    raise RuntimeError(f"Image enhancement failed after {MAX_RETRIES} retries for: {item_label}")
+    # Step 2: Composite on white with drop shadow
+    enhanced = _composite_on_white(foreground)
+    logger.info(f"{label} Enhanced successfully ({enhanced.size[0]}x{enhanced.size[1]})")
+    return enhanced
 
 
 # ---------------------------------------------------------------------------
@@ -730,13 +773,12 @@ def crop_and_upload_item_images(
     page_images: dict[int, bytes],
     r2: R2PromoStorage,
     store_id: str,
-    gemini_client: genai.Client = None,
+    enhance: bool = True,
 ) -> None:
-    """Crop each item's product tile, enhance via Gemini, and upload 3 sizes to R2.
+    """Crop each item's product tile, enhance via Replicate FLUX, and upload 3 sizes to R2.
 
     Sets thumbnail_url, image_url, hero_url on each item that has a valid bbox.
-    Items without a bbox are skipped gracefully. Enhancement is mandatory — raises
-    if Gemini image generation fails.
+    Items without a bbox are skipped gracefully.
     """
     if not R2_PUBLIC_BASE_URL:
         logger.warning("R2_PUBLIC_BASE_URL not set — skipping image upload")
@@ -795,11 +837,11 @@ def crop_and_upload_item_images(
 
         crop = page_img.crop((x1, y1, x2, y2))
 
-        # Enhance the crop via Gemini
-        if gemini_client:
+        # Enhance the crop via Replicate FLUX
+        if enhance and REPLICATE_API_TOKEN:
             try:
                 logger.info(f"Enhancing image for '{item.display_name[:40]}'...")
-                crop = enhance_item_image(gemini_client, crop, item_label=item.display_name[:50])
+                crop = enhance_item_image(crop, item_label=item.display_name[:50])
             except Exception as e:
                 logger.warning(f"Enhancement failed for '{item.display_name[:40]}': {e} — skipping image")
                 skipped_invalid += 1
@@ -1006,14 +1048,10 @@ def run_pipeline(
         logger.warning("No items extracted. Exiting.")
         return []
 
-    # Step 2.5: Crop item images, enhance via Gemini, and upload to R2
+    # Step 2.5: Crop item images, enhance via Replicate FLUX, and upload to R2
     page_images = _render_pdf_pages(pdf_data)
     r2 = R2PromoStorage()
-    gemini_client = genai.Client(
-        api_key=GEMINI_API_KEY,
-        http_options={"timeout": REQUEST_TIMEOUT * 1000},
-    )
-    crop_and_upload_item_images(items, page_images, r2, canonical_store_id, gemini_client)
+    crop_and_upload_item_images(items, page_images, r2, canonical_store_id)
 
     # Step 3: Summary
     logger.info(f"\nExtracted {len(items)} high-quality promo items")
