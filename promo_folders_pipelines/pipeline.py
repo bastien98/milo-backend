@@ -617,30 +617,99 @@ def generate_record_id(item: PromoItem) -> str:
 
 
 # ---------------------------------------------------------------------------
-# Image enhancement via Replicate (FLUX.1 Kontext [dev] image editing)
+# Image enhancement via Replicate (background removal) + PIL compositing
 # ---------------------------------------------------------------------------
 REPLICATE_API_TOKEN = os.environ.get("REPLICATE_API_TOKEN", "")
 
-_ENHANCE_PROMPT = (
-    "Transform this supermarket flyer crop into a clean, professional e-commerce product photo. "
-    "Remove all promotional overlays, price tags, discount stickers (e.g. '-25%', '1+1'), "
-    "and flyer graphics. "
-    "Reconstruct any parts of the product packaging hidden beneath removed overlays. "
-    "Isolate the product on a pure solid white background (#FFFFFF). "
-    "Add a subtle realistic drop shadow beneath the product. "
-    "Center the product, it should occupy 80% of the canvas with uniform padding. "
-    "Sharp focus, accurate true-to-life colors, clean even lighting."
-)
+# Drop shadow settings
+_SHADOW_COLOR = (0, 0, 0, 80)  # semi-transparent black
+_SHADOW_OFFSET = (2, 4)  # x, y pixel offset
+_SHADOW_BLUR = 6
+
+
+def _remove_background(crop: Image.Image, item_label: str = "") -> Image.Image:
+    """Remove background from a product crop using lucataco/remove-bg on Replicate.
+
+    Returns an RGBA image with transparent background.
+    """
+    buf = io.BytesIO()
+    crop.save(buf, format="PNG")
+    buf.seek(0)
+    image_data_uri = "data:image/png;base64," + base64.b64encode(buf.read()).decode()
+
+    for attempt in range(1, MAX_RETRIES + 1):
+        delay = RETRY_BASE_DELAY * (2 ** (attempt - 1))
+        label = f"[RemoveBG {item_label}]" if item_label else "[RemoveBG]"
+
+        if attempt > 1:
+            logger.info(f"{label} Retry {attempt}/{MAX_RETRIES} after {delay}s backoff...")
+            time.sleep(delay)
+
+        try:
+            output = replicate_lib.run(
+                "lucataco/remove-bg",
+                input={"image": image_data_uri},
+            )
+
+            image_url = output[0] if isinstance(output, list) else output
+            resp = httpx.get(str(image_url), timeout=60)
+            resp.raise_for_status()
+            result = Image.open(io.BytesIO(resp.content)).convert("RGBA")
+            logger.info(f"{label} Background removed ({result.size[0]}x{result.size[1]})")
+            return result
+
+        except Exception as e:
+            logger.warning(f"{label} Attempt {attempt} failed: {e}")
+            if attempt == MAX_RETRIES:
+                raise RuntimeError(
+                    f"Background removal failed after {MAX_RETRIES} retries for: {item_label}"
+                ) from e
+
+    raise RuntimeError(f"Background removal failed after {MAX_RETRIES} retries for: {item_label}")
+
+
+def _composite_on_white(foreground: Image.Image) -> Image.Image:
+    """Composite an RGBA foreground onto a white background with a drop shadow.
+
+    Centers the product at ~80% of the canvas and adds a subtle shadow.
+    """
+    from PIL import ImageFilter
+
+    fw, fh = foreground.size
+    # Canvas sized so product occupies ~80%
+    canvas_w = int(fw / 0.8)
+    canvas_h = int(fh / 0.8)
+    canvas_size = max(canvas_w, canvas_h)
+
+    # Create drop shadow from the alpha channel
+    alpha = foreground.split()[3]
+    # Position shadow with offset
+    sx = (canvas_size - fw) // 2 + _SHADOW_OFFSET[0]
+    sy = (canvas_size - fh) // 2 + _SHADOW_OFFSET[1]
+    shadow_layer = Image.new("RGBA", (canvas_size, canvas_size), (0, 0, 0, 0))
+    shadow_layer.paste(Image.new("RGBA", (fw, fh), _SHADOW_COLOR), (sx, sy), mask=alpha)
+    shadow = shadow_layer.filter(ImageFilter.GaussianBlur(radius=_SHADOW_BLUR))
+
+    # White background
+    canvas = Image.new("RGBA", (canvas_size, canvas_size), (255, 255, 255, 255))
+    # Composite shadow, then foreground
+    canvas = Image.alpha_composite(canvas, shadow)
+    # Center the product
+    px = (canvas_size - fw) // 2
+    py = (canvas_size - fh) // 2
+    canvas.paste(foreground, (px, py), mask=foreground.split()[3])
+
+    return canvas.convert("RGB")
 
 
 def enhance_item_image(
     crop: Image.Image,
     item_label: str = "",
 ) -> Image.Image:
-    """Enhance a cropped product image using FLUX.1 Kontext [dev] on Replicate.
+    """Enhance a cropped product image: remove background + composite on white.
 
-    Sends the crop as an input image with an editing prompt to produce a clean
-    e-commerce product photo on a white background.
+    Step 1: Remove background via Replicate (lucataco/remove-bg)
+    Step 2: Composite onto white canvas with drop shadow (pure PIL)
     Raises on failure after retries.
     """
     w, h = crop.size
@@ -649,47 +718,15 @@ def enhance_item_image(
             f"Crop too small ({w}x{h}) for enhancement: {item_label}"
         )
 
-    # Encode crop as base64 data URI for Replicate
-    buf = io.BytesIO()
-    crop.save(buf, format="PNG")
-    buf.seek(0)
-    image_data_uri = "data:image/png;base64," + base64.b64encode(buf.read()).decode()
+    label = f"[Enhance {item_label}]" if item_label else "[Enhance]"
 
-    for attempt in range(1, MAX_RETRIES + 1):
-        delay = RETRY_BASE_DELAY * (2 ** (attempt - 1))
-        label = f"[Enhance {item_label}]" if item_label else "[Enhance]"
+    # Step 1: Remove background via Replicate
+    foreground = _remove_background(crop, item_label)
 
-        if attempt > 1:
-            logger.info(f"{label} Retry {attempt}/{MAX_RETRIES} after {delay}s backoff...")
-            time.sleep(delay)
-
-        try:
-            output = replicate_lib.run(
-                "black-forest-labs/flux-kontext-dev",
-                input={
-                    "prompt": _ENHANCE_PROMPT,
-                    "input_image": image_data_uri,
-                    "aspect_ratio": "match_input_image",
-                    "output_format": "png",
-                },
-            )
-
-            # output is a FileOutput URL or list of URLs
-            image_url = output[0] if isinstance(output, list) else output
-            resp = httpx.get(str(image_url), timeout=120)
-            resp.raise_for_status()
-            enhanced = Image.open(io.BytesIO(resp.content)).convert("RGB")
-            logger.info(f"{label} Enhanced successfully ({enhanced.size[0]}x{enhanced.size[1]})")
-            return enhanced
-
-        except Exception as e:
-            logger.warning(f"{label} Attempt {attempt} failed: {e}")
-            if attempt == MAX_RETRIES:
-                raise RuntimeError(
-                    f"Image enhancement failed after {MAX_RETRIES} retries for: {item_label}"
-                ) from e
-
-    raise RuntimeError(f"Image enhancement failed after {MAX_RETRIES} retries for: {item_label}")
+    # Step 2: Composite on white with drop shadow
+    enhanced = _composite_on_white(foreground)
+    logger.info(f"{label} Enhanced successfully ({enhanced.size[0]}x{enhanced.size[1]})")
+    return enhanced
 
 
 # ---------------------------------------------------------------------------
@@ -737,7 +774,7 @@ def crop_and_upload_item_images(
     store_id: str,
     enhance: bool = True,
 ) -> None:
-    """Crop each item's product tile, enhance via FLUX.2 Pro, and upload 3 sizes to R2.
+    """Crop each item's product tile, enhance via background removal, and upload 3 sizes to R2.
 
     Sets thumbnail_url, image_url, hero_url on each item that has a valid bbox.
     Items without a bbox are skipped gracefully.
@@ -799,7 +836,7 @@ def crop_and_upload_item_images(
 
         crop = page_img.crop((x1, y1, x2, y2))
 
-        # Enhance the crop via FLUX.2 Pro on Replicate
+        # Enhance the crop: remove background + composite on white
         if enhance and REPLICATE_API_TOKEN:
             try:
                 logger.info(f"Enhancing image for '{item.display_name[:40]}'...")
