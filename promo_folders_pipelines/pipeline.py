@@ -705,6 +705,17 @@ def _render_pdf_pages(pdf_data: bytes, dpi: int = 150) -> dict[int, bytes]:
     return pages
 
 
+def _pad_to_square(img: Image.Image, bg_color=(255, 255, 255)) -> Image.Image:
+    """Pad image to a square canvas with the given background color."""
+    w, h = img.size
+    if w == h:
+        return img
+    size = max(w, h)
+    square = Image.new("RGB", (size, size), bg_color)
+    square.paste(img, ((size - w) // 2, (size - h) // 2))
+    return square
+
+
 def _resize_to_max(img: Image.Image, max_dim: int) -> Image.Image:
     """Resize image so its largest dimension equals max_dim, preserving aspect ratio."""
     w, h = img.size
@@ -793,6 +804,9 @@ def crop_and_upload_item_images(
                 logger.warning(f"Enhancement failed for '{item.display_name[:40]}': {e} — skipping image")
                 skipped_invalid += 1
                 continue
+
+        # Pad to square for uniform display in iOS grid
+        crop = _pad_to_square(crop)
 
         record_id = generate_record_id(item)
         base_key = f"promo_item_images/{store_id}/{record_id}"
