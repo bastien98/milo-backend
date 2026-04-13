@@ -609,7 +609,7 @@ def extract_promos_from_images(
         name = (item.get("display_name") or "").lower().strip()
         page = item.get("page_number")
         if name and name in seen_names and seen_names[name] != page:
-            logger.debug(f"Dedup: skipping cross-page duplicate '{name}' (first on p{seen_names[name]}, dup on p{page})")
+            logger.info(f"Dedup: dropping cross-page duplicate '{name}' (first on p{seen_names[name]}, dup on p{page})")
             continue
         if name and name not in seen_names:
             seen_names[name] = page
@@ -660,7 +660,7 @@ def extract_promos_from_pdf(pdf_data: bytes, config: Dict[str, Any]) -> dict:
         name = (item.get("display_name") or "").lower().strip()
         page = item.get("page_number")
         if name and name in seen_names and seen_names[name] != page:
-            logger.debug(f"Dedup: skipping cross-page duplicate '{name}' (first on p{seen_names[name]}, dup on p{page})")
+            logger.info(f"Dedup: dropping cross-page duplicate '{name}' (first on p{seen_names[name]}, dup on p{page})")
             continue
         if name and name not in seen_names:
             seen_names[name] = page
@@ -696,8 +696,10 @@ def parse_promo_items(
 
     items = []
     skipped = 0
+    raw_items = data.get("items", [])
+    logger.info(f"Parsing {len(raw_items)} raw items from Gemini output")
 
-    for raw in data.get("items", []):
+    for raw in raw_items:
         display_name = (raw.get("display_name") or "").strip()
         if not display_name:
             logger.warning("Skipping item with empty display_name")
@@ -711,6 +713,9 @@ def parse_promo_items(
         display_mechanism = (raw.get("display_mechanism") or "").strip() or "Promo"
         display_description = (raw.get("display_description") or "").strip() or display_mechanism
         display_savings_label = (raw.get("display_savings_label") or "").strip() or "Promo"
+
+        if original_price == 0.0 and promo_price == 0.0:
+            logger.warning(f"Item '{display_name}' (p{raw.get('page_number')}): both prices are 0.0")
 
         # Round prices to 2 decimal places
         original_price = round(original_price, 2)
@@ -772,6 +777,13 @@ def parse_promo_items(
                     "x_max": tx_max / 1000.0,
                     "y_max": ty_max / 1000.0,
                 }
+            else:
+                logger.warning(f"Item '{display_name}' (p{raw.get('page_number')}): invalid tile_bbox coords")
+        else:
+            logger.warning(f"Item '{display_name}' (p{raw.get('page_number')}): missing tile_bbox")
+
+        if not bbox_dict:
+            logger.debug(f"Item '{display_name}' (p{raw.get('page_number')}): no product bbox")
 
         items.append(
             PromoItem(
@@ -801,8 +813,25 @@ def parse_promo_items(
         )
 
     if skipped:
-        logger.info(f"Quality gate: skipped {skipped} items that didn't meet minimum requirements")
-    logger.info(f"Parsed {len(items)} high-quality promo items")
+        logger.info(f"Skipped {skipped} items with empty display_name")
+
+    # Per-page summary
+    page_counts: dict[int, dict] = {}
+    for item in items:
+        pn = item.page_number or 0
+        if pn not in page_counts:
+            page_counts[pn] = {"total": 0, "with_tile_bbox": 0, "with_bbox": 0}
+        page_counts[pn]["total"] += 1
+        if item.tile_bbox:
+            page_counts[pn]["with_tile_bbox"] += 1
+        if item.bbox:
+            page_counts[pn]["with_bbox"] += 1
+
+    for pn in sorted(page_counts):
+        c = page_counts[pn]
+        logger.info(f"  Page {pn}: {c['total']} items, {c['with_tile_bbox']} with tile_bbox, {c['with_bbox']} with bbox")
+
+    logger.info(f"Parsed {len(items)} promo items from {len(page_counts)} pages")
     return items
 
 
