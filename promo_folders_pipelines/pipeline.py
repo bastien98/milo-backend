@@ -123,7 +123,7 @@ class _PromoItemSchema(PydanticBaseModel):
     granular_category: str = Field(description="Category from the provided list, or 'Other' if nothing fits.")
 
     # --- Page reference ---
-    page_number: int = Field(ge=1, description="Page number within the current PDF batch, 1-indexed.")
+    page_number: int = Field(ge=1, description="Position of the item's page within THIS batch (1-indexed). For a single-page batch, ALWAYS return 1. For multi-page batches: 1 for first page, 2 for second, etc. Do NOT return the absolute page number from the full document.")
 
     # --- Bounding box (for image cropping) ---
     bbox: Optional[_BboxSchema] = Field(
@@ -389,10 +389,16 @@ def extract_batch_images(
 
         # Adjust page numbers: batch-relative → absolute page number
         first_page = page_nums[0]
+        last_page = page_nums[-1]
         for item in data.get("items", []):
             batch_page = item.get("page_number")
             if batch_page is not None:
-                item["page_number"] = first_page + batch_page - 1
+                adjusted = first_page + batch_page - 1
+                # Clamp to valid range (Gemini sometimes returns absolute page numbers)
+                if adjusted < first_page or adjusted > last_page:
+                    logger.warning(f"{label} Item '{item.get('display_name', '?')}' had page_number={batch_page}, clamping to batch range")
+                    adjusted = max(first_page, min(adjusted, last_page))
+                item["page_number"] = adjusted
 
         item_count = len(data.get("items", []))
         logger.info(f"{label} Done in {elapsed:.1f}s — {item_count} items extracted")
@@ -589,6 +595,7 @@ def extract_promos_from_images(
         for pn, indexed_items in sorted(items_by_page.items()):
             page_img = image_lookup.get(pn)
             if not page_img:
+                logger.warning(f"No image found for page {pn} — skipping bbox validation for {len(indexed_items)} item(s)")
                 continue
 
             page_items = [item for _, item in indexed_items]
@@ -963,6 +970,7 @@ def crop_and_upload_item_images(
     r2: R2PromoStorage,
     store_id: str,
     enhance: bool = True,
+    folder_index: int = 1,
 ) -> None:
     """Crop each item's product tile from upscaled pages and upload 3 sizes to R2.
 
@@ -991,6 +999,17 @@ def crop_and_upload_item_images(
                 page_img = Image.open(io.BytesIO(page_images[page_num])).convert("RGB")
                 upscaled = _upscale_image(page_img, item_label=f"page {page_num}")
                 upscaled_pages[page_num] = upscaled
+
+                # Replace original page in R2 with upscaled version
+                try:
+                    buf = io.BytesIO()
+                    upscaled.save(buf, format="WEBP", quality=85)
+                    safe_id = store_id.replace(" ", "_")
+                    r2_key = f"{R2_PREFIX}{safe_id}/folder_{folder_index}/page_{page_num:03d}.webp"
+                    r2.upload_image(r2_key, buf.getvalue())
+                    logger.info(f"[Upscale page {page_num}] Replaced in R2 ({len(buf.getvalue()) / 1000:.0f} KB)")
+                except Exception as upload_err:
+                    logger.warning(f"[Upscale page {page_num}] Failed to replace in R2: {upload_err}")
             except Exception as e:
                 logger.warning(f"Page {page_num} upscale failed: {e} — will use original resolution")
 
