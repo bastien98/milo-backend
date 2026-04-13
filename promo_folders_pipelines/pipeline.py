@@ -136,13 +136,12 @@ class _PromoItemSchema(PydanticBaseModel):
     )
 
     # --- Tile bounding box (for tap hotspots in app) ---
-    tile_bbox: Optional[_BboxSchema] = Field(
-        default=None,
+    tile_bbox: _BboxSchema = Field(
         description=(
-            "Bounding box around the ENTIRE promo tile area for this item — including "
+            "REQUIRED bounding box around the ENTIRE promo tile area for this item — including "
             "the product image, price label, brand text, promo badge, and background. "
             "This is always equal to or larger than bbox. Integer coords 0-1000. "
-            "x_min < x_max, y_min < y_max. Provide your best estimate — avoid null."
+            "x_min < x_max, y_min < y_max. Always provide your best estimate."
         ),
     )
 
@@ -601,16 +600,18 @@ def extract_promos_from_images(
         validation_elapsed = time.time() - validation_start
         logger.info(f"Bbox validation complete in {validation_elapsed:.1f}s")
 
-    # Deduplicate by display_name (keep first occurrence)
+    # Deduplicate by (display_name, page_number) — same name on different pages are distinct
     seen = set()
     deduped = []
     for item in all_items:
         name = (item.get("display_name") or "").lower().strip()
-        if name and name not in seen:
-            seen.add(name)
+        page = item.get("page_number")
+        key = (name, page)
+        if name and key not in seen:
+            seen.add(key)
             deduped.append(item)
-        elif name in seen:
-            logger.debug(f"Dedup: skipping duplicate '{name}'")
+        elif key in seen:
+            logger.debug(f"Dedup: skipping duplicate '{name}' on page {page}")
 
     if len(deduped) < len(all_items):
         logger.info(f"Deduplicated: {len(all_items)} → {len(deduped)} items")
@@ -649,16 +650,18 @@ def extract_promos_from_pdf(pdf_data: bytes, config: Dict[str, Any]) -> dict:
     elapsed = time.time() - start_time
     logger.info(f"All batches complete in {elapsed:.1f}s — {len(all_items)} total items")
 
-    # Deduplicate by display_name (keep first occurrence)
+    # Deduplicate by (display_name, page_number) — same name on different pages are distinct
     seen = set()
     deduped = []
     for item in all_items:
         name = (item.get("display_name") or "").lower().strip()
-        if name and name not in seen:
-            seen.add(name)
+        page = item.get("page_number")
+        key = (name, page)
+        if name and key not in seen:
+            seen.add(key)
             deduped.append(item)
-        elif name in seen:
-            logger.debug(f"Dedup: skipping duplicate '{name}'")
+        elif key in seen:
+            logger.debug(f"Dedup: skipping duplicate '{name}' on page {page}")
 
     if len(deduped) < len(all_items):
         logger.info(f"Deduplicated: {len(all_items)} → {len(deduped)} items")
@@ -698,46 +701,13 @@ def parse_promo_items(
             skipped += 1
             continue
 
-        # Quality gate: all mandatory fields must be present
-        original_price = _parse_price(raw.get("original_price"))
-        promo_price = _parse_price(raw.get("promo_price"))
-        savings_amount = _parse_price(raw.get("savings_amount"))
-        display_mechanism = (raw.get("display_mechanism") or "").strip()
-        display_description = (raw.get("display_description") or "").strip()
-        display_savings_label = (raw.get("display_savings_label") or "").strip()
-
-        if original_price is None or original_price <= 0:
-            logger.warning(f"Skipping '{display_name}': missing or invalid original_price")
-            skipped += 1
-            continue
-        if promo_price is None or promo_price <= 0:
-            logger.warning(f"Skipping '{display_name}': missing or invalid promo_price")
-            skipped += 1
-            continue
-        if savings_amount is None or savings_amount <= 0:
-            logger.warning(f"Skipping '{display_name}': missing or invalid savings_amount")
-            skipped += 1
-            continue
-        if not display_mechanism:
-            logger.warning(f"Skipping '{display_name}': missing display_mechanism")
-            skipped += 1
-            continue
-        if not display_description:
-            logger.warning(f"Skipping '{display_name}': missing display_description")
-            skipped += 1
-            continue
-        if not display_savings_label:
-            logger.warning(f"Skipping '{display_name}': missing display_savings_label")
-            skipped += 1
-            continue
-
-        # Price validation
-        if promo_price > original_price:
-            logger.warning(
-                f"Skipping '{display_name}': promo_price ({promo_price}) > original_price ({original_price})"
-            )
-            skipped += 1
-            continue
+        # Extract fields with sensible defaults (coverage over quality)
+        original_price = _parse_price(raw.get("original_price")) or 0.0
+        promo_price = _parse_price(raw.get("promo_price")) or 0.0
+        savings_amount = _parse_price(raw.get("savings_amount")) or 0.0
+        display_mechanism = (raw.get("display_mechanism") or "").strip() or "Promo"
+        display_description = (raw.get("display_description") or "").strip() or display_mechanism
+        display_savings_label = (raw.get("display_savings_label") or "").strip() or "Promo"
 
         # Round prices to 2 decimal places
         original_price = round(original_price, 2)
@@ -746,15 +716,11 @@ def parse_promo_items(
 
         # Purchase quantity & promo depth
         min_purchase_qty = max(1, int(raw.get("min_purchase_qty", 1)))
-        promo_depth = compute_promo_depth(savings_amount, original_price, min_purchase_qty)
+        promo_depth = compute_promo_depth(savings_amount, original_price, min_purchase_qty) if original_price > 0 else 0
 
-        # Brand extraction (quality gate — promo folders always show branded products)
-        normalized_brand = (raw.get("normalized_brand") or "").strip().lower() or None
+        # Brand extraction (default to "unknown" if missing)
+        normalized_brand = (raw.get("normalized_brand") or "").strip().lower() or "unknown"
         display_brand = (raw.get("display_brand") or "").strip() or None
-        if not normalized_brand:
-            logger.warning(f"Skipping '{display_name}': missing normalized_brand")
-            skipped += 1
-            continue
 
         # Category validation
         granular = raw.get("granular_category", "Other")
