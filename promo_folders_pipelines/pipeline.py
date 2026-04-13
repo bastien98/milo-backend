@@ -82,7 +82,7 @@ CRITICAL RULES FOR TILE_BBOX:
 4. Validation: x_min < x_max and y_min < y_max (set to null if uncertain).
 5. The tile_bbox will ALWAYS be equal to or larger than the bbox for the same item.
 6. Ensure EVERY item has a tile_bbox. If you cannot determine exact boundaries, provide your best estimate rather than null.
-7. NO OVERLAPS: Tile bounding boxes must NOT overlap each other. Each tile_bbox should cover only its own product's area. If two items are adjacent, their tile_bbox edges should meet but not cross. Adjust boundaries to eliminate any overlap.
+7. MINIMIZE OVERLAPS: Tile bounding boxes should avoid overlapping where possible. For adjacent items in a grid, prefer tight boundaries that meet at the edge. Slight overlap is acceptable — never omit an item just because its tile_bbox would overlap a neighbor.
 """
 
 
@@ -601,18 +601,19 @@ def extract_promos_from_images(
         validation_elapsed = time.time() - validation_start
         logger.info(f"Bbox validation complete in {validation_elapsed:.1f}s")
 
-    # Deduplicate by (display_name, page_number) — same name on different pages are distinct
-    seen = set()
+    # Deduplicate: only remove cross-page duplicates (bilingual NL/FR).
+    # Same name on the SAME page = different products (e.g., different beer brands).
+    seen_names: dict[str, int] = {}  # name → first page seen
     deduped = []
     for item in all_items:
         name = (item.get("display_name") or "").lower().strip()
         page = item.get("page_number")
-        key = (name, page)
-        if name and key not in seen:
-            seen.add(key)
-            deduped.append(item)
-        elif key in seen:
-            logger.debug(f"Dedup: skipping duplicate '{name}' on page {page}")
+        if name and name in seen_names and seen_names[name] != page:
+            logger.debug(f"Dedup: skipping cross-page duplicate '{name}' (first on p{seen_names[name]}, dup on p{page})")
+            continue
+        if name and name not in seen_names:
+            seen_names[name] = page
+        deduped.append(item)
 
     if len(deduped) < len(all_items):
         logger.info(f"Deduplicated: {len(all_items)} → {len(deduped)} items")
@@ -651,18 +652,19 @@ def extract_promos_from_pdf(pdf_data: bytes, config: Dict[str, Any]) -> dict:
     elapsed = time.time() - start_time
     logger.info(f"All batches complete in {elapsed:.1f}s — {len(all_items)} total items")
 
-    # Deduplicate by (display_name, page_number) — same name on different pages are distinct
-    seen = set()
+    # Deduplicate: only remove cross-page duplicates (bilingual NL/FR).
+    # Same name on the SAME page = different products (e.g., different beer brands).
+    seen_names: dict[str, int] = {}  # name → first page seen
     deduped = []
     for item in all_items:
         name = (item.get("display_name") or "").lower().strip()
         page = item.get("page_number")
-        key = (name, page)
-        if name and key not in seen:
-            seen.add(key)
-            deduped.append(item)
-        elif key in seen:
-            logger.debug(f"Dedup: skipping duplicate '{name}' on page {page}")
+        if name and name in seen_names and seen_names[name] != page:
+            logger.debug(f"Dedup: skipping cross-page duplicate '{name}' (first on p{seen_names[name]}, dup on p{page})")
+            continue
+        if name and name not in seen_names:
+            seen_names[name] = page
+        deduped.append(item)
 
     if len(deduped) < len(all_items):
         logger.info(f"Deduplicated: {len(all_items)} → {len(deduped)} items")
