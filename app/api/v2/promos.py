@@ -1,7 +1,10 @@
-"""Weekly promo reports and search endpoints."""
+"""Weekly promo reports, search, and folder browsing endpoints."""
 
 import logging
-from typing import List
+import os
+import time
+from datetime import date
+from typing import List, Optional, Tuple
 
 from fastapi import APIRouter, Depends, HTTPException, Response, status
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -10,6 +13,9 @@ from app.api.deps import get_db, get_current_db_user
 from app.core.stores import ALL_STORE_NAMES, STORE_DISPLAY_NAMES, STORE_HAS_PROMOS
 from app.models.user import User
 from app.schemas.promo import (
+    PromoFolderInfo,
+    PromoFolderPage,
+    PromoFoldersResponse,
     PromoRecommendationResponse,
     PromoReportEventCreate,
     PromoSearchRequest,
@@ -85,6 +91,126 @@ async def create_promo_report_event(
         )
 
     return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+# ---------------------------------------------------------------------------
+# Promo Folders (browsable folder pages from R2)
+# ---------------------------------------------------------------------------
+
+# In-memory TTL cache: (data, timestamp)
+_folders_cache: Optional[Tuple[PromoFoldersResponse, float]] = None
+_FOLDERS_CACHE_TTL = 3600  # 1 hour
+
+R2_PUBLIC_BASE_URL = os.environ.get("R2_PUBLIC_BASE_URL", "")
+
+
+def _build_folders_response() -> PromoFoldersResponse:
+    """Read R2 metadata and build the folders response.
+
+    Lists all active promo folders across all configured retailers,
+    constructing page image URLs from the R2 public base URL.
+    """
+    from promo_folders_pipelines.scraper.config import RETAILERS
+    from promo_folders_pipelines.r2_storage import R2PromoStorage, R2_BUCKET, R2_PREFIX
+
+    if not R2_PUBLIC_BASE_URL:
+        logger.warning("R2_PUBLIC_BASE_URL not set — returning empty folders")
+        return PromoFoldersResponse(folders=[])
+
+    r2 = R2PromoStorage()
+    today = date.today().isoformat()
+    folders: list[PromoFolderInfo] = []
+
+    for _key, retailer in RETAILERS.items():
+        store_id = retailer["store_id"]
+        safe_id = store_id.replace(" ", "_")
+        prefix = f"{R2_PREFIX}{safe_id}/"
+
+        # List folder sub-directories (folder_1/, folder_2/, etc.)
+        try:
+            response = r2.client.list_objects_v2(
+                Bucket=R2_BUCKET, Prefix=prefix, Delimiter="/"
+            )
+        except Exception as e:
+            logger.warning(f"Failed to list R2 prefix {prefix}: {e}")
+            continue
+
+        for cp in response.get("CommonPrefixes", []):
+            folder_prefix = cp["Prefix"]  # e.g., "promo_folders/colruyt/folder_1/"
+            folder_dir = folder_prefix.rstrip("/").rsplit("/", 1)[-1]  # "folder_1"
+
+            # Download metadata.json
+            meta_key = f"{folder_prefix}metadata.json"
+            try:
+                meta_response = r2.client.get_object(Bucket=R2_BUCKET, Key=meta_key)
+                import json
+                metadata = json.loads(meta_response["Body"].read())
+            except Exception as e:
+                logger.debug(f"No metadata at {meta_key}: {e}")
+                continue
+
+            # Filter: only active folders (validity_end >= today)
+            validity_end = metadata.get("validity_end", "")
+            if validity_end and validity_end < today:
+                continue
+
+            page_count = metadata.get("page_count", 0)
+            if page_count == 0:
+                continue
+
+            # Build page image URLs
+            pages = [
+                PromoFolderPage(
+                    page_number=i,
+                    image_url=f"{R2_PUBLIC_BASE_URL}/{R2_PREFIX}{safe_id}/{folder_dir}/page_{i:03d}.webp",
+                )
+                for i in range(1, page_count + 1)
+            ]
+
+            display_name = STORE_DISPLAY_NAMES.get(store_id, store_id.title())
+
+            folders.append(PromoFolderInfo(
+                folder_id=f"{safe_id}/{folder_dir}",
+                store_id=store_id,
+                store_display_name=display_name,
+                folder_name=metadata.get("folder_name", folder_dir.replace("_", " ").title()),
+                source_url=metadata.get("source_url", ""),
+                validity_start=metadata.get("validity_start", ""),
+                validity_end=validity_end,
+                page_count=page_count,
+                pages=pages,
+            ))
+
+    # Sort: by store_id, then folder_id
+    folders.sort(key=lambda f: (f.store_id, f.folder_id))
+    return PromoFoldersResponse(folders=folders)
+
+
+@router.get("/folders", response_model=PromoFoldersResponse)
+async def get_promo_folders():
+    """Return all active promo folders with page image URLs, grouped by store.
+
+    Public endpoint — no authentication required.
+    Results are cached in memory for 1 hour.
+    """
+    global _folders_cache
+
+    now = time.time()
+    if _folders_cache is not None:
+        data, cached_at = _folders_cache
+        if now - cached_at < _FOLDERS_CACHE_TTL:
+            return data
+
+    try:
+        data = _build_folders_response()
+        _folders_cache = (data, now)
+        return data
+    except Exception as e:
+        logger.error(f"Failed to build promo folders response: {e}", exc_info=True)
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Promo folders are temporarily unavailable.",
+        )
 
 
 # ---------------------------------------------------------------------------

@@ -137,3 +137,31 @@ class PromoStoreOption(BaseModel):
     id: str
     name: str
     has_promos: bool
+
+
+# ---------------------------------------------------------------------------
+# Promo Folders (browsable folder pages from R2)
+# ---------------------------------------------------------------------------
+
+class PromoFolderPage(BaseModel):
+    """A single page image from a promo folder."""
+    page_number: int
+    image_url: str
+
+
+class PromoFolderInfo(BaseModel):
+    """A single promo folder (one PDF/leaflet) for a store."""
+    folder_id: str
+    store_id: str
+    store_display_name: str
+    folder_name: str
+    source_url: str
+    validity_start: str
+    validity_end: str
+    page_count: int
+    pages: List[PromoFolderPage]
+
+
+class PromoFoldersResponse(BaseModel):
+    """Response for GET /api/v2/promos/folders."""
+    folders: List[PromoFolderInfo]
