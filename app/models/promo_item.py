@@ -53,6 +53,16 @@ class PromoItem(Base):
     image_url: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     hero_url: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
 
+    # Bounding boxes (normalized 0-1 coordinates)
+    bbox_x_min: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    bbox_y_min: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    bbox_x_max: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    bbox_y_max: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    tile_bbox_x_min: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    tile_bbox_y_min: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    tile_bbox_x_max: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    tile_bbox_y_max: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
     )

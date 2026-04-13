@@ -13,6 +13,7 @@ from app.api.deps import get_db, get_current_db_user
 from app.core.stores import ALL_STORE_NAMES, STORE_DISPLAY_NAMES, STORE_HAS_PROMOS
 from app.models.user import User
 from app.schemas.promo import (
+    PromoFolderHotspot,
     PromoFolderInfo,
     PromoFolderPage,
     PromoFoldersResponse,
@@ -104,11 +105,96 @@ _FOLDERS_CACHE_TTL = 3600  # 1 hour
 R2_PUBLIC_BASE_URL = os.environ.get("R2_PUBLIC_BASE_URL", "")
 
 
+def _query_hotspots_by_retailer(today_str: str) -> dict[str, list[PromoFolderHotspot]]:
+    """Query promo items with tile bounding boxes, grouped by (retailer, page_number).
+
+    Returns a dict keyed by "{retailer}:{page_number}" → list of hotspots.
+    """
+    import psycopg2
+
+    db_url = os.environ.get("DATABASE_URL", "")
+    for suffix in ("+asyncpg", "+psycopg2"):
+        db_url = db_url.replace(suffix, "")
+
+    if not db_url:
+        logger.warning("DATABASE_URL not set — no hotspots available")
+        return {}
+
+    try:
+        conn = psycopg2.connect(db_url)
+    except Exception as e:
+        logger.warning(f"Failed to connect to DB for hotspots: {e}")
+        return {}
+
+    hotspots_map: dict[str, list[PromoFolderHotspot]] = {}
+    try:
+        cur = conn.cursor()
+        cur.execute(
+            """
+            SELECT
+                id, source_retailer, page_number,
+                tile_bbox_x_min, tile_bbox_y_min, tile_bbox_x_max, tile_bbox_y_max,
+                display_name, display_brand, display_mechanism,
+                original_price, promo_price, savings_amount, promo_depth,
+                min_purchase_qty, validity_end,
+                thumbnail_url, image_url
+            FROM promo_items
+            WHERE tile_bbox_x_min IS NOT NULL
+              AND validity_end >= %s
+              AND page_number IS NOT NULL
+            """,
+            (today_str,),
+        )
+        for row in cur.fetchall():
+            (
+                item_id, retailer, page_number,
+                tx_min, ty_min, tx_max, ty_max,
+                display_name, display_brand, display_mechanism,
+                original_price, promo_price, savings_amount, promo_depth,
+                min_purchase_qty, validity_end,
+                thumbnail_url, image_url,
+            ) = row
+
+            discount_pct = int(round(promo_depth)) if promo_depth else 0
+
+            hotspot = PromoFolderHotspot(
+                item_id=item_id,
+                page_number=page_number,
+                tile_bbox_x_min=tx_min,
+                tile_bbox_y_min=ty_min,
+                tile_bbox_x_max=tx_max,
+                tile_bbox_y_max=ty_max,
+                display_name=display_name,
+                display_brand=display_brand,
+                display_mechanism=display_mechanism or "",
+                original_price=original_price,
+                promo_price=promo_price,
+                savings_amount=savings_amount,
+                discount_percentage=discount_pct,
+                min_purchase_qty=min_purchase_qty or 1,
+                validity_end=str(validity_end),
+                thumbnail_url=thumbnail_url,
+                image_url=image_url,
+                store_name=retailer,
+            )
+            key = f"{retailer}:{page_number}"
+            hotspots_map.setdefault(key, []).append(hotspot)
+
+        cur.close()
+    except Exception as e:
+        logger.warning(f"Failed to query hotspots: {e}")
+    finally:
+        conn.close()
+
+    return hotspots_map
+
+
 def _build_folders_response() -> PromoFoldersResponse:
     """Read R2 metadata and build the folders response.
 
     Lists all active promo folders across all configured retailers,
     constructing page image URLs from the R2 public base URL.
+    Attaches promo item hotspots (with tile bounding boxes) to each page.
     """
     from promo_folders_pipelines.scraper.config import RETAILERS
     from promo_folders_pipelines.r2_storage import R2PromoStorage, R2_BUCKET, R2_PREFIX
@@ -119,6 +205,10 @@ def _build_folders_response() -> PromoFoldersResponse:
 
     r2 = R2PromoStorage()
     today = date.today().isoformat()
+
+    # Query all hotspots once (single DB call)
+    hotspots_map = _query_hotspots_by_retailer(today)
+
     folders: list[PromoFolderInfo] = []
 
     for _key, retailer in RETAILERS.items():
@@ -158,11 +248,12 @@ def _build_folders_response() -> PromoFoldersResponse:
             if page_count == 0:
                 continue
 
-            # Build page image URLs
+            # Build page image URLs with hotspots
             pages = [
                 PromoFolderPage(
                     page_number=i,
                     image_url=f"{R2_PUBLIC_BASE_URL}/{R2_PREFIX}{safe_id}/{folder_dir}/page_{i:03d}.webp",
+                    hotspots=hotspots_map.get(f"{store_id}:{i}", []),
                 )
                 for i in range(1, page_count + 1)
             ]

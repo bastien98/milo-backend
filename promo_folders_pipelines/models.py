@@ -45,8 +45,9 @@ class PromoItem:
     page_number: Optional[int] = None           # Page in the PDF where this item appears
     promo_folder_url: Optional[str] = None
 
-    # --- Bounding box (transit only — not persisted to DB) ---
-    bbox: Optional[dict] = None                  # Normalized 0-1 coords from Gemini
+    # --- Bounding boxes (normalized 0-1 coords from Gemini, persisted to DB) ---
+    bbox: Optional[dict] = None                  # Product-only bbox (for image cropping)
+    tile_bbox: Optional[dict] = None             # Full promo tile bbox (for tap hotspots)
 
     # --- Product image URLs (persisted to DB, served from R2) ---
     thumbnail_url: Optional[str] = None          # 200px max dimension

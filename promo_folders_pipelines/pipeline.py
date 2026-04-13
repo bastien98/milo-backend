@@ -71,6 +71,16 @@ CRITICAL RULES FOR BBOX:
    y_min=0 → top edge,  y_max=1 → bottom edge
 5. Validation: x_min < x_max and y_min < y_max (set to null if uncertain).
 6. One bbox per item, even if the product appears in multiple places on the page.
+
+## TILE BOUNDING BOX (FULL PROMO TILE)
+For EVERY item, ALSO populate the `tile_bbox` field with a bounding box that encompasses the **entire promo tile area** allocated to this product on the page — including the product image, price labels, brand text, promo badges, and background area.
+
+CRITICAL RULES FOR TILE_BBOX:
+1. CAPTURE EVERYTHING: Include the product image, price text, brand name, promo banner/ribbon, description, and any background color/shape that visually groups this item.
+2. TIGHT FIT: The tile_bbox should tightly wrap the full visual area for this item. Do NOT include neighboring products' areas.
+3. Coordinates are normalized 0-1 (same system as bbox).
+4. Validation: x_min < x_max and y_min < y_max (set to null if uncertain).
+5. The tile_bbox will ALWAYS be equal to or larger than the bbox for the same item.
 """
 
 
@@ -121,6 +131,17 @@ class _PromoItemSchema(PydanticBaseModel):
             "Exclude text, price labels, and promo badges. Leave a small margin around "
             "the product. Normalized 0-1 (x=0 left, y=0 top). x_min < x_max, y_min < y_max. "
             "null if the product cannot be clearly located."
+        ),
+    )
+
+    # --- Tile bounding box (for tap hotspots in app) ---
+    tile_bbox: Optional[_BboxSchema] = Field(
+        default=None,
+        description=(
+            "Bounding box around the ENTIRE promo tile area for this item — including "
+            "the product image, price label, brand text, promo badge, and background. "
+            "This is always equal to or larger than bbox. Normalized 0-1. "
+            "x_min < x_max, y_min < y_max. null if the tile area is unclear."
         ),
     )
 
@@ -551,7 +572,7 @@ def parse_promo_items(
             granular = "Other"
         parent = get_parent_category(granular)
 
-        # Extract bbox (transit-only field — not persisted to DB)
+        # Extract bbox (product-only, used for image cropping + persisted)
         raw_bbox = raw.get("bbox")
         bbox_dict = None
         if raw_bbox and isinstance(raw_bbox, dict):
@@ -565,6 +586,21 @@ def parse_promo_items(
                 and x_min < x_max and y_min < y_max
             ):
                 bbox_dict = raw_bbox
+
+        # Extract tile_bbox (full promo tile area, used for tap hotspots)
+        raw_tile_bbox = raw.get("tile_bbox")
+        tile_bbox_dict = None
+        if raw_tile_bbox and isinstance(raw_tile_bbox, dict):
+            tx_min = raw_tile_bbox.get("x_min")
+            ty_min = raw_tile_bbox.get("y_min")
+            tx_max = raw_tile_bbox.get("x_max")
+            ty_max = raw_tile_bbox.get("y_max")
+            if (
+                tx_min is not None and ty_min is not None
+                and tx_max is not None and ty_max is not None
+                and tx_min < tx_max and ty_min < ty_max
+            ):
+                tile_bbox_dict = raw_tile_bbox
 
         items.append(
             PromoItem(
@@ -589,6 +625,7 @@ def parse_promo_items(
                 page_number=raw.get("page_number"),
                 promo_folder_url=promo_folder_url,
                 bbox=bbox_dict,
+                tile_bbox=tile_bbox_dict,
             )
         )
 
@@ -617,16 +654,9 @@ def generate_record_id(item: PromoItem) -> str:
 
 
 # ---------------------------------------------------------------------------
-# Image enhancement via Recraft (upscale + background removal) + PIL compositing
+# Image enhancement via Recraft (upscale)
 # ---------------------------------------------------------------------------
 REPLICATE_API_TOKEN = os.environ.get("REPLICATE_API_TOKEN", "")
-
-# Drop shadow settings
-_SHADOW_COLOR = (0, 0, 0, 80)  # semi-transparent black
-_SHADOW_OFFSET = (2, 4)  # x, y pixel offset
-_SHADOW_BLUR = 6
-
-
 def _upscale_image(crop: Image.Image, item_label: str = "") -> Image.Image:
     """Upscale a cropped product image 4x using Recraft Crisp Upscale on Replicate.
 
@@ -668,90 +698,12 @@ def _upscale_image(crop: Image.Image, item_label: str = "") -> Image.Image:
     raise RuntimeError(f"Upscale failed after {MAX_RETRIES} retries for: {item_label}")
 
 
-def _remove_background(crop: Image.Image, item_label: str = "") -> Image.Image:
-    """Remove background from a product crop using Recraft on Replicate.
-
-    Returns an RGBA image with transparent background.
-    """
-    buf = io.BytesIO()
-    crop.save(buf, format="PNG")
-    buf.seek(0)
-    image_data_uri = "data:image/png;base64," + base64.b64encode(buf.read()).decode()
-
-    for attempt in range(1, MAX_RETRIES + 1):
-        delay = RETRY_BASE_DELAY * (2 ** (attempt - 1))
-        label = f"[RemoveBG {item_label}]" if item_label else "[RemoveBG]"
-
-        if attempt > 1:
-            logger.info(f"{label} Retry {attempt}/{MAX_RETRIES} after {delay}s backoff...")
-            time.sleep(delay)
-
-        try:
-            output = replicate_lib.run(
-                "recraft-ai/recraft-remove-background",
-                input={"image": image_data_uri},
-            )
-
-            image_url = output[0] if isinstance(output, list) else output
-            resp = httpx.get(str(image_url), timeout=60)
-            resp.raise_for_status()
-            result = Image.open(io.BytesIO(resp.content)).convert("RGBA")
-            logger.info(f"{label} Background removed ({result.size[0]}x{result.size[1]})")
-            return result
-
-        except Exception as e:
-            logger.warning(f"{label} Attempt {attempt} failed: {e}")
-            if attempt == MAX_RETRIES:
-                raise RuntimeError(
-                    f"Background removal failed after {MAX_RETRIES} retries for: {item_label}"
-                ) from e
-
-    raise RuntimeError(f"Background removal failed after {MAX_RETRIES} retries for: {item_label}")
-
-
-def _composite_on_white(foreground: Image.Image) -> Image.Image:
-    """Composite an RGBA foreground onto a white background with a drop shadow.
-
-    Centers the product at ~80% of the canvas and adds a subtle shadow.
-    """
-    from PIL import ImageFilter
-
-    fw, fh = foreground.size
-    # Canvas sized so product occupies ~80%
-    canvas_w = int(fw / 0.8)
-    canvas_h = int(fh / 0.8)
-    canvas_size = max(canvas_w, canvas_h)
-
-    # Create drop shadow from the alpha channel
-    alpha = foreground.split()[3]
-    # Position shadow with offset
-    sx = (canvas_size - fw) // 2 + _SHADOW_OFFSET[0]
-    sy = (canvas_size - fh) // 2 + _SHADOW_OFFSET[1]
-    shadow_layer = Image.new("RGBA", (canvas_size, canvas_size), (0, 0, 0, 0))
-    shadow_layer.paste(Image.new("RGBA", (fw, fh), _SHADOW_COLOR), (sx, sy), mask=alpha)
-    shadow = shadow_layer.filter(ImageFilter.GaussianBlur(radius=_SHADOW_BLUR))
-
-    # White background
-    canvas = Image.new("RGBA", (canvas_size, canvas_size), (255, 255, 255, 255))
-    # Composite shadow, then foreground
-    canvas = Image.alpha_composite(canvas, shadow)
-    # Center the product
-    px = (canvas_size - fw) // 2
-    py = (canvas_size - fh) // 2
-    canvas.paste(foreground, (px, py), mask=foreground.split()[3])
-
-    return canvas.convert("RGB")
-
-
 def enhance_item_image(
     crop: Image.Image,
     item_label: str = "",
 ) -> Image.Image:
-    """Enhance a cropped product image: upscale + remove background + composite on white.
+    """Enhance a cropped product image by upscaling 4x via Recraft Crisp Upscale on Replicate.
 
-    Step 1: Upscale 4x via Recraft Crisp Upscale on Replicate
-    Step 2: Remove background via Recraft on Replicate
-    Step 3: Composite onto white canvas with drop shadow (pure PIL)
     Raises on failure after retries.
     """
     w, h = crop.size
@@ -762,16 +714,9 @@ def enhance_item_image(
 
     label = f"[Enhance {item_label}]" if item_label else "[Enhance]"
 
-    # Step 1: Upscale 4x via Recraft Crisp
     upscaled = _upscale_image(crop, item_label)
-
-    # Step 2: Remove background
-    foreground = _remove_background(upscaled, item_label)
-
-    # Step 3: Composite on white with drop shadow
-    enhanced = _composite_on_white(foreground)
-    logger.info(f"{label} Enhanced successfully ({enhanced.size[0]}x{enhanced.size[1]})")
-    return enhanced
+    logger.info(f"{label} Enhanced successfully ({upscaled.size[0]}x{upscaled.size[1]})")
+    return upscaled
 
 
 # ---------------------------------------------------------------------------
@@ -819,7 +764,7 @@ def crop_and_upload_item_images(
     store_id: str,
     enhance: bool = True,
 ) -> None:
-    """Crop each item's product tile, enhance via background removal, and upload 3 sizes to R2.
+    """Crop each item's product tile, enhance via upscaling, and upload 3 sizes to R2.
 
     Sets thumbnail_url, image_url, hero_url on each item that has a valid bbox.
     Items without a bbox are skipped gracefully.
@@ -881,7 +826,7 @@ def crop_and_upload_item_images(
 
         crop = page_img.crop((x1, y1, x2, y2))
 
-        # Enhance the crop: remove background + composite on white
+        # Enhance the crop: upscale via Recraft
         if enhance and REPLICATE_API_TOKEN:
             try:
                 logger.info(f"Enhancing image for '{item.display_name[:40]}'...")
@@ -947,6 +892,10 @@ def upsert_to_postgres(items: list[PromoItem]) -> int:
         cur = conn.cursor()
         for item in items:
             record_id = generate_record_id(item)
+            # Extract bbox coordinates (None if bbox is missing)
+            bbox = item.bbox or {}
+            tile = item.tile_bbox or {}
+
             cur.execute(
                 """
                 INSERT INTO promo_items (
@@ -956,9 +905,12 @@ def upsert_to_postgres(items: list[PromoItem]) -> int:
                     original_price, promo_price, savings_amount, min_purchase_qty, promo_depth,
                     granular_category, source_retailer, source_type,
                     page_number, promo_folder_url, validity_start, validity_end,
-                    thumbnail_url, image_url, hero_url
+                    thumbnail_url, image_url, hero_url,
+                    bbox_x_min, bbox_y_min, bbox_x_max, bbox_y_max,
+                    tile_bbox_x_min, tile_bbox_y_min, tile_bbox_x_max, tile_bbox_y_max
                 ) VALUES (
-                    %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s
+                    %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s,
+                    %s, %s, %s, %s, %s, %s, %s, %s
                 )
                 ON CONFLICT (id) DO UPDATE SET
                     display_name = EXCLUDED.display_name,
@@ -983,7 +935,15 @@ def upsert_to_postgres(items: list[PromoItem]) -> int:
                     validity_end = EXCLUDED.validity_end,
                     thumbnail_url = EXCLUDED.thumbnail_url,
                     image_url = EXCLUDED.image_url,
-                    hero_url = EXCLUDED.hero_url
+                    hero_url = EXCLUDED.hero_url,
+                    bbox_x_min = EXCLUDED.bbox_x_min,
+                    bbox_y_min = EXCLUDED.bbox_y_min,
+                    bbox_x_max = EXCLUDED.bbox_x_max,
+                    bbox_y_max = EXCLUDED.bbox_y_max,
+                    tile_bbox_x_min = EXCLUDED.tile_bbox_x_min,
+                    tile_bbox_y_min = EXCLUDED.tile_bbox_y_min,
+                    tile_bbox_x_max = EXCLUDED.tile_bbox_x_max,
+                    tile_bbox_y_max = EXCLUDED.tile_bbox_y_max
                 """,
                 (
                     record_id,
@@ -1010,6 +970,14 @@ def upsert_to_postgres(items: list[PromoItem]) -> int:
                     item.thumbnail_url,
                     item.image_url,
                     item.hero_url,
+                    bbox.get("x_min"),
+                    bbox.get("y_min"),
+                    bbox.get("x_max"),
+                    bbox.get("y_max"),
+                    tile.get("x_min"),
+                    tile.get("y_min"),
+                    tile.get("x_max"),
+                    tile.get("y_max"),
                 ),
             )
 

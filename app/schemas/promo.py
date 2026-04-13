@@ -143,10 +143,33 @@ class PromoStoreOption(BaseModel):
 # Promo Folders (browsable folder pages from R2)
 # ---------------------------------------------------------------------------
 
+class PromoFolderHotspot(BaseModel):
+    """A tappable product hotspot on a folder page."""
+    item_id: str
+    page_number: int
+    tile_bbox_x_min: float
+    tile_bbox_y_min: float
+    tile_bbox_x_max: float
+    tile_bbox_y_max: float
+    display_name: str
+    display_brand: Optional[str] = None
+    display_mechanism: str
+    original_price: float
+    promo_price: float
+    savings_amount: float
+    discount_percentage: int
+    min_purchase_qty: int = 1
+    validity_end: str
+    thumbnail_url: Optional[str] = None
+    image_url: Optional[str] = None
+    store_name: str
+
+
 class PromoFolderPage(BaseModel):
     """A single page image from a promo folder."""
     page_number: int
     image_url: str
+    hotspots: List[PromoFolderHotspot] = []
 
 
 class PromoFolderInfo(BaseModel):
