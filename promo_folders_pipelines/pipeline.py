@@ -47,7 +47,7 @@ GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "")
 
 GEMINI_MODEL = "gemini-3-pro-preview"
 MAX_OUTPUT_TOKENS = 32768
-PAGES_PER_BATCH = 2
+PAGES_PER_BATCH = 1  # Single page per Gemini call for maximum bbox accuracy
 MAX_BATCH_BYTES = 1_500_000  # 1.5 MB — split oversized batches into single pages
 MAX_RETRIES = 4
 RETRY_BASE_DELAY = 5  # seconds, doubles each retry
@@ -66,9 +66,9 @@ CRITICAL RULES FOR BBOX:
 1. CAPTURE THE WHOLE PRODUCT: Ensure the entire physical product is inside the box. Do NOT clip or shave off the edges, caps, or sides of the product. Leave a tiny visual margin (padding) around the physical item to ensure it is 100% intact.
 2. EXCLUDE TEXT: DO NOT include the product name, price labels, volume information, or health warnings located below, above, or beside the product.
 3. EXCLUDE PROMOS: DO NOT include promotional banners, ribbons, or discount badges unless they are physically printed onto the product packaging itself.
-4. Coordinates are normalized 0-1:
-   x_min=0 → left edge, x_max=1 → right edge
-   y_min=0 → top edge,  y_max=1 → bottom edge
+4. Coordinates are integers from 0 to 1000:
+   x_min=0 → left edge, x_max=1000 → right edge
+   y_min=0 → top edge,  y_max=1000 → bottom edge
 5. Validation: x_min < x_max and y_min < y_max (set to null if uncertain).
 6. One bbox per item, even if the product appears in multiple places on the page.
 
@@ -78,9 +78,10 @@ For EVERY item, ALSO populate the `tile_bbox` field with a bounding box that enc
 CRITICAL RULES FOR TILE_BBOX:
 1. CAPTURE EVERYTHING: Include the product image, price text, brand name, promo banner/ribbon, description, and any background color/shape that visually groups this item.
 2. TIGHT FIT: The tile_bbox should tightly wrap the full visual area for this item. Do NOT include neighboring products' areas.
-3. Coordinates are normalized 0-1 (same system as bbox).
+3. Coordinates are integers from 0 to 1000 (same system as bbox).
 4. Validation: x_min < x_max and y_min < y_max (set to null if uncertain).
 5. The tile_bbox will ALWAYS be equal to or larger than the bbox for the same item.
+6. Ensure EVERY item has a tile_bbox. If you cannot determine exact boundaries, provide your best estimate rather than null.
 """
 
 
@@ -88,10 +89,10 @@ CRITICAL RULES FOR TILE_BBOX:
 # Pydantic schemas for Gemini structured output
 # ---------------------------------------------------------------------------
 class _BboxSchema(PydanticBaseModel):
-    x_min: float = Field(ge=0.0, le=1.0, description="Left edge, normalized 0-1")
-    y_min: float = Field(ge=0.0, le=1.0, description="Top edge, normalized 0-1")
-    x_max: float = Field(ge=0.0, le=1.0, description="Right edge, normalized 0-1")
-    y_max: float = Field(ge=0.0, le=1.0, description="Bottom edge, normalized 0-1")
+    x_min: int = Field(ge=0, le=1000, description="Left edge, 0=left 1000=right")
+    y_min: int = Field(ge=0, le=1000, description="Top edge, 0=top 1000=bottom")
+    x_max: int = Field(ge=0, le=1000, description="Right edge, 0=left 1000=right")
+    y_max: int = Field(ge=0, le=1000, description="Bottom edge, 0=top 1000=bottom")
 
 
 class _PromoItemSchema(PydanticBaseModel):
@@ -129,8 +130,8 @@ class _PromoItemSchema(PydanticBaseModel):
         description=(
             "Bounding box around the physical product only (bottle, box, package, can). "
             "Exclude text, price labels, and promo badges. Leave a small margin around "
-            "the product. Normalized 0-1 (x=0 left, y=0 top). x_min < x_max, y_min < y_max. "
-            "null if the product cannot be clearly located."
+            "the product. Integer coords 0-1000 (0=left/top, 1000=right/bottom). "
+            "x_min < x_max, y_min < y_max. null if the product cannot be clearly located."
         ),
     )
 
@@ -140,8 +141,8 @@ class _PromoItemSchema(PydanticBaseModel):
         description=(
             "Bounding box around the ENTIRE promo tile area for this item — including "
             "the product image, price label, brand text, promo badge, and background. "
-            "This is always equal to or larger than bbox. Normalized 0-1. "
-            "x_min < x_max, y_min < y_max. null if the tile area is unclear."
+            "This is always equal to or larger than bbox. Integer coords 0-1000. "
+            "x_min < x_max, y_min < y_max. Provide your best estimate — avoid null."
         ),
     )
 
@@ -150,6 +151,38 @@ class _PromoFolderSchema(PydanticBaseModel):
     validity_start: Optional[date] = Field(default=None, description="Folder validity start date")
     validity_end: Optional[date] = Field(default=None, description="Folder validity end date")
     items: list[_PromoItemSchema] = Field(description="All promotional items extracted")
+
+
+# ---------------------------------------------------------------------------
+# Bbox validation schemas (second-pass verification)
+# ---------------------------------------------------------------------------
+
+class _BboxValidationItem(PydanticBaseModel):
+    item_index: int = Field(description="0-based index of the item in the input list")
+    tile_bbox: _BboxSchema = Field(description="Corrected or confirmed tile bounding box (0-1000 coords)")
+    bbox: Optional[_BboxSchema] = Field(default=None, description="Corrected or confirmed product-only bbox (0-1000 coords)")
+    status: str = Field(description="'confirmed' if bbox was already correct, 'corrected' if adjusted, 'added' if was previously missing")
+
+
+class _BboxValidationResult(PydanticBaseModel):
+    items: list[_BboxValidationItem] = Field(description="Validated bounding boxes for each input item")
+
+
+_BBOX_VALIDATION_PROMPT = """You are verifying bounding box accuracy for promo items on a supermarket folder page.
+
+For EACH item listed below, verify that its tile_bbox correctly encompasses the ENTIRE promo tile area
+(product image + price label + brand text + promo badge + background). Also verify the bbox (product-only).
+
+Rules:
+- If the bbox is correct, return it unchanged with status "confirmed"
+- If the bbox is wrong (too small, shifted, covers wrong area), correct it with status "corrected"
+- If the bbox is null/missing, locate the item on the page and provide one with status "added"
+- Coordinates are integers 0-1000 (0=left/top, 1000=right/bottom)
+- tile_bbox must encompass the full promo tile; bbox must tightly wrap the physical product only
+- Return ALL items, even if confirmed unchanged
+
+Items to verify:
+"""
 
 
 # ---------------------------------------------------------------------------
@@ -227,7 +260,7 @@ def extract_batch(
                 model=GEMINI_MODEL,
                 contents=[
                     types.Part.from_bytes(data=batch_pdf, mime_type="application/pdf"),
-                    f"Extract all promotional product offers from these {display_name} promo folder pages.",
+                    f"Extract all promotional product offers from this {display_name} promo folder page.",
                 ],
                 config=types.GenerateContentConfig(
                     system_instruction=full_system_prompt,
@@ -312,7 +345,7 @@ def extract_batch_images(
             parts.append(types.Part.from_bytes(data=img_bytes, mime_type="image/webp"))
         parts.append(
             types.Part.from_text(
-                text=f"Extract all promotional product offers from these {display_name} promo folder pages."
+                text=f"Extract all promotional product offers from this {display_name} promo folder page."
             )
         )
 
@@ -368,6 +401,132 @@ def extract_batch_images(
     return {"items": []}
 
 
+def validate_page_bboxes(
+    client: genai.Client,
+    page_image: bytes,
+    page_number: int,
+    items_on_page: list[dict],
+    display_name: str,
+) -> list[dict]:
+    """Second-pass bbox validation: verify and correct bboxes for items on a single page.
+
+    Sends the page image + list of items with their current bboxes to Gemini,
+    asking it to verify/correct each bbox and fill in missing ones.
+
+    Args:
+        client: Gemini API client
+        page_image: WebP bytes of the page image
+        page_number: 1-indexed page number
+        items_on_page: List of raw item dicts from the extraction pass
+        display_name: Store display name for logging
+
+    Returns:
+        Updated list of item dicts with corrected bbox/tile_bbox values
+    """
+    if not items_on_page:
+        return items_on_page
+
+    label = f"[{display_name} p{page_number} validate]"
+
+    # Build the item list for the validation prompt
+    item_descriptions = []
+    for i, item in enumerate(items_on_page):
+        name = item.get("display_name", "Unknown")
+        tile_bbox = item.get("tile_bbox")
+        bbox = item.get("bbox")
+
+        tile_str = f"[{tile_bbox['x_min']}, {tile_bbox['y_min']}, {tile_bbox['x_max']}, {tile_bbox['y_max']}]" if tile_bbox else "null (LOCATE THIS ITEM)"
+        bbox_str = f"[{bbox['x_min']}, {bbox['y_min']}, {bbox['x_max']}, {bbox['y_max']}]" if bbox else "null"
+
+        item_descriptions.append(f"{i}. \"{name}\" — tile_bbox: {tile_str}, bbox: {bbox_str}")
+
+    items_text = "\n".join(item_descriptions)
+    full_prompt = _BBOX_VALIDATION_PROMPT + items_text
+
+    for attempt in range(1, MAX_RETRIES + 1):
+        delay = RETRY_BASE_DELAY * (2 ** (attempt - 1))
+        if attempt > 1:
+            logger.info(f"{label} Retry {attempt}/{MAX_RETRIES} after {delay}s backoff...")
+            time.sleep(delay)
+
+        try:
+            response = client.models.generate_content(
+                model=GEMINI_MODEL,
+                contents=[
+                    types.Part.from_bytes(data=page_image, mime_type="image/webp"),
+                    types.Part.from_text(text="Verify and correct the bounding boxes for the items listed in the system prompt."),
+                ],
+                config=types.GenerateContentConfig(
+                    system_instruction=full_prompt,
+                    max_output_tokens=MAX_OUTPUT_TOKENS,
+                    temperature=0.0,
+                    thinking_config=types.ThinkingConfig(thinking_level="medium"),
+                    response_mime_type="application/json",
+                    response_schema=_BboxValidationResult,
+                    media_resolution=types.MediaResolution.MEDIA_RESOLUTION_HIGH,
+                ),
+            )
+        except Exception as e:
+            logger.warning(f"{label} API error: {e}")
+            if attempt == MAX_RETRIES:
+                logger.error(f"{label} Validation failed after {MAX_RETRIES} retries, returning original items")
+                return items_on_page
+            continue
+
+        response_text = ""
+        if response.candidates:
+            for part in response.candidates[0].content.parts:
+                if hasattr(part, "text") and part.text:
+                    response_text += part.text
+
+        if not response_text:
+            if attempt == MAX_RETRIES:
+                logger.warning(f"{label} Empty validation response, returning original items")
+                return items_on_page
+            continue
+
+        try:
+            cleaned = re.sub(r',\s*([}\]])', r'\1', response_text)
+            data = json.loads(cleaned)
+        except json.JSONDecodeError as e:
+            logger.warning(f"{label} JSON parse error: {e}")
+            if attempt == MAX_RETRIES:
+                return items_on_page
+            continue
+
+        # Apply validated bboxes back to items
+        validated_items = data.get("items", [])
+        confirmed = corrected = added = 0
+
+        for vi in validated_items:
+            idx = vi.get("item_index")
+            if idx is None or idx < 0 or idx >= len(items_on_page):
+                continue
+
+            status = vi.get("status", "confirmed")
+            if status == "confirmed":
+                confirmed += 1
+            elif status == "corrected":
+                corrected += 1
+            elif status == "added":
+                added += 1
+
+            # Update tile_bbox (convert back to the raw format Gemini returns)
+            new_tile = vi.get("tile_bbox")
+            if new_tile and isinstance(new_tile, dict):
+                items_on_page[idx]["tile_bbox"] = new_tile
+
+            # Update bbox
+            new_bbox = vi.get("bbox")
+            if new_bbox and isinstance(new_bbox, dict):
+                items_on_page[idx]["bbox"] = new_bbox
+
+        logger.info(f"{label} Validation: {confirmed} confirmed, {corrected} corrected, {added} added")
+        return items_on_page
+
+    return items_on_page
+
+
 def extract_promos_from_images(
     page_images: list[tuple[int, bytes]],
     config: Dict[str, Any],
@@ -409,6 +568,38 @@ def extract_promos_from_images(
 
     elapsed = time.time() - start_time
     logger.info(f"All batches complete in {elapsed:.1f}s — {len(all_items)} total items")
+
+    # Validation pass: verify and correct bboxes per page
+    validate = config.get("validate_bboxes", True)
+    if validate and all_items:
+        logger.info("Starting bbox validation pass...")
+        validation_start = time.time()
+
+        # Build a lookup of page_number → image bytes
+        image_lookup = {num: img for num, img in page_images}
+
+        # Group items by page_number
+        from collections import defaultdict
+        items_by_page: dict[int, list[tuple[int, dict]]] = defaultdict(list)
+        for idx, item in enumerate(all_items):
+            pn = item.get("page_number")
+            if pn is not None:
+                items_by_page[pn].append((idx, item))
+
+        for pn, indexed_items in sorted(items_by_page.items()):
+            page_img = image_lookup.get(pn)
+            if not page_img:
+                continue
+
+            page_items = [item for _, item in indexed_items]
+            validated = validate_page_bboxes(client, page_img, pn, page_items, display_name)
+
+            # Write validated items back to all_items
+            for (orig_idx, _), new_item in zip(indexed_items, validated):
+                all_items[orig_idx] = new_item
+
+        validation_elapsed = time.time() - validation_start
+        logger.info(f"Bbox validation complete in {validation_elapsed:.1f}s")
 
     # Deduplicate by display_name (keep first occurrence)
     seen = set()
@@ -573,6 +764,7 @@ def parse_promo_items(
         parent = get_parent_category(granular)
 
         # Extract bbox (product-only, used for image cropping + persisted)
+        # Gemini returns 0-1000 integers; convert to 0-1 floats for storage
         raw_bbox = raw.get("bbox")
         bbox_dict = None
         if raw_bbox and isinstance(raw_bbox, dict):
@@ -585,7 +777,12 @@ def parse_promo_items(
                 and x_max is not None and y_max is not None
                 and x_min < x_max and y_min < y_max
             ):
-                bbox_dict = raw_bbox
+                bbox_dict = {
+                    "x_min": x_min / 1000.0,
+                    "y_min": y_min / 1000.0,
+                    "x_max": x_max / 1000.0,
+                    "y_max": y_max / 1000.0,
+                }
 
         # Extract tile_bbox (full promo tile area, used for tap hotspots)
         raw_tile_bbox = raw.get("tile_bbox")
@@ -600,7 +797,12 @@ def parse_promo_items(
                 and tx_max is not None and ty_max is not None
                 and tx_min < tx_max and ty_min < ty_max
             ):
-                tile_bbox_dict = raw_tile_bbox
+                tile_bbox_dict = {
+                    "x_min": tx_min / 1000.0,
+                    "y_min": ty_min / 1000.0,
+                    "x_max": tx_max / 1000.0,
+                    "y_max": ty_max / 1000.0,
+                }
 
         items.append(
             PromoItem(
@@ -764,7 +966,11 @@ def crop_and_upload_item_images(
     store_id: str,
     enhance: bool = True,
 ) -> None:
-    """Crop each item's product tile, enhance via upscaling, and upload 3 sizes to R2.
+    """Crop each item's product tile from upscaled pages and upload 3 sizes to R2.
+
+    When enhance=True, upscales each *page* once via Replicate, then crops all
+    items from the high-res page. This is far more cost-efficient than upscaling
+    each individual crop (1 Replicate call per page instead of per item).
 
     Sets thumbnail_url, image_url, hero_url on each item that has a valid bbox.
     Items without a bbox are skipped gracefully.
@@ -772,6 +978,23 @@ def crop_and_upload_item_images(
     if not R2_PUBLIC_BASE_URL:
         logger.warning("R2_PUBLIC_BASE_URL not set — skipping image upload")
         return
+
+    # Pre-upscale pages that have items with bboxes (1 Replicate call per page)
+    upscaled_pages: dict[int, Image.Image] = {}
+    if enhance and REPLICATE_API_TOKEN:
+        pages_needed = {
+            item.page_number
+            for item in items
+            if item.bbox and item.page_number and item.page_number in page_images
+        }
+        logger.info(f"Upscaling {len(pages_needed)} pages via Replicate (1 call per page)...")
+        for page_num in sorted(pages_needed):
+            try:
+                page_img = Image.open(io.BytesIO(page_images[page_num])).convert("RGB")
+                upscaled = _upscale_image(page_img, item_label=f"page {page_num}")
+                upscaled_pages[page_num] = upscaled
+            except Exception as e:
+                logger.warning(f"Page {page_num} upscale failed: {e} — will use original resolution")
 
     uploaded = 0
     skipped_no_bbox = 0
@@ -793,22 +1016,25 @@ def crop_and_upload_item_images(
         x_max = bbox.get("x_max", 0)
         y_max = bbox.get("y_max", 0)
 
-        # Validate bbox geometry and minimum area (0.5% of page)
+        # Validate bbox geometry and minimum area
         if x_min >= x_max or y_min >= y_max:
             skipped_invalid += 1
             continue
         area = (x_max - x_min) * (y_max - y_min)
-        if area < 0.005:
+        if area < 0.0025:  # 0.25% of page area — allow smaller items
             skipped_invalid += 1
             continue
 
-        # Open page image and crop
-        try:
-            page_img = Image.open(io.BytesIO(page_images[page_num])).convert("RGB")
-        except Exception as e:
-            logger.warning(f"Could not open page {page_num} image: {e}")
-            skipped_invalid += 1
-            continue
+        # Use upscaled page if available, otherwise fall back to original
+        if page_num in upscaled_pages:
+            page_img = upscaled_pages[page_num]
+        else:
+            try:
+                page_img = Image.open(io.BytesIO(page_images[page_num])).convert("RGB")
+            except Exception as e:
+                logger.warning(f"Could not open page {page_num} image: {e}")
+                skipped_invalid += 1
+                continue
 
         pw, ph = page_img.size
 
@@ -825,16 +1051,6 @@ def crop_and_upload_item_images(
             continue
 
         crop = page_img.crop((x1, y1, x2, y2))
-
-        # Enhance the crop: upscale via Recraft
-        if enhance and REPLICATE_API_TOKEN:
-            try:
-                logger.info(f"Enhancing image for '{item.display_name[:40]}'...")
-                crop = enhance_item_image(crop, item_label=item.display_name[:50])
-            except Exception as e:
-                logger.warning(f"Enhancement failed for '{item.display_name[:40]}': {e} — skipping image")
-                skipped_invalid += 1
-                continue
 
         # Pad to square for uniform display in iOS grid
         crop = _pad_to_square(crop)
