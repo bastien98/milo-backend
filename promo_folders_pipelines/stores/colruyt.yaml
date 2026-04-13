@@ -43,6 +43,5 @@ promo_mechanisms:
 
 
 price_calculation_table: null
-extra_rules:
-  - "SKIP items whose only promotion is 'Rode Prijzen' or 'Laagste Prijs' — these are Colruyt's permanent price-match guarantees, not time-limited promotional deals. Only extract items with a real promotional mechanism (1+1, -25%, 2e halve prijs, etc.)."
+extra_rules: []
 validation_checklist: []

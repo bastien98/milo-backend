@@ -117,13 +117,13 @@ def _build_extraction_rules(config: Dict[str, Any], categories_list: str) -> str
 
     return f"""## EXTRACTION RULES
 
-### QUALITY GATE — READ THIS FIRST
-Only extract items that are **time-limited promotional deals** with clear pricing.
-- Items MUST have a visible original_price AND promo_price on the page. SKIP items without both prices.
-- Items MUST have a clear promotional mechanism (1+1, -25%, etc.). SKIP items without one.
-- SKIP items that are permanent price guarantees (e.g., "Rode Prijzen", "Laagste Prijs", "Prix le plus bas") — these are NOT time-limited promos.
-- SKIP decorative elements, recipe suggestions, store information, and non-promotional content.
-- Quality over quantity: it is better to extract fewer, complete items than many incomplete ones.
+### COVERAGE GOAL — READ THIS FIRST
+Extract EVERY product that has ANY promotional offer, deal, or reduced price on the page.
+- Coverage is the top priority: extract ALL promo items on the page.
+- If only one price is visible (no original_price), set original_price = promo_price.
+- If the promo mechanism is unclear, use "Promo" as display_mechanism.
+- DO extract fresh produce, butcher/deli items, and store-brand items — these are promos too.
+- ONLY skip purely decorative elements, recipes, or store information that are clearly NOT product offers.
 
 ### For Each Promotional Item Extract:
 
@@ -148,8 +148,8 @@ Only extract items that are **time-limited promotional deals** with clear pricin
      - "Coca-Cola Zero 1,5 L" (just "Zero 1,5 L" is meaningless)
      - "Jupiler Pils 24 x 25 cl" (just "Pils 24 x 25 cl" is too generic)
 
-2. **original_price**: Regular price before promo (float, comma→dot). REQUIRED — skip item if not visible.
-   Round to 2 decimal places.{price_table}
+2. **original_price**: Regular price before promo (float, comma→dot).
+   If not visible, set equal to promo_price. Round to 2 decimal places.{price_table}
 
 3. **promo_price**: Price of ONE item/pack as shown on the shelf (float, comma→dot). REQUIRED.
    - For simple discounts (-25%, -30%): original_price × (1 − discount percentage)
@@ -246,19 +246,14 @@ def _build_validation_checklist(config: Dict[str, Any]) -> str:
     lines = [
         "## VALIDATION CHECKLIST",
         "Before outputting each item, verify:",
-        "- display_name is Title Case, includes brand + product + variant + size (no promo text or pricing)",
-        "- display_name includes size/volume for drinks and packaged foods — do NOT output a drink without volume (e.g., '33 cl', '6 x 25 cl', '1,5 L')",
-        "- original_price AND promo_price are both present and positive",
-        "- promo_price ≤ original_price (if not, something is wrong — recheck)",
-        "- savings_amount is positive and matches the mechanism logic",
+        "- display_name is Title Case, includes product + variant + size (no promo text or pricing)",
+        "- Include size/volume for drinks and packaged foods when visible (e.g., '33 cl', '6 x 25 cl', '1,5 L')",
+        "- At least promo_price is present and positive",
         "- All prices rounded to 2 decimal places (no 3+ decimals)",
         "- display_mechanism is clean and standardized (not raw OCR text)",
-        "- display_mechanism includes 'Vanaf X ...' when the discount requires buying multiple items (do NOT use bare '-25%' for multi-buy deals)",
-        "- display_description is understandable without seeing the folder, max ~80 chars",
+        "- display_mechanism includes 'Vanaf X ...' when the discount requires buying multiple items",
         "- display_unit_price computed when any size info is visible on the page",
-        "- display_savings_label is a human-friendly savings text",
         "- granular_category is from the provided list",
-        "- Item is a TIME-LIMITED promo, not a permanent price guarantee",
         "- If multiple brands share a promo, split into separate items",
         "- normalized_brand is lowercase, matches the brand visible on the page (NEVER 'in-house')",
         "- display_brand is Title Case version of normalized_brand",

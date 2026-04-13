@@ -36,6 +36,5 @@ promo_mechanisms:
 
 price_calculation_table: null
 extra_rules:
-  - "SKIP items whose only promotion is 'Rode Prijzen' or 'Laagste Prijs' — these are Colruyt Group permanent price-match guarantees, not time-limited promotional deals."
   - "Spar is a smaller-format Colruyt Group store. Its folders share the same visual style as Colruyt with per-item pricing."
 validation_checklist: []

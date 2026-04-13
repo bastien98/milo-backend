@@ -82,6 +82,7 @@ CRITICAL RULES FOR TILE_BBOX:
 4. Validation: x_min < x_max and y_min < y_max (set to null if uncertain).
 5. The tile_bbox will ALWAYS be equal to or larger than the bbox for the same item.
 6. Ensure EVERY item has a tile_bbox. If you cannot determine exact boundaries, provide your best estimate rather than null.
+7. NO OVERLAPS: Tile bounding boxes must NOT overlap each other. Each tile_bbox should cover only its own product's area. If two items are adjacent, their tile_bbox edges should meet but not cross. Adjust boundaries to eliminate any overlap.
 """
 
 
@@ -99,8 +100,8 @@ class _PromoItemSchema(PydanticBaseModel):
     # --- Display fields (all required except display_unit_price) ---
     display_name: str = Field(description="Clean Title Case product label: product + variant + size. Omit brand when product is identifiable without it (e.g., 'Chips Explosions Salt & Pepper 150 g' not 'Croky Chips...'). Keep brand when it IS the product identity (e.g., 'Coca-Cola Zero 1,5 L' — 'Zero 1,5 L' alone is meaningless). ALWAYS include size/quantity when visible. For drinks, volume is CRITICAL (e.g., '33 cl', '6 x 25 cl', '1,5 L'). No promo text or pricing.")
     display_mechanism: str = Field(description="Standardized promo label. Title case, consistent formatting. For conditional percentage discounts, ALWAYS include the condition (e.g., '-25% Vanaf 2 Verpakkingen', NOT just '-25%'). Only use bare '-25%' if the discount applies to a single item with no minimum purchase. Examples: '1+1 Gratis', '-25%', '-25% Vanaf 2 Verpakkingen', '-20% Vanaf 3 Flessen', '-30% Vanaf 12 Blikken', '2e aan Halve Prijs', '2+1 Gratis', 'Prijsverlaging'.")
-    display_description: str = Field(description="Plain-language Dutch explanation of the deal (~80 chars max). Explain what the shopper needs to DO and what they GET. Examples: 'Koop 2 en krijg de 3e gratis', 'Nu €0.80 goedkoper per stuk'. Must be understandable without seeing the folder.")
-    display_savings_label: str = Field(description="Human-friendly savings text. Examples: '1 Gratis Item', 'Bespaar €3.00', 'Tot -25% Korting', '2e aan Halve Prijs'.")
+    display_description: Optional[str] = Field(default=None, description="Plain-language Dutch explanation of the deal (~80 chars max). Explain what the shopper needs to DO and what they GET. Examples: 'Koop 2 en krijg de 3e gratis', 'Nu €0.80 goedkoper per stuk'. null if unclear.")
+    display_savings_label: Optional[str] = Field(default=None, description="Human-friendly savings text. Examples: '1 Gratis Item', 'Bespaar €3.00', 'Tot -25% Korting', '2e aan Halve Prijs'. null if unclear.")
     display_unit_price: Optional[str] = Field(default=None, description="Price per standard unit computed from promo_price and size info visible on the page. Use Belgian units: €/L for drinks, €/kg for food, €/stuk for countable items, €/rol for paper products, €/stuk for tea bags/tabs/doekjes. For wine assume 75 cl, for beer blik assume 33 cl. Format: '€X.XX/unit'. null ONLY if no size info whatsoever.")
 
     # --- Brand identification ---
@@ -111,9 +112,9 @@ class _PromoItemSchema(PydanticBaseModel):
     price_reasoning: str = Field(description="Show your work: what is the promo mechanism, what prices are visible on the page, and how you calculated promo_price and savings_amount step by step. This field is not displayed to users.")
 
     # --- Pricing (all required, non-negative) ---
-    original_price: float = Field(ge=0, description="Regular price before promo, rounded to 2 decimal places. REQUIRED — skip item if not visible.")
+    original_price: Optional[float] = Field(default=0.0, ge=0, description="Regular price before promo, rounded to 2 decimal places. If not visible, set equal to promo_price.")
     promo_price: float = Field(ge=0, description="Price of ONE item/pack as shown on shelf. For ANY X+Y gratis deal (1+1, 2+1, 3+3, 4+1, 12+6, etc.): ALWAYS same as original_price. For -25%: original_price × 0.75. For X voor €Y: €Y ÷ X. Rounded to 2 decimal places.")
-    savings_amount: float = Field(ge=0, description="Total euro savings when completing the deal. For 1+1 @ €3: savings=3.00. For 2+1 @ €3: savings=3.00. For -25% @ €4: savings=1.00. For 2e halve prijs @ €3: savings=1.50. For 12+6 gratis @ €2.33: savings=13.98. Rounded to 2 decimal places.")
+    savings_amount: Optional[float] = Field(default=0.0, ge=0, description="Total euro savings when completing the deal. 0.0 if unknown.")
 
     # --- Purchase quantity (for promo depth calculation) ---
     min_purchase_qty: int = Field(ge=1, description="Minimum number of items/packs a shopper must buy to complete the deal. For 1+1 Gratis: 2. For 2+1 Gratis: 3. For 12+6 Gratis: 18. For 2e aan Halve Prijs: 2. For 2e aan -70%: 2. For -25%: 1. For -25% Vanaf 2 Verpakkingen: 2. For -30% Vanaf 12 Blikken: 12. For Prijsverlaging: 1. For 3 voor €5: 3.")

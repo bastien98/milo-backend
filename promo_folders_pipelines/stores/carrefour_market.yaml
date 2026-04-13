@@ -75,8 +75,8 @@ price_calculation_table: |
 extra_rules:
   - "Carrefour Market folders often show deal bundles with the TOTAL quantity and price for all items (including free ones). Always extract PER-ITEM pricing. See PRICE EXTRACTION section for details."
   - "Volume deals frequently include the phrase 'naar keuze' (of your choice / mix & match). Strip 'naar keuze' from the product name, but ensure the promo mechanism is still recognized."
-  - "Spaar/stamp campaigns (e.g., 'Spaar voor Pyrex aan 1€', '+5 zegels') are NOT time-limited promos — SKIP them."
-  - "Loyalty point bonuses (e.g., '150 bonus Punten bij aankoop van 3') are NOT price discounts — SKIP them unless there is also a price reduction."
+  - "Spaar/stamp campaigns (e.g., 'Spaar voor Pyrex aan 1€', '+5 zegels') — extract these with display_mechanism 'Spaaractie'."
+  - "Loyalty point bonuses (e.g., '150 bonus Punten bij aankoop van 3') — extract these with display_mechanism 'Bonus Punten'."
 validation_checklist:
   - "For X+Y Gratis deals: original_price is the PER-ITEM shelf price, NOT the bundle total. promo_price = original_price."
   - "display_name shows single unit size (e.g., '75 ml'), NOT the deal bundle quantity (e.g., NOT '4 x 75 ml')."
