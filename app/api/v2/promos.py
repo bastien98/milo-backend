@@ -105,10 +105,12 @@ _FOLDERS_CACHE_TTL = 3600  # 1 hour
 R2_PUBLIC_BASE_URL = os.environ.get("R2_PUBLIC_BASE_URL", "")
 
 
-def _query_hotspots_by_retailer(today_str: str) -> dict[str, list[PromoFolderHotspot]]:
-    """Query promo items with tile bounding boxes, grouped by (retailer, page_number).
+def _query_hotspots_by_folder_url(today_str: str) -> dict[str, list[PromoFolderHotspot]]:
+    """Query promo items with tile bounding boxes, grouped by (promo_folder_url, page_number).
 
-    Returns a dict keyed by "{retailer}:{page_number}" → list of hotspots.
+    Returns a dict keyed by "{promo_folder_url}:{page_number}" → list of hotspots.
+    The folder URL matches the per-folder R2 metadata.json source_url, which is
+    what the client-facing response builder uses to attach hotspots to pages.
     """
     import psycopg2
 
@@ -132,7 +134,7 @@ def _query_hotspots_by_retailer(today_str: str) -> dict[str, list[PromoFolderHot
         cur.execute(
             """
             SELECT
-                id, source_retailer, page_number,
+                id, source_retailer, page_number, promo_folder_url,
                 tile_bbox_x_min, tile_bbox_y_min, tile_bbox_x_max, tile_bbox_y_max,
                 display_name, display_brand, display_mechanism,
                 original_price, promo_price, savings_amount, promo_depth,
@@ -147,7 +149,7 @@ def _query_hotspots_by_retailer(today_str: str) -> dict[str, list[PromoFolderHot
         )
         for row in cur.fetchall():
             (
-                item_id, retailer, page_number,
+                item_id, retailer, page_number, promo_folder_url,
                 tx_min, ty_min, tx_max, ty_max,
                 display_name, display_brand, display_mechanism,
                 original_price, promo_price, savings_amount, promo_depth,
@@ -177,7 +179,7 @@ def _query_hotspots_by_retailer(today_str: str) -> dict[str, list[PromoFolderHot
                 image_url=image_url,
                 store_name=retailer,
             )
-            key = f"{retailer}:{page_number}"
+            key = f"{promo_folder_url}:{page_number}"
             hotspots_map.setdefault(key, []).append(hotspot)
 
         cur.close()
@@ -207,7 +209,7 @@ def _build_folders_response() -> PromoFoldersResponse:
     today = date.today().isoformat()
 
     # Query all hotspots once (single DB call)
-    hotspots_map = _query_hotspots_by_retailer(today)
+    hotspots_map = _query_hotspots_by_folder_url(today)
 
     folders: list[PromoFolderInfo] = []
 
@@ -248,12 +250,16 @@ def _build_folders_response() -> PromoFoldersResponse:
             if page_count == 0:
                 continue
 
-            # Build page image URLs with hotspots
+            folder_source_url = metadata.get("source_url", "")
+
+            # Build page image URLs with hotspots keyed per-folder by source_url.
+            # If source_url is missing, pages render with no hotspots rather than
+            # leaking hotspots from sibling folders of the same store.
             pages = [
                 PromoFolderPage(
                     page_number=i,
                     image_url=f"{R2_PUBLIC_BASE_URL}/{R2_PREFIX}{safe_id}/{folder_dir}/page_{i:03d}.webp",
-                    hotspots=hotspots_map.get(f"{store_id}:{i}", []),
+                    hotspots=hotspots_map.get(f"{folder_source_url}:{i}", []) if folder_source_url else [],
                 )
                 for i in range(1, page_count + 1)
             ]
@@ -265,7 +271,7 @@ def _build_folders_response() -> PromoFoldersResponse:
                 store_id=store_id,
                 store_display_name=display_name,
                 folder_name=metadata.get("folder_name", folder_dir.replace("_", " ").title()),
-                source_url=metadata.get("source_url", ""),
+                source_url=folder_source_url,
                 validity_start=metadata.get("validity_start", ""),
                 validity_end=validity_end,
                 page_count=page_count,

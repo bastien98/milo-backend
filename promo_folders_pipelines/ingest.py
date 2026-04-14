@@ -140,6 +140,15 @@ def _collect_pdfs_from_r2(
                 )
                 sys.exit(1)
 
+            if not metadata[pdf].get("promo_folder_url"):
+                logger.error(
+                    f"PDF '{pdf}' in {store_id}/{w}/metadata.json is missing "
+                    f"'promo_folder_url'. Every PDF entry must carry the per-folder "
+                    f"promopromo URL (matching the folder's R2 metadata.json source_url) "
+                    f"so hotspots can be scoped to the correct folder."
+                )
+                sys.exit(1)
+
             pdf_refs.append({
                 "store_id": store_id,
                 "week": w,
@@ -260,7 +269,7 @@ def main():
         items = run_pipeline(
             store_id=args.store,
             pdf_data=pdf_data,
-            promo_folder_url=meta.get("promo_folder_url"),
+            promo_folder_url=meta["promo_folder_url"],
             dry_run=args.dry_run,
             pdf_label=label,
         )

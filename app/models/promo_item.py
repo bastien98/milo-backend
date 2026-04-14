@@ -44,7 +44,7 @@ class PromoItem(Base):
     source_retailer: Mapped[str] = mapped_column(String, nullable=False)
     source_type: Mapped[str] = mapped_column(String, nullable=False, default="folder")
     page_number: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
-    promo_folder_url: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    promo_folder_url: Mapped[str] = mapped_column(Text, nullable=False)
 
     validity_start: Mapped[date_type] = mapped_column(Date, nullable=False)
     validity_end: Mapped[date_type] = mapped_column(Date, nullable=False)

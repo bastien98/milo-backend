@@ -44,7 +44,7 @@ PdfData = bytes
 GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "")
 
 GEMINI_MODEL = "gemini-3-pro-preview"
-MAX_OUTPUT_TOKENS = 32768
+MAX_OUTPUT_TOKENS = 65536
 PAGES_PER_BATCH = 1  # Single page per Gemini call for maximum bbox accuracy
 MAX_BATCH_BYTES = 1_500_000  # 1.5 MB — split oversized batches into single pages
 MAX_RETRIES = 4
@@ -347,6 +347,9 @@ def extract_batch_images(
             )
         )
 
+        # Bump temperature on retries to avoid deterministic truncation
+        temp = 0.0 if attempt == 1 else 0.2
+
         try:
             response = client.models.generate_content(
                 model=GEMINI_MODEL,
@@ -354,7 +357,7 @@ def extract_batch_images(
                 config=types.GenerateContentConfig(
                     system_instruction=full_system_prompt,
                     max_output_tokens=MAX_OUTPUT_TOKENS,
-                    temperature=0.0,
+                    temperature=temp,
                     thinking_config=types.ThinkingConfig(thinking_level="high"),
                     response_mime_type="application/json",
                     response_schema=_PromoFolderSchema,
@@ -403,6 +406,37 @@ def extract_batch_images(
         return data
 
     return {"items": []}
+
+
+def _iou(a: dict | None, b: dict | None) -> float:
+    """Intersection-over-union for two bbox dicts in the 0-1000 coord system."""
+    if not a or not b:
+        return 0.0
+    ix1 = max(a["x_min"], b["x_min"])
+    iy1 = max(a["y_min"], b["y_min"])
+    ix2 = min(a["x_max"], b["x_max"])
+    iy2 = min(a["y_max"], b["y_max"])
+    iw = max(0, ix2 - ix1)
+    ih = max(0, iy2 - iy1)
+    inter = iw * ih
+    area_a = max(0, a["x_max"] - a["x_min"]) * max(0, a["y_max"] - a["y_min"])
+    area_b = max(0, b["x_max"] - b["x_min"]) * max(0, b["y_max"] - b["y_min"])
+    union = area_a + area_b - inter
+    return inter / union if union > 0 else 0.0
+
+
+def _contains(outer: dict | None, inner: dict | None) -> bool:
+    if not outer or not inner:
+        return False
+    return (
+        inner["x_min"] >= outer["x_min"]
+        and inner["y_min"] >= outer["y_min"]
+        and inner["x_max"] <= outer["x_max"]
+        and inner["y_max"] <= outer["y_max"]
+    )
+
+
+IOU_REJECT_THRESHOLD = 0.3
 
 
 def validate_page_bboxes(
@@ -464,7 +498,7 @@ def validate_page_bboxes(
                     system_instruction=full_prompt,
                     max_output_tokens=MAX_OUTPUT_TOKENS,
                     temperature=0.0,
-                    thinking_config=types.ThinkingConfig(thinking_level="medium"),
+                    thinking_config=types.ThinkingConfig(thinking_level="high"),
                     response_mime_type="application/json",
                     response_schema=_BboxValidationResult,
                     media_resolution=types.MediaResolution.MEDIA_RESOLUTION_HIGH,
@@ -515,15 +549,51 @@ def validate_page_bboxes(
             elif status == "added":
                 added += 1
 
-            # Update tile_bbox (convert back to the raw format Gemini returns)
+            orig_tile = items_on_page[idx].get("tile_bbox")
+            orig_bbox = items_on_page[idx].get("bbox")
+
+            # tile_bbox: reject drastic corrections, keep original on null regression
             new_tile = vi.get("tile_bbox")
             if new_tile and isinstance(new_tile, dict):
-                items_on_page[idx]["tile_bbox"] = new_tile
+                if orig_tile:
+                    iou = _iou(orig_tile, new_tile)
+                    if iou < IOU_REJECT_THRESHOLD:
+                        logger.warning(
+                            f"{label} Rejecting tile_bbox correction for item {idx} "
+                            f"('{items_on_page[idx].get('display_name', '?')}'): IoU={iou:.2f} "
+                            f"below threshold {IOU_REJECT_THRESHOLD}"
+                        )
+                    else:
+                        items_on_page[idx]["tile_bbox"] = new_tile
+                else:
+                    items_on_page[idx]["tile_bbox"] = new_tile
+            # else: validator returned null — keep original (null-regression guard)
 
-            # Update bbox
+            # bbox: same guards
             new_bbox = vi.get("bbox")
             if new_bbox and isinstance(new_bbox, dict):
-                items_on_page[idx]["bbox"] = new_bbox
+                if orig_bbox:
+                    iou = _iou(orig_bbox, new_bbox)
+                    if iou < IOU_REJECT_THRESHOLD:
+                        logger.warning(
+                            f"{label} Rejecting bbox correction for item {idx} "
+                            f"('{items_on_page[idx].get('display_name', '?')}'): IoU={iou:.2f} "
+                            f"below threshold {IOU_REJECT_THRESHOLD}"
+                        )
+                    else:
+                        items_on_page[idx]["bbox"] = new_bbox
+                else:
+                    items_on_page[idx]["bbox"] = new_bbox
+
+            # Containment clip: bbox must sit inside tile_bbox. If not, fall back to tile_bbox.
+            final_tile = items_on_page[idx].get("tile_bbox")
+            final_bbox = items_on_page[idx].get("bbox")
+            if final_bbox and final_tile and not _contains(final_tile, final_bbox):
+                logger.warning(
+                    f"{label} bbox for item {idx} not contained in tile_bbox — "
+                    f"falling back bbox := tile_bbox"
+                )
+                items_on_page[idx]["bbox"] = dict(final_tile)
 
         logger.info(f"{label} Validation: {confirmed} confirmed, {corrected} corrected, {added} added")
         return items_on_page
@@ -606,27 +676,10 @@ def extract_promos_from_images(
         validation_elapsed = time.time() - validation_start
         logger.info(f"Bbox validation complete in {validation_elapsed:.1f}s")
 
-    # Deduplicate: only remove cross-page duplicates (bilingual NL/FR).
-    # Same name on the SAME page = different products (e.g., different beer brands).
-    seen_names: dict[str, int] = {}  # name → first page seen
-    deduped = []
-    for item in all_items:
-        name = (item.get("display_name") or "").lower().strip()
-        page = item.get("page_number")
-        if name and name in seen_names and seen_names[name] != page:
-            logger.info(f"Dedup: dropping cross-page duplicate '{name}' (first on p{seen_names[name]}, dup on p{page})")
-            continue
-        if name and name not in seen_names:
-            seen_names[name] = page
-        deduped.append(item)
-
-    if len(deduped) < len(all_items):
-        logger.info(f"Deduplicated: {len(all_items)} → {len(deduped)} items")
-
     return {
         "validity_start": validity_start,
         "validity_end": validity_end,
-        "items": deduped,
+        "items": all_items,
     }
 
 
@@ -657,27 +710,10 @@ def extract_promos_from_pdf(pdf_data: bytes, config: Dict[str, Any]) -> dict:
     elapsed = time.time() - start_time
     logger.info(f"All batches complete in {elapsed:.1f}s — {len(all_items)} total items")
 
-    # Deduplicate: only remove cross-page duplicates (bilingual NL/FR).
-    # Same name on the SAME page = different products (e.g., different beer brands).
-    seen_names: dict[str, int] = {}  # name → first page seen
-    deduped = []
-    for item in all_items:
-        name = (item.get("display_name") or "").lower().strip()
-        page = item.get("page_number")
-        if name and name in seen_names and seen_names[name] != page:
-            logger.info(f"Dedup: dropping cross-page duplicate '{name}' (first on p{seen_names[name]}, dup on p{page})")
-            continue
-        if name and name not in seen_names:
-            seen_names[name] = page
-        deduped.append(item)
-
-    if len(deduped) < len(all_items):
-        logger.info(f"Deduplicated: {len(all_items)} → {len(deduped)} items")
-
     return {
         "validity_start": validity_start,
         "validity_end": validity_end,
-        "items": deduped,
+        "items": all_items,
     }
 
 
