@@ -219,7 +219,7 @@ def process_retailer(
         source_url = f"https://www.promopromo.be/nl/{folder.shop_slug}-folder/{folder.uuid}/0"
         items = parse_promo_items(raw_data, canonical_store_id, source_url)
 
-        # Step 6.5: Crop item images, enhance via Replicate FLUX, and upload to R2
+        # Step 6.5: Crop item images and upload to R2
         page_images_dict = {num: img for num, img in page_images}
         crop_and_upload_item_images(items, page_images_dict, r2, canonical_store_id, folder_index=idx)
 

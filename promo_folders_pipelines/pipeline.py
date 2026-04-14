@@ -5,7 +5,6 @@ Shared functions for PDF splitting, Gemini extraction (structured output),
 parsing, and PostgreSQL upsert.
 """
 
-import base64
 import hashlib
 import io
 import json
@@ -20,7 +19,6 @@ import fitz  # PyMuPDF
 from google import genai
 from google.genai import types
 import httpx
-import replicate as replicate_lib
 from PIL import Image
 from pydantic import BaseModel as PydanticBaseModel, Field
 
@@ -861,72 +859,6 @@ def generate_record_id(item: PromoItem) -> str:
 
 
 # ---------------------------------------------------------------------------
-# Image enhancement via Recraft (upscale)
-# ---------------------------------------------------------------------------
-REPLICATE_API_TOKEN = os.environ.get("REPLICATE_API_TOKEN", "")
-def _upscale_image(crop: Image.Image, item_label: str = "") -> Image.Image:
-    """Upscale a cropped product image 4x using Recraft Crisp Upscale on Replicate.
-
-    Returns an RGB image at 4x the input resolution.
-    """
-    buf = io.BytesIO()
-    crop.save(buf, format="PNG")
-    buf.seek(0)
-    image_data_uri = "data:image/png;base64," + base64.b64encode(buf.read()).decode()
-
-    for attempt in range(1, MAX_RETRIES + 1):
-        delay = RETRY_BASE_DELAY * (2 ** (attempt - 1))
-        label = f"[Upscale {item_label}]" if item_label else "[Upscale]"
-
-        if attempt > 1:
-            logger.info(f"{label} Retry {attempt}/{MAX_RETRIES} after {delay}s backoff...")
-            time.sleep(delay)
-
-        try:
-            output = replicate_lib.run(
-                "recraft-ai/recraft-crisp-upscale",
-                input={"image": image_data_uri},
-            )
-
-            image_url = output[0] if isinstance(output, list) else output
-            resp = httpx.get(str(image_url), timeout=120)
-            resp.raise_for_status()
-            result = Image.open(io.BytesIO(resp.content)).convert("RGB")
-            logger.info(f"{label} Upscaled {crop.size[0]}x{crop.size[1]} → {result.size[0]}x{result.size[1]}")
-            return result
-
-        except Exception as e:
-            logger.warning(f"{label} Attempt {attempt} failed: {e}")
-            if attempt == MAX_RETRIES:
-                raise RuntimeError(
-                    f"Upscale failed after {MAX_RETRIES} retries for: {item_label}"
-                ) from e
-
-    raise RuntimeError(f"Upscale failed after {MAX_RETRIES} retries for: {item_label}")
-
-
-def enhance_item_image(
-    crop: Image.Image,
-    item_label: str = "",
-) -> Image.Image:
-    """Enhance a cropped product image by upscaling 4x via Recraft Crisp Upscale on Replicate.
-
-    Raises on failure after retries.
-    """
-    w, h = crop.size
-    if w < 64 or h < 64:
-        raise RuntimeError(
-            f"Crop too small ({w}x{h}) for enhancement: {item_label}"
-        )
-
-    label = f"[Enhance {item_label}]" if item_label else "[Enhance]"
-
-    upscaled = _upscale_image(crop, item_label)
-    logger.info(f"{label} Enhanced successfully ({upscaled.size[0]}x{upscaled.size[1]})")
-    return upscaled
-
-
-# ---------------------------------------------------------------------------
 # Page image rendering + item image cropping
 # ---------------------------------------------------------------------------
 def _render_pdf_pages(pdf_data: bytes, dpi: int = 150) -> dict[int, bytes]:
@@ -969,14 +901,9 @@ def crop_and_upload_item_images(
     page_images: dict[int, bytes],
     r2: R2PromoStorage,
     store_id: str,
-    enhance: bool = True,
     folder_index: int = 1,
 ) -> None:
-    """Crop each item's product tile from upscaled pages and upload 3 sizes to R2.
-
-    When enhance=True, upscales each *page* once via Replicate, then crops all
-    items from the high-res page. This is far more cost-efficient than upscaling
-    each individual crop (1 Replicate call per page instead of per item).
+    """Crop each item's product tile from pages and upload 3 sizes to R2.
 
     Sets thumbnail_url, image_url, hero_url on each item that has a valid bbox.
     Items without a bbox are skipped gracefully.
@@ -984,34 +911,6 @@ def crop_and_upload_item_images(
     if not R2_PUBLIC_BASE_URL:
         logger.warning("R2_PUBLIC_BASE_URL not set — skipping image upload")
         return
-
-    # Pre-upscale pages that have items with bboxes (1 Replicate call per page)
-    upscaled_pages: dict[int, Image.Image] = {}
-    if enhance and REPLICATE_API_TOKEN:
-        pages_needed = {
-            item.page_number
-            for item in items
-            if item.bbox and item.page_number and item.page_number in page_images
-        }
-        logger.info(f"Upscaling {len(pages_needed)} pages via Replicate (1 call per page)...")
-        for page_num in sorted(pages_needed):
-            try:
-                page_img = Image.open(io.BytesIO(page_images[page_num])).convert("RGB")
-                upscaled = _upscale_image(page_img, item_label=f"page {page_num}")
-                upscaled_pages[page_num] = upscaled
-
-                # Replace original page in R2 with upscaled version
-                try:
-                    buf = io.BytesIO()
-                    upscaled.save(buf, format="WEBP", quality=85)
-                    safe_id = store_id.replace(" ", "_")
-                    r2_key = f"{R2_PREFIX}{safe_id}/folder_{folder_index}/page_{page_num:03d}.webp"
-                    r2.upload_image(r2_key, buf.getvalue())
-                    logger.info(f"[Upscale page {page_num}] Replaced in R2 ({len(buf.getvalue()) / 1000:.0f} KB)")
-                except Exception as upload_err:
-                    logger.warning(f"[Upscale page {page_num}] Failed to replace in R2: {upload_err}")
-            except Exception as e:
-                logger.warning(f"Page {page_num} upscale failed: {e} — will use original resolution")
 
     uploaded = 0
     skipped_no_bbox = 0
@@ -1042,16 +941,12 @@ def crop_and_upload_item_images(
             skipped_invalid += 1
             continue
 
-        # Use upscaled page if available, otherwise fall back to original
-        if page_num in upscaled_pages:
-            page_img = upscaled_pages[page_num]
-        else:
-            try:
-                page_img = Image.open(io.BytesIO(page_images[page_num])).convert("RGB")
-            except Exception as e:
-                logger.warning(f"Could not open page {page_num} image: {e}")
-                skipped_invalid += 1
-                continue
+        try:
+            page_img = Image.open(io.BytesIO(page_images[page_num])).convert("RGB")
+        except Exception as e:
+            logger.warning(f"Could not open page {page_num} image: {e}")
+            skipped_invalid += 1
+            continue
 
         pw, ph = page_img.size
 
