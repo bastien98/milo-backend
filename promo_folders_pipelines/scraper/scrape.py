@@ -207,9 +207,9 @@ def download_page_images(folder_pages: FolderPages) -> list[tuple[int, bytes]]:
     results = []
 
     with httpx.Client(timeout=HTTP_TIMEOUT, follow_redirects=True) as client:
-        for page in folder_pages.pages:
+        for position, page in enumerate(folder_pages.pages, start=1):
             url = page["url"]
-            page_num = page["index"] + 1  # 1-indexed for filenames
+            page_num = position  # 1-indexed based on sorted order
             logger.info(
                 f"Downloading page {page_num}/{folder_pages.page_count}: {url[:80]}..."
             )
