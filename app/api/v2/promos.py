@@ -1,96 +1,128 @@
-"""Weekly promo reports, search, and folder browsing endpoints."""
+"""Promo folder browsing, similar-promo recommendations, and interaction telemetry."""
 
 import logging
 import os
 import time
-from datetime import date
-from typing import List, Optional, Tuple
+from datetime import date, datetime, timezone
+from typing import Optional, Tuple
 
-from fastapi import APIRouter, Depends, HTTPException, Response, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.deps import get_db, get_current_db_user
-from app.core.stores import ALL_STORE_NAMES, STORE_DISPLAY_NAMES, STORE_HAS_PROMOS
+from app.api.deps import get_db, get_optional_db_user
+from app.core.stores import STORE_DISPLAY_NAMES
+from app.db.repositories.enriched_profile_repo import EnrichedProfileRepository
+from app.db.repositories.promo_interaction_event_repo import (
+    PromoInteractionEventRepository,
+)
 from app.models.user import User
 from app.schemas.promo import (
     PromoFolderHotspot,
     PromoFolderInfo,
     PromoFolderPage,
     PromoFoldersResponse,
-    PromoRecommendationResponse,
-    PromoReportEventCreate,
-    PromoSearchRequest,
-    PromoSearchResponse,
-    PromoStoreOption,
+    PromoInteractionEventCreate,
+    PromoStoreItem,
+    SimilarPromosResponse,
+    SimilarPromosSource,
 )
-from app.services.promo_report_service import PromoReportNotFoundError, PromoReportService
-from app.services.promo_search_service import PromoSearchService
+from app.services.promo_similarity_service import (
+    PromoNotFoundError,
+    PromoSimilarityService,
+)
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
+R2_PUBLIC_BASE_URL = os.environ.get("R2_PUBLIC_BASE_URL", "")
+
+# ---------------------------------------------------------------------------
+# Similar Promos
+# ---------------------------------------------------------------------------
+
 
 @router.get(
-    "",
-    response_model=PromoRecommendationResponse,
-    responses={
-        503: {"description": "Promo report service unavailable"},
-    },
+    "/{promo_id}/similar",
+    response_model=SimilarPromosResponse,
+    responses={404: {"description": "Promo not found"}},
 )
-async def get_promo_recommendations(
-    current_user: User = Depends(get_current_db_user),
+async def get_similar_promos(
+    promo_id: str,
+    limit: int = Query(10, ge=1, le=30),
+    personalize: bool = Query(True),
+    current_user: Optional[User] = Depends(get_optional_db_user),
     db: AsyncSession = Depends(get_db),
 ):
-    """Get the stored weekly promo report for the current user."""
-    service = PromoReportService(db)
+    """Return promos similar to the given source promo.
+
+    Public endpoint. If a valid bearer token is provided AND personalize=true,
+    the user's category profile is used as a within-tier re-ranker (it cannot
+    promote a less-relevant item above a more-relevant one — content tier
+    is always the primary sort key).
+    """
+    service = PromoSimilarityService(db)
+
+    category_profiles: Optional[dict] = None
+    if personalize and current_user is not None:
+        try:
+            profile = await EnrichedProfileRepository(db).get_by_user_id(current_user.id)
+            if profile and profile.category_profiles:
+                category_profiles = profile.category_profiles
+        except Exception as e:
+            logger.warning(f"Failed loading enriched profile for personalization: {e}")
 
     try:
-        recommendations = await service.get_current_report_response(current_user.id)
-    except Exception as e:
-        logger.error(f"Promo report lookup failed for user {current_user.id}: {e}", exc_info=True)
-        raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="Could not load promo report. Please try again later.",
+        source_dict, items = await service.find_similar(
+            source_id=promo_id,
+            limit=limit,
+            category_profiles=category_profiles,
         )
+    except PromoNotFoundError:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Promo not found")
 
-    return recommendations
+    return SimilarPromosResponse(
+        source=SimilarPromosSource(**source_dict),
+        items=[PromoStoreItem(**item) for item in items],
+        generated_at=datetime.now(timezone.utc).isoformat(),
+    )
+
+
+# ---------------------------------------------------------------------------
+# Promo Interaction Events (telemetry)
+# ---------------------------------------------------------------------------
 
 
 @router.post(
-    "/events",
+    "/interactions",
     status_code=status.HTTP_204_NO_CONTENT,
     response_class=Response,
 )
-async def create_promo_report_event(
-    payload: PromoReportEventCreate,
-    current_user: User = Depends(get_current_db_user),
+async def create_promo_interaction_event(
+    payload: PromoInteractionEventCreate,
+    current_user: Optional[User] = Depends(get_optional_db_user),
     db: AsyncSession = Depends(get_db),
 ):
-    """Log a promo report interaction event for the current user."""
-    service = PromoReportService(db)
-
+    """Log a folder/carousel interaction. Accepts both authenticated and
+    anonymous calls — anonymous events have user_id=NULL, still useful
+    for aggregate CTR analysis.
+    """
+    repo = PromoInteractionEventRepository(db)
     try:
-        await service.log_event(
-            user_id=current_user.id,
-            report_id=payload.report_id,
+        await repo.create(
             event_type=payload.event_type,
-            item_key=payload.item_key,
+            user_id=current_user.id if current_user else None,
+            promo_item_id=payload.promo_item_id,
+            source_item_id=payload.source_item_id,
             store_name=payload.store_name,
-            metadata=payload.metadata,
-        )
-    except PromoReportNotFoundError:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Promo report not found.",
+            metadata_json=payload.metadata,
         )
     except Exception as e:
-        logger.error(f"Promo report event logging failed for user {current_user.id}: {e}", exc_info=True)
+        logger.error(f"Failed to log promo interaction event: {e}", exc_info=True)
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="Could not log promo report event.",
+            detail="Could not log interaction event.",
         )
-
     return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
@@ -102,15 +134,11 @@ async def create_promo_report_event(
 _folders_cache: Optional[Tuple[PromoFoldersResponse, float]] = None
 _FOLDERS_CACHE_TTL = 3600  # 1 hour
 
-R2_PUBLIC_BASE_URL = os.environ.get("R2_PUBLIC_BASE_URL", "")
-
 
 def _query_hotspots_by_folder_url(today_str: str) -> dict[str, list[PromoFolderHotspot]]:
     """Query promo items with tile bounding boxes, grouped by (promo_folder_url, page_number).
 
     Returns a dict keyed by "{promo_folder_url}:{page_number}" → list of hotspots.
-    The folder URL matches the per-folder R2 metadata.json source_url, which is
-    what the client-facing response builder uses to attach hotspots to pages.
     """
     import psycopg2
 
@@ -192,12 +220,7 @@ def _query_hotspots_by_folder_url(today_str: str) -> dict[str, list[PromoFolderH
 
 
 def _build_folders_response() -> PromoFoldersResponse:
-    """Read R2 metadata and build the folders response.
-
-    Lists all active promo folders across all configured retailers,
-    constructing page image URLs from the R2 public base URL.
-    Attaches promo item hotspots (with tile bounding boxes) to each page.
-    """
+    """Read R2 metadata and build the folders response."""
     from promo_folders_pipelines.scraper.config import RETAILERS
     from promo_folders_pipelines.r2_storage import R2PromoStorage, R2_BUCKET, R2_PREFIX
 
@@ -208,7 +231,6 @@ def _build_folders_response() -> PromoFoldersResponse:
     r2 = R2PromoStorage()
     today = date.today().isoformat()
 
-    # Query all hotspots once (single DB call)
     hotspots_map = _query_hotspots_by_folder_url(today)
 
     folders: list[PromoFolderInfo] = []
@@ -218,7 +240,6 @@ def _build_folders_response() -> PromoFoldersResponse:
         safe_id = store_id.replace(" ", "_")
         prefix = f"{R2_PREFIX}{safe_id}/"
 
-        # List folder sub-directories (folder_1/, folder_2/, etc.)
         try:
             response = r2.client.list_objects_v2(
                 Bucket=R2_BUCKET, Prefix=prefix, Delimiter="/"
@@ -228,10 +249,9 @@ def _build_folders_response() -> PromoFoldersResponse:
             continue
 
         for cp in response.get("CommonPrefixes", []):
-            folder_prefix = cp["Prefix"]  # e.g., "promo_folders/colruyt/folder_1/"
-            folder_dir = folder_prefix.rstrip("/").rsplit("/", 1)[-1]  # "folder_1"
+            folder_prefix = cp["Prefix"]
+            folder_dir = folder_prefix.rstrip("/").rsplit("/", 1)[-1]
 
-            # Download metadata.json
             meta_key = f"{folder_prefix}metadata.json"
             try:
                 meta_response = r2.client.get_object(Bucket=R2_BUCKET, Key=meta_key)
@@ -241,7 +261,6 @@ def _build_folders_response() -> PromoFoldersResponse:
                 logger.debug(f"No metadata at {meta_key}: {e}")
                 continue
 
-            # Filter: only active folders (validity_end >= today)
             validity_end = metadata.get("validity_end", "")
             if validity_end and validity_end < today:
                 continue
@@ -252,9 +271,6 @@ def _build_folders_response() -> PromoFoldersResponse:
 
             folder_source_url = metadata.get("source_url", "")
 
-            # Build page image URLs with hotspots keyed per-folder by source_url.
-            # If source_url is missing, pages render with no hotspots rather than
-            # leaking hotspots from sibling folders of the same store.
             pages = [
                 PromoFolderPage(
                     page_number=i,
@@ -278,7 +294,6 @@ def _build_folders_response() -> PromoFoldersResponse:
                 pages=pages,
             ))
 
-    # Sort: by store_id, then folder_id
     folders.sort(key=lambda f: (f.store_id, f.folder_id))
     return PromoFoldersResponse(folders=folders)
 
@@ -287,8 +302,7 @@ def _build_folders_response() -> PromoFoldersResponse:
 async def get_promo_folders():
     """Return all active promo folders with page image URLs, grouped by store.
 
-    Public endpoint — no authentication required.
-    Results are cached in memory for 1 hour.
+    Public endpoint. Cached in memory for 1 hour.
     """
     global _folders_cache
 
@@ -308,50 +322,3 @@ async def get_promo_folders():
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail="Promo folders are temporarily unavailable.",
         )
-
-
-# ---------------------------------------------------------------------------
-# Promo Search
-# ---------------------------------------------------------------------------
-
-
-@router.get("/stores", response_model=List[PromoStoreOption])
-async def get_promo_stores():
-    """Return all stores available for promo search filtering."""
-    return [
-        PromoStoreOption(
-            id=name,
-            name=STORE_DISPLAY_NAMES[name],
-            has_promos=STORE_HAS_PROMOS.get(name, False),
-        )
-        for name in ALL_STORE_NAMES
-        if name != "other"
-    ]
-
-
-@router.post("/search", response_model=PromoSearchResponse)
-async def search_promos(
-    payload: PromoSearchRequest,
-    current_user: User = Depends(get_current_db_user),
-):
-    """Search current promos by product name/description and store filters."""
-    service = PromoSearchService()
-
-    try:
-        results = await service.search(payload.query, payload.stores)
-    except Exception as e:
-        logger.error(
-            f"Promo search failed for user {current_user.id}: {e}",
-            exc_info=True,
-        )
-        raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="Promo search is temporarily unavailable. Please try again later.",
-        )
-
-    return PromoSearchResponse(
-        query=payload.query,
-        stores=payload.stores,
-        result_count=len(results),
-        results=results,
-    )

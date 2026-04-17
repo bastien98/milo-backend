@@ -80,11 +80,6 @@ rebuild-profiles:
 	@echo "Rebuilding enriched profiles on $(RAILWAY_ENV)..."
 	DATABASE_URL=$(DATABASE_URL) $(PYTHON) -m scripts.rebuild_profiles
 
-.PHONY: generate-promos
-generate-promos:
-	@echo "Generating promo candidates on $(RAILWAY_ENV)..."
-	DATABASE_URL=$(DATABASE_URL) $(PYTHON) -m scripts.promo_reports.generate_promo_candidates
-
 .PHONY: cleanup-promos-dry
 cleanup-promos-dry:
 	@echo "[DRY RUN] Counting promo data on $(RAILWAY_ENV)..."

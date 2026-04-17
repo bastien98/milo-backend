@@ -87,7 +87,6 @@ python3 -m promo_folders_pipelines.ingest --list-stores
 | `--env` | Target database: `prod` (default) or `non-prod` |
 | `--dry-run` | Extract and parse only — no database upsert |
 | `--output` | Custom path for extracted JSON output |
-| `--skip-candidates` | Skip promo candidate regeneration after ingestion |
 | `--list-stores` | Print available stores and exit |
 
 ## How It Works
@@ -99,17 +98,8 @@ python3 -m promo_folders_pipelines.ingest --list-stores
 5. **Dedup** — Items deduplicated by `display_name` (handles bilingual folders)
 6. **Clean** — Existing promos for this retailer (scoped to week if `--week` is used) are deleted
 7. **Upsert** — Items inserted with `ON CONFLICT DO UPDATE` for idempotency
-8. **Candidate regeneration** — Promo candidates are regenerated for all users with enriched profiles, so personalized promo recommendations reflect the newly ingested items
 
 The pipeline is **fully idempotent** — running it multiple times with the same arguments produces the same database state.
-
-When ingesting multiple stores in sequence, use `--skip-candidates` on intermediate runs and let the final run trigger regeneration:
-
-```bash
-python3 -m promo_folders_pipelines.ingest --store colruyt --week 2026-W13 --skip-candidates
-python3 -m promo_folders_pipelines.ingest --store delhaize --week 2026-W13 --skip-candidates
-python3 -m promo_folders_pipelines.ingest --store lidl --week 2026-W13   # triggers candidate regen
-```
 
 ## Adding a New Store
 

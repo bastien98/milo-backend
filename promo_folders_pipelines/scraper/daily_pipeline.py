@@ -260,11 +260,6 @@ def main():
         default="non-prod",
         help="Target database environment (default: non-prod)",
     )
-    parser.add_argument(
-        "--skip-candidates",
-        action="store_true",
-        help="Skip promo candidate regeneration after ingestion",
-    )
     args = parser.parse_args()
 
     # Environment override
@@ -307,17 +302,6 @@ def main():
     logger.info(f"  New folders processed: {total_new}")
     logger.info(f"  Items upserted: {total_items}")
     logger.info(f"{'=' * 60}")
-
-    # Regenerate promo candidates (only if we upserted new items)
-    if total_items > 0 and not args.dry_run and not args.skip_candidates:
-        logger.info("Regenerating promo candidates for all users...")
-        import asyncio
-        from scripts.promo_reports.generate_promo_candidates import generate_candidates_for_users
-        try:
-            asyncio.run(generate_candidates_for_users())
-            logger.info("Promo candidate regeneration complete")
-        except Exception as e:
-            logger.error(f"Promo candidate regeneration failed: {e}", exc_info=True)
 
     if fail_count > 0:
         sys.exit(1)

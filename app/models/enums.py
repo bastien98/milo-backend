@@ -110,24 +110,11 @@ class LoyaltyStatus(str, Enum):
     NEW = "new"                         # events < 3
 
 
-class PromoBucket(str, Enum):
-    STAPLES = "staples"
-    STOCK_UP = "stock_up"
-    ENDING_SOON = "ending_soon"
-    DISCOVER = "discover"
+class PromoInteractionEventType(str, Enum):
+    """Telemetry for the folder → hotspot → detail → similar-carousel flow.
 
-
-class PromoReportStatus(str, Enum):
-    READY = "ready"
-    NO_ENRICHED_PROFILE = "no_enriched_profile"
-    NO_REPORT_AVAILABLE = "no_report_available"
-
-
-class PromoReportEventType(str, Enum):
-    REPORT_VIEWED = "report_viewed"
+    Decoupled from any report/candidates table. Event rows may be anonymous
+    (user_id NULL) for public folder browsing.
+    """
     DEAL_OPENED = "deal_opened"
-    DEAL_CLAIMED = "deal_claimed"
-    FOLDER_OPENED = "folder_opened"
-    STORE_SECTION_OPENED = "store_section_opened"
-    FEEDBACK_POSITIVE = "feedback_positive"
-    FEEDBACK_NEGATIVE = "feedback_negative"
+    SIMILAR_PROMO_CLICKED = "similar_promo_clicked"
