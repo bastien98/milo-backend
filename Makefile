@@ -40,6 +40,8 @@ help:
 	@echo "Script Commands:"
 	@echo "  make rebuild-profiles [ENV=production|non-prod]    - Rebuild enriched user profiles"
 	@echo "  make generate-promos [ENV=production|non-prod]     - Generate promo candidates"
+	@echo "  make cleanup-promos-dry [ENV=...]                  - Preview promo R2+DB wipe counts"
+	@echo "  make cleanup-promos [ENV=...]                      - Wipe promo R2 objects + promo_items rows (destructive)"
 	@echo ""
 	@echo "Deploy examples:"
 	@echo "  make deploy                # Deploy to non-prod"
@@ -82,3 +84,13 @@ rebuild-profiles:
 generate-promos:
 	@echo "Generating promo candidates on $(RAILWAY_ENV)..."
 	DATABASE_URL=$(DATABASE_URL) $(PYTHON) -m scripts.promo_reports.generate_promo_candidates
+
+.PHONY: cleanup-promos-dry
+cleanup-promos-dry:
+	@echo "[DRY RUN] Counting promo data on $(RAILWAY_ENV)..."
+	set -a; . ./.env; set +a; DATABASE_URL=$(DATABASE_URL) $(PYTHON) -m scripts.cleanup_promos --dry-run
+
+.PHONY: cleanup-promos
+cleanup-promos:
+	@echo "[DELETE] Wiping promo data on $(RAILWAY_ENV)..."
+	set -a; . ./.env; set +a; DATABASE_URL=$(DATABASE_URL) $(PYTHON) -m scripts.cleanup_promos --yes

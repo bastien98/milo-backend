@@ -58,29 +58,45 @@ R2_PUBLIC_BASE_URL = os.environ.get("R2_PUBLIC_BASE_URL", "")
 _BBOX_PROMPT_SUFFIX = """
 
 ## BOUNDING BOX (PHYSICAL PRODUCT ONLY)
-For EVERY item, populate the `bbox` field with a bounding box that safely and fully encompasses the **physical product itself** (e.g., the actual bottle, box, can, or crate).
+For EVERY item, populate the `bbox` field with a bounding box around the **physical product itself** (e.g., the actual bottle, box, can, or crate).
 
 CRITICAL RULES FOR BBOX:
-1. CAPTURE THE WHOLE PRODUCT: Ensure the entire physical product is inside the box. Do NOT clip or shave off the edges, caps, or sides of the product. Leave a tiny visual margin (padding) around the physical item to ensure it is 100% intact.
-2. EXCLUDE TEXT: DO NOT include the product name, price labels, volume information, or health warnings located below, above, or beside the product.
-3. EXCLUDE PROMOS: DO NOT include promotional banners, ribbons, or discount badges unless they are physically printed onto the product packaging itself.
-4. Coordinates are integers from 0 to 1000:
+1. CAPTURE THE WHOLE PRODUCT: The entire physical product must be inside the box. Do NOT clip caps, lids, or edges.
+2. FIXED MARGIN: Leave exactly 2-3% of the tile's shortest side as margin around the physical product — no more, no less. The crop must look consistent across products: neither tight-cropped nor surrounded by whitespace.
+3. EXCLUDE TEXT: Do NOT include product names, price labels, volume information, or health warnings that sit outside the packaging.
+4. EXCLUDE PROMOS: Do NOT include promotional banners, ribbons, or discount badges unless they are physically printed onto the product packaging itself.
+5. Coordinates are integers from 0 to 1000:
    x_min=0 → left edge, x_max=1000 → right edge
    y_min=0 → top edge,  y_max=1000 → bottom edge
-5. Validation: x_min < x_max and y_min < y_max (set to null if uncertain).
-6. One bbox per item, even if the product appears in multiple places on the page.
+6. Validation: x_min < x_max and y_min < y_max (set to null only if the product cannot be located at all).
+7. One bbox per item, even if the product appears in multiple places on the page.
 
 ## TILE BOUNDING BOX (FULL PROMO TILE)
-For EVERY item, ALSO populate the `tile_bbox` field with a bounding box that encompasses the **entire promo tile area** allocated to this product on the page — including the product image, price labels, brand text, promo badges, and background area.
+For EVERY item, populate the `tile_bbox` field with a bounding box around the **entire promo tile** — product image, price labels, brand text, promo badges/ribbons, and the background shape or color block that visually groups this item.
 
 CRITICAL RULES FOR TILE_BBOX:
-1. CAPTURE EVERYTHING: Include the product image, price text, brand name, promo banner/ribbon, description, and any background color/shape that visually groups this item.
-2. TIGHT FIT: The tile_bbox should tightly wrap the full visual area for this item. Do NOT include neighboring products' areas.
-3. Coordinates are integers from 0 to 1000 (same system as bbox).
-4. Validation: x_min < x_max and y_min < y_max (set to null if uncertain).
-5. The tile_bbox will ALWAYS be equal to or larger than the bbox for the same item.
-6. Ensure EVERY item has a tile_bbox. If you cannot determine exact boundaries, provide your best estimate rather than null.
-7. MINIMIZE OVERLAPS: Tile bounding boxes should avoid overlapping where possible. For adjacent items in a grid, prefer tight boundaries that meet at the edge. Slight overlap is acceptable — never omit an item just because its tile_bbox would overlap a neighbor.
+1. CAPTURE EVERYTHING: Include the product image AND every price/brand/promo element that visually belongs to this item. Missing a price label or promo badge is a failure.
+2. NEIGHBOR OVERLAP IS OK: In dense grids, tile_bboxes MAY touch or slightly overlap their neighbors at the shared edge. Do not shrink a tile_bbox inward just to avoid an overlap — that cuts off price labels. Each item's price label and badges must always be inside its own tile_bbox.
+3. Coordinates are integers 0-1000 (same system as bbox).
+4. Validation: x_min < x_max and y_min < y_max. tile_bbox must always fully contain bbox.
+5. Always provide a tile_bbox for every item. Use your best estimate rather than null.
+
+## WORKED EXAMPLE
+For a 1L milk carton whose packaging spans coords [110, 210, 250, 400] and has a price label below at y=420-500 and a "-25%" badge in the top-right corner of its tile:
+  bbox       = [106, 206, 254, 404]   (product with ~2-3% margin, excludes price label and badge)
+  tile_bbox  = [80,  190, 290, 520]   (includes badge, product, price label, and background)
+
+NEGATIVE EXAMPLE — DO NOT DO THIS:
+  bbox       = [80,  190, 290, 520]   (wrong — that's the tile, not just the product)
+  tile_bbox  = [110, 210, 250, 400]   (wrong — cuts off the price label and badge)
+
+## CONFIDENCE
+For EVERY item, populate `bbox_confidence` with your confidence that BOTH bbox and tile_bbox are correct:
+  1.0 = product edges are crisp, tile boundaries are unambiguous.
+  0.7-0.9 = standard case with minor ambiguity.
+  0.4-0.6 = product is stylized, partially occluded, or the tile layout is unclear.
+  0.0-0.3 = you are guessing the location.
+Be honest — low confidence is more useful than optimistic guesses.
 """
 
 
@@ -144,6 +160,17 @@ class _PromoItemSchema(PydanticBaseModel):
         ),
     )
 
+    # --- Bbox confidence (routing signal, not persisted) ---
+    bbox_confidence: float = Field(
+        default=0.7,
+        ge=0.0,
+        le=1.0,
+        description=(
+            "Your confidence that both bbox and tile_bbox are correct, 0.0-1.0. "
+            "Lower it when the product is stylized, occluded, or the tile layout is ambiguous."
+        ),
+    )
+
 
 class _PromoFolderSchema(PydanticBaseModel):
     validity_start: Optional[date] = Field(default=None, description="Folder validity start date")
@@ -169,14 +196,17 @@ class _BboxValidationResult(PydanticBaseModel):
 _BBOX_VALIDATION_PROMPT = """You are verifying bounding box accuracy for promo items on a supermarket folder page.
 
 For EACH item listed below, verify that its tile_bbox correctly encompasses the ENTIRE promo tile area
-(product image + price label + brand text + promo badge + background). Also verify the bbox (product-only).
+(product image + price label + brand text + promo badge + background). Also verify the bbox (product-only
+with a 2-3% margin around the physical product).
 
 Rules:
+- Items tagged [CONFIRM ONLY — do not modify] are already validated by a high-confidence extraction. Return them unchanged with status "confirmed". Do NOT relocate, shrink, or expand them.
+- Items tagged [REVIEW — check and correct if wrong] may have errors. Correct only if you are sure the current bbox is wrong.
 - If the bbox is correct, return it unchanged with status "confirmed"
 - If the bbox is wrong (too small, shifted, covers wrong area), correct it with status "corrected"
 - If the bbox is null/missing, locate the item on the page and provide one with status "added"
 - Coordinates are integers 0-1000 (0=left/top, 1000=right/bottom)
-- tile_bbox must encompass the full promo tile; bbox must tightly wrap the physical product only
+- tile_bbox must encompass the full promo tile; bbox must tightly wrap the physical product only with a small margin
 - Return ALL items, even if confirmed unchanged
 
 Items to verify:
@@ -436,7 +466,65 @@ def _contains(outer: dict | None, inner: dict | None) -> bool:
     )
 
 
+def _expand_to_contain(outer: dict, inner: dict, buffer: int = 10) -> dict:
+    """Return a copy of outer expanded so it fully contains inner, plus a small buffer.
+
+    Coords are in the 0-1000 system. `buffer` is absolute (10 ≈ 1% of page edge).
+    """
+    return {
+        "x_min": max(0, min(outer["x_min"], inner["x_min"] - buffer)),
+        "y_min": max(0, min(outer["y_min"], inner["y_min"] - buffer)),
+        "x_max": min(1000, max(outer["x_max"], inner["x_max"] + buffer)),
+        "y_max": min(1000, max(outer["y_max"], inner["y_max"] + buffer)),
+    }
+
+
+def _clip_to(inner: dict, outer: dict) -> dict:
+    """Return a copy of inner clipped to stay within outer."""
+    return {
+        "x_min": max(inner["x_min"], outer["x_min"]),
+        "y_min": max(inner["y_min"], outer["y_min"]),
+        "x_max": min(inner["x_max"], outer["x_max"]),
+        "y_max": min(inner["y_max"], outer["y_max"]),
+    }
+
+
+def _max_iou_with_others(candidate: dict, others: list[dict | None]) -> float:
+    """Highest IoU between `candidate` and any non-null bbox in `others`."""
+    best = 0.0
+    for other in others:
+        if not other:
+            continue
+        val = _iou(candidate, other)
+        if val > best:
+            best = val
+    return best
+
+
+def _is_suspect_original(bbox: dict | None, confidence: float | None) -> bool:
+    """True when the original bbox looks geometrically suspect and deserves a looser IoU gate.
+
+    Cases: low area (<1% of page), touches a page edge, or model reports low confidence.
+    """
+    if not bbox:
+        return True
+    if confidence is not None and confidence < 0.5:
+        return True
+    width = bbox["x_max"] - bbox["x_min"]
+    height = bbox["y_max"] - bbox["y_min"]
+    if width <= 0 or height <= 0:
+        return True
+    if (width * height) < 10_000:  # <1% of 1000×1000 page
+        return True
+    if bbox["x_min"] <= 2 or bbox["y_min"] <= 2 or bbox["x_max"] >= 998 or bbox["y_max"] >= 998:
+        return True
+    return False
+
+
 IOU_REJECT_THRESHOLD = 0.3
+IOU_REJECT_THRESHOLD_SUSPECT = 0.15
+NEIGHBOR_OVERLAP_IOU_LIMIT = 0.2  # tile_bbox expansion is blocked if it overlaps neighbors more than this
+CONFIDENCE_SKIP_VALIDATION = 0.9  # items above this are not modified by the validation pass
 
 
 def validate_page_bboxes(
@@ -466,20 +554,32 @@ def validate_page_bboxes(
 
     label = f"[{display_name} p{page_number} validate]"
 
+    # Flag high-confidence items so the validator (and our post-processing) leave them alone.
+    skip_modification = [
+        float(item.get("bbox_confidence") or 0.0) >= CONFIDENCE_SKIP_VALIDATION
+        for item in items_on_page
+    ]
+    skip_count = sum(skip_modification)
+
     # Build the item list for the validation prompt
     item_descriptions = []
     for i, item in enumerate(items_on_page):
         name = item.get("display_name", "Unknown")
         tile_bbox = item.get("tile_bbox")
         bbox = item.get("bbox")
+        confidence = item.get("bbox_confidence")
 
         tile_str = f"[{tile_bbox['x_min']}, {tile_bbox['y_min']}, {tile_bbox['x_max']}, {tile_bbox['y_max']}]" if tile_bbox else "null (LOCATE THIS ITEM)"
         bbox_str = f"[{bbox['x_min']}, {bbox['y_min']}, {bbox['x_max']}, {bbox['y_max']}]" if bbox else "null"
+        flag = "[CONFIRM ONLY — do not modify]" if skip_modification[i] else "[REVIEW — check and correct if wrong]"
+        conf_str = f" conf={confidence:.2f}" if isinstance(confidence, (int, float)) else ""
 
-        item_descriptions.append(f"{i}. \"{name}\" — tile_bbox: {tile_str}, bbox: {bbox_str}")
+        item_descriptions.append(f"{i}. {flag} \"{name}\"{conf_str} — tile_bbox: {tile_str}, bbox: {bbox_str}")
 
     items_text = "\n".join(item_descriptions)
     full_prompt = _BBOX_VALIDATION_PROMPT + items_text
+    if skip_count:
+        logger.info(f"{label} {skip_count}/{len(items_on_page)} items marked high-confidence and exempt from modification")
 
     for attempt in range(1, MAX_RETRIES + 1):
         delay = RETRY_BASE_DELAY * (2 ** (attempt - 1))
@@ -534,7 +634,7 @@ def validate_page_bboxes(
 
         # Apply validated bboxes back to items
         validated_items = data.get("items", [])
-        confirmed = corrected = added = 0
+        confirmed = corrected = added = skipped_high_conf = 0
 
         for vi in validated_items:
             idx = vi.get("item_index")
@@ -551,51 +651,104 @@ def validate_page_bboxes(
 
             orig_tile = items_on_page[idx].get("tile_bbox")
             orig_bbox = items_on_page[idx].get("bbox")
+            confidence = items_on_page[idx].get("bbox_confidence")
 
-            # tile_bbox: reject drastic corrections, keep original on null regression
-            new_tile = vi.get("tile_bbox")
-            if new_tile and isinstance(new_tile, dict):
-                if orig_tile:
-                    iou = _iou(orig_tile, new_tile)
-                    if iou < IOU_REJECT_THRESHOLD:
-                        logger.warning(
-                            f"{label} Rejecting tile_bbox correction for item {idx} "
-                            f"('{items_on_page[idx].get('display_name', '?')}'): IoU={iou:.2f} "
-                            f"below threshold {IOU_REJECT_THRESHOLD}"
-                        )
+            # High-confidence items are exempt from modification; only missing bboxes can be filled.
+            if skip_modification[idx]:
+                skipped_high_conf += 1
+                if not orig_tile and vi.get("tile_bbox"):
+                    items_on_page[idx]["tile_bbox"] = vi["tile_bbox"]
+                if not orig_bbox and vi.get("bbox"):
+                    items_on_page[idx]["bbox"] = vi["bbox"]
+            else:
+                # Asymmetric IoU threshold: looser bar when the original bbox looks geometrically suspect.
+                tile_threshold = (
+                    IOU_REJECT_THRESHOLD_SUSPECT
+                    if _is_suspect_original(orig_tile, confidence)
+                    else IOU_REJECT_THRESHOLD
+                )
+                bbox_threshold = (
+                    IOU_REJECT_THRESHOLD_SUSPECT
+                    if _is_suspect_original(orig_bbox, confidence)
+                    else IOU_REJECT_THRESHOLD
+                )
+
+                # tile_bbox: reject drastic corrections, keep original on null regression
+                new_tile = vi.get("tile_bbox")
+                if new_tile and isinstance(new_tile, dict):
+                    if orig_tile:
+                        iou = _iou(orig_tile, new_tile)
+                        if iou < tile_threshold:
+                            logger.warning(
+                                f"{label} Rejecting tile_bbox correction for item {idx} "
+                                f"('{items_on_page[idx].get('display_name', '?')}'): IoU={iou:.2f} "
+                                f"below threshold {tile_threshold}"
+                            )
+                        else:
+                            items_on_page[idx]["tile_bbox"] = new_tile
                     else:
                         items_on_page[idx]["tile_bbox"] = new_tile
-                else:
-                    items_on_page[idx]["tile_bbox"] = new_tile
-            # else: validator returned null — keep original (null-regression guard)
+                # else: validator returned null — keep original (null-regression guard)
 
-            # bbox: same guards
-            new_bbox = vi.get("bbox")
-            if new_bbox and isinstance(new_bbox, dict):
-                if orig_bbox:
-                    iou = _iou(orig_bbox, new_bbox)
-                    if iou < IOU_REJECT_THRESHOLD:
-                        logger.warning(
-                            f"{label} Rejecting bbox correction for item {idx} "
-                            f"('{items_on_page[idx].get('display_name', '?')}'): IoU={iou:.2f} "
-                            f"below threshold {IOU_REJECT_THRESHOLD}"
-                        )
+                # bbox: same guards
+                new_bbox = vi.get("bbox")
+                if new_bbox and isinstance(new_bbox, dict):
+                    if orig_bbox:
+                        iou = _iou(orig_bbox, new_bbox)
+                        if iou < bbox_threshold:
+                            logger.warning(
+                                f"{label} Rejecting bbox correction for item {idx} "
+                                f"('{items_on_page[idx].get('display_name', '?')}'): IoU={iou:.2f} "
+                                f"below threshold {bbox_threshold}"
+                            )
+                        else:
+                            items_on_page[idx]["bbox"] = new_bbox
                     else:
                         items_on_page[idx]["bbox"] = new_bbox
-                else:
-                    items_on_page[idx]["bbox"] = new_bbox
 
-            # Containment clip: bbox must sit inside tile_bbox. If not, fall back to tile_bbox.
+            # Containment: bbox must sit inside tile_bbox. Try non-destructive recovery.
             final_tile = items_on_page[idx].get("tile_bbox")
             final_bbox = items_on_page[idx].get("bbox")
             if final_bbox and final_tile and not _contains(final_tile, final_bbox):
-                logger.warning(
-                    f"{label} bbox for item {idx} not contained in tile_bbox — "
-                    f"falling back bbox := tile_bbox"
-                )
-                items_on_page[idx]["bbox"] = dict(final_tile)
+                # Step 1: attempt to expand tile_bbox to contain bbox + small buffer.
+                expanded_tile = _expand_to_contain(final_tile, final_bbox, buffer=10)
+                # Only accept the expansion if it doesn't chew into a neighbor's tile.
+                other_tiles = [
+                    items_on_page[j].get("tile_bbox")
+                    for j in range(len(items_on_page))
+                    if j != idx
+                ]
+                neighbor_overlap = _max_iou_with_others(expanded_tile, other_tiles)
+                if neighbor_overlap <= NEIGHBOR_OVERLAP_IOU_LIMIT:
+                    logger.info(
+                        f"{label} bbox escaped tile for item {idx} — "
+                        f"expanding tile_bbox (neighbor IoU={neighbor_overlap:.2f})"
+                    )
+                    items_on_page[idx]["tile_bbox"] = expanded_tile
+                else:
+                    # Step 2: clip bbox to tile_bbox so the product-only intent is preserved.
+                    clipped = _clip_to(final_bbox, final_tile)
+                    # Guard against degenerate clip (zero/negative area).
+                    if clipped["x_max"] > clipped["x_min"] and clipped["y_max"] > clipped["y_min"]:
+                        logger.warning(
+                            f"{label} bbox escaped tile for item {idx} and expansion would "
+                            f"overlap neighbor (IoU={neighbor_overlap:.2f}) — "
+                            f"clipping bbox to tile_bbox instead"
+                        )
+                        items_on_page[idx]["bbox"] = clipped
+                    else:
+                        # Step 3: last resort — fall back to tile_bbox and flag for review.
+                        logger.warning(
+                            f"{label} bbox escaped tile for item {idx} "
+                            f"('{items_on_page[idx].get('display_name', '?')}') and neither "
+                            f"expand nor clip is viable — falling back bbox := tile_bbox (REVIEW)"
+                        )
+                        items_on_page[idx]["bbox"] = dict(final_tile)
 
-        logger.info(f"{label} Validation: {confirmed} confirmed, {corrected} corrected, {added} added")
+        logger.info(
+            f"{label} Validation: {confirmed} confirmed, {corrected} corrected, "
+            f"{added} added, {skipped_high_conf} high-confidence exempt"
+        )
         return items_on_page
 
     return items_on_page
@@ -897,17 +1050,22 @@ def generate_record_id(item: PromoItem) -> str:
 # ---------------------------------------------------------------------------
 # Page image rendering + item image cropping
 # ---------------------------------------------------------------------------
-def _render_pdf_pages(pdf_data: bytes, dpi: int = 150) -> dict[int, bytes]:
+def _render_pdf_pages(pdf_data: bytes, dpi: int = 200) -> dict[int, bytes]:
     """Render each PDF page to a WebP image at the given DPI.
 
     Returns {page_number: webp_bytes} (1-indexed).
-    150 DPI on A4 ≈ 1240×1754px — sufficient for 800px crops.
+    200 DPI on A4 ≈ 1653×2338px — preserves small-product edges for Gemini bbox extraction.
+    Uses Pillow with quality=95, method=6 so WebP encoding is pinned instead of relying
+    on PyMuPDF's default (which has varied across versions and produced lossy page images).
     """
     doc = fitz.open(stream=pdf_data, filetype="pdf")
     pages = {}
     for i in range(len(doc)):
         pixmap = doc[i].get_pixmap(dpi=dpi)
-        pages[i + 1] = pixmap.tobytes("webp")
+        img = Image.frombytes("RGB", (pixmap.width, pixmap.height), pixmap.samples)
+        buf = io.BytesIO()
+        img.save(buf, format="WEBP", quality=95, method=6)
+        pages[i + 1] = buf.getvalue()
     doc.close()
     return pages
 
@@ -986,13 +1144,13 @@ def crop_and_upload_item_images(
 
         pw, ph = page_img.size
 
-        # Add 2% padding around bbox to avoid clipping product edges
-        pad_x = int(0.02 * pw)
-        pad_y = int(0.02 * ph)
-        x1 = max(0, int(x_min * pw) - pad_x)
-        y1 = max(0, int(y_min * ph) - pad_y)
-        x2 = min(pw, int(x_max * pw) + pad_x)
-        y2 = min(ph, int(y_max * ph) + pad_y)
+        # No post-crop padding — the extraction prompt already instructs Gemini to leave
+        # a 2-3% margin around the physical product. Adding more here double-pads the crop
+        # and produces inconsistent whitespace across products.
+        x1 = max(0, int(x_min * pw))
+        y1 = max(0, int(y_min * ph))
+        x2 = min(pw, int(x_max * pw))
+        y2 = min(ph, int(y_max * ph))
 
         if (x2 - x1) < 64 or (y2 - y1) < 64:
             skipped_invalid += 1
