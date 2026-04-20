@@ -13,7 +13,7 @@ import os
 import re
 import time
 from datetime import date
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Literal, Optional
 
 import fitz  # PyMuPDF
 from google import genai
@@ -32,6 +32,7 @@ from promo_folders_pipelines.promo_depth import compute_promo_depth
 from promo_folders_pipelines.prompt_builder import build_system_prompt
 from promo_folders_pipelines.r2_storage import R2PromoStorage
 from promo_folders_pipelines.stores import load_store_config
+from promo_folders_pipelines.unit_pricing import compute_unit_price, validate_pack_size
 
 logger = logging.getLogger(__name__)
 
@@ -111,12 +112,17 @@ class _BboxSchema(PydanticBaseModel):
 
 
 class _PromoItemSchema(PydanticBaseModel):
-    # --- Display fields (all required except display_unit_price) ---
+    # --- Display fields ---
     display_name: str = Field(description="Clean Title Case product label: product + variant + size. Omit brand when product is identifiable without it (e.g., 'Chips Explosions Salt & Pepper 150 g' not 'Croky Chips...'). Keep brand when it IS the product identity (e.g., 'Coca-Cola Zero 1,5 L' — 'Zero 1,5 L' alone is meaningless). ALWAYS include size/quantity when visible. For drinks, volume is CRITICAL (e.g., '33 cl', '6 x 25 cl', '1,5 L'). No promo text or pricing.")
     display_mechanism: str = Field(description="Standardized promo label. Title case, consistent formatting. For conditional percentage discounts, ALWAYS include the condition (e.g., '-25% Vanaf 2 Verpakkingen', NOT just '-25%'). Only use bare '-25%' if the discount applies to a single item with no minimum purchase. Examples: '1+1 Gratis', '-25%', '-25% Vanaf 2 Verpakkingen', '-20% Vanaf 3 Flessen', '-30% Vanaf 12 Blikken', '2e aan Halve Prijs', '2+1 Gratis', 'Prijsverlaging'.")
     display_description: Optional[str] = Field(default=None, description="Plain-language Dutch explanation of the deal (~80 chars max). Explain what the shopper needs to DO and what they GET. Examples: 'Koop 2 en krijg de 3e gratis', 'Nu €0.80 goedkoper per stuk'. null if unclear.")
     display_savings_label: Optional[str] = Field(default=None, description="Human-friendly savings text. Examples: '1 Gratis Item', 'Bespaar €3.00', 'Tot -25% Korting', '2e aan Halve Prijs'. null if unclear.")
-    display_unit_price: Optional[str] = Field(default=None, description="Price per standard unit computed from promo_price and size info visible on the page. Use Belgian units: €/L for drinks, €/kg for food, €/stuk for countable items, €/rol for paper products, €/stuk for tea bags/tabs/doekjes. For wine assume 75 cl, for beer blik assume 33 cl. Format: '€X.XX/unit'. null ONLY if no size info whatsoever.")
+
+    # --- Pack size (observable tokens; Python computes unit price from these) ---
+    pack_size_value: Optional[float] = Field(default=None, ge=0, description="Numeric size of ONE unit in the pack as printed on the page. '500 g'→500, '1,5 L'→1.5, '6 x 25 cl'→25, 'Box 12 capsules'→12, '4-pack toiletpapier 6 rollen'→6. Comma→dot. null if no size visible.")
+    pack_size_unit: Optional[Literal['g','kg','ml','cl','l','stuk','rol','doekje','capsule','tab','zakje']] = Field(default=None, description="Unit of pack_size_value EXACTLY as implied on the page, lowercased. Do NOT convert (cl stays cl, g stays g). Countables→'stuk'. Toilet/kitchen paper→'rol'. Tea bags→'zakje'. Dishwasher/washing tabs→'tab'. Coffee/Nespresso→'capsule'. Wipes→'doekje'.")
+    pack_count: int = Field(default=1, ge=1, description="Number of individual units in the pack. '6 x 25 cl'→6, '24 blikjes 33 cl'→24, '4-pack toiletpapier 6 rollen'→4, '1,5 L'→1, '500 g'→1, '3-pack'→3. Default 1 for single items.")
+    pack_size_reasoning: Optional[str] = Field(default=None, description="Brief scratchpad: which tokens on the page led to pack_size_value/unit/count. Not displayed to users.")
 
     # --- Brand identification ---
     normalized_brand: Optional[str] = Field(default=None, description="Lowercase brand/manufacturer name only. Use the EXACT same format as receipt brand extraction: 'jupiler', 'coca-cola', 'boni', 'boni selection', 'milbona', 'lay\\'s', 'delhaize', '365'. For store/house brands use their actual name (e.g., 'boni', '365', 'everyday', 'milbona', 'pikok'), NEVER 'in-house'. null only for truly unbranded generic assortment promos (very rare in promo folders).")
@@ -979,16 +985,46 @@ def parse_promo_items(
         if not bbox_dict:
             logger.debug(f"Item '{display_name}' (p{raw.get('page_number')}): no product bbox")
 
+        # Pack size tokens (Gemini-extracted); Python computes the unit price from these.
+        pack_size_value = _parse_price(raw.get("pack_size_value"))
+        pack_size_unit = (raw.get("pack_size_unit") or "").strip().lower() or None
+        pack_count = max(1, int(raw.get("pack_count") or 1))
+
+        unit_price = compute_unit_price(
+            promo_price=promo_price,
+            original_price=original_price,
+            min_purchase_qty=min_purchase_qty,
+            savings_amount=savings_amount,
+            pack_size_value=pack_size_value,
+            pack_size_unit=pack_size_unit,
+            pack_count=pack_count,
+            display_name=display_name,
+            granular_category=granular,
+        )
+
+        # Validation — flag gross pack-size mismatches but don't drop the row.
+        mismatch = validate_pack_size(display_name, pack_size_value, pack_size_unit)
+        if mismatch:
+            logger.warning(f"Item '{display_name}' (p{raw.get('page_number')}): {mismatch}")
+        for warn in unit_price.warnings:
+            logger.info(f"Item '{display_name}' (p{raw.get('page_number')}): unit-price {warn}")
+
         items.append(
             PromoItem(
                 display_name=display_name,
                 display_mechanism=display_mechanism,
                 display_description=display_description,
                 display_savings_label=display_savings_label,
-                display_unit_price=(raw.get("display_unit_price") or "").strip() or None,
+                display_unit_price=unit_price.display_unit_price,
                 original_price=original_price,
                 promo_price=promo_price,
                 savings_amount=savings_amount,
+                unit_price_value=unit_price.unit_price_value,
+                unit_price_unit=unit_price.unit_price_unit,
+                unit_price_quality=unit_price.quality,
+                pack_size_value=pack_size_value,
+                pack_size_unit=pack_size_unit,
+                pack_count=pack_count,
                 min_purchase_qty=min_purchase_qty,
                 promo_depth=promo_depth,
                 normalized_brand=normalized_brand,
@@ -1223,6 +1259,8 @@ def upsert_to_postgres(items: list[PromoItem]) -> int:
                 INSERT INTO promo_items (
                     id, display_name, display_name_lower, display_mechanism,
                     display_description, display_savings_label, display_unit_price,
+                    unit_price_value, unit_price_unit, unit_price_quality,
+                    pack_size_value, pack_size_unit, pack_count,
                     normalized_brand, display_brand,
                     original_price, promo_price, savings_amount, min_purchase_qty, promo_depth,
                     granular_category, source_retailer, source_type,
@@ -1231,8 +1269,16 @@ def upsert_to_postgres(items: list[PromoItem]) -> int:
                     bbox_x_min, bbox_y_min, bbox_x_max, bbox_y_max,
                     tile_bbox_x_min, tile_bbox_y_min, tile_bbox_x_max, tile_bbox_y_max
                 ) VALUES (
-                    %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s,
-                    %s, %s, %s, %s, %s, %s, %s, %s
+                    %s, %s, %s, %s, %s, %s, %s,
+                    %s, %s, %s,
+                    %s, %s, %s,
+                    %s, %s,
+                    %s, %s, %s, %s, %s,
+                    %s, %s, %s,
+                    %s, %s, %s, %s,
+                    %s, %s, %s,
+                    %s, %s, %s, %s,
+                    %s, %s, %s, %s
                 )
                 ON CONFLICT (id) DO UPDATE SET
                     display_name = EXCLUDED.display_name,
@@ -1241,6 +1287,12 @@ def upsert_to_postgres(items: list[PromoItem]) -> int:
                     display_description = EXCLUDED.display_description,
                     display_savings_label = EXCLUDED.display_savings_label,
                     display_unit_price = EXCLUDED.display_unit_price,
+                    unit_price_value = EXCLUDED.unit_price_value,
+                    unit_price_unit = EXCLUDED.unit_price_unit,
+                    unit_price_quality = EXCLUDED.unit_price_quality,
+                    pack_size_value = EXCLUDED.pack_size_value,
+                    pack_size_unit = EXCLUDED.pack_size_unit,
+                    pack_count = EXCLUDED.pack_count,
                     normalized_brand = EXCLUDED.normalized_brand,
                     display_brand = EXCLUDED.display_brand,
                     original_price = EXCLUDED.original_price,
@@ -1275,6 +1327,12 @@ def upsert_to_postgres(items: list[PromoItem]) -> int:
                     item.display_description,
                     item.display_savings_label,
                     item.display_unit_price,
+                    item.unit_price_value,
+                    item.unit_price_unit,
+                    item.unit_price_quality,
+                    item.pack_size_value,
+                    item.pack_size_unit,
+                    item.pack_count,
                     item.normalized_brand,
                     item.display_brand,
                     item.original_price,

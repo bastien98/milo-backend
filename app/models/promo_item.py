@@ -31,6 +31,14 @@ class PromoItem(Base):
     display_savings_label: Mapped[str] = mapped_column(String, nullable=False, default="")
     display_unit_price: Mapped[Optional[str]] = mapped_column(String, nullable=True)
 
+    # Unit pricing — numeric fields derived in Python from pack_size_* (see promo_folders_pipelines.unit_pricing)
+    unit_price_value: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    unit_price_unit: Mapped[Optional[str]] = mapped_column(String(10), nullable=True)
+    pack_size_value: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    pack_size_unit: Mapped[Optional[str]] = mapped_column(String(16), nullable=True)
+    pack_count: Mapped[int] = mapped_column(Integer, nullable=False, server_default="1", default=1)
+    unit_price_quality: Mapped[Optional[str]] = mapped_column(String(16), nullable=True)
+
     normalized_brand: Mapped[Optional[str]] = mapped_column(String(255), nullable=True, index=True)
     display_brand: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
 
@@ -71,4 +79,5 @@ class PromoItem(Base):
         Index("ix_promo_items_source_retailer", "source_retailer"),
         Index("ix_promo_items_granular_category", "granular_category"),
         Index("ix_promo_items_validity", "validity_start", "validity_end"),
+        Index("ix_promo_items_unit_price", "granular_category", "unit_price_unit", "unit_price_value"),
     )

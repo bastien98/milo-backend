@@ -197,14 +197,35 @@ Extract EVERY product that has ANY promotional offer, deal, or reduced price on 
    - For second-item deals: "2e aan Halve Prijs"
    - Examples: "Bespaar €3.00", "1 Gratis Item", "Tot -25% Korting", "2e aan Halve Prijs"
 
-8. **display_unit_price**: Price per standard unit. Compute from promo_price and size info visible on the page.
-   - Use standard Belgian units: €/L for drinks, €/kg for food, €/stuk for countable items
-   - For paper products (toilet paper, kitchen paper, tissues): use €/rol or €/stuk
-   - For tea bags, capsules, tabs, doekjes: use €/stuk
-   - For wine/beer bottles without explicit volume: assume standard 75 cl (wine) or 33 cl (beer blik) and compute €/L
-   - Format: "€X.XX/unit" (e.g., "€0.84/L", "€12.50/kg", "€0.55/stuk", "€0.41/rol")
-   - ALWAYS provide this when ANY size, quantity, or countable unit is in the product name or visible on the page
-   - null ONLY if the product is a generic assortment with no size info whatsoever (e.g., "WC-Gels Of Sprays")
+8. **Pack size extraction** (pack_size_value, pack_size_unit, pack_count): REQUIRED when any size info is visible.
+   Read the size tokens EXACTLY as printed on the page. Do NOT compute, divide, or convert units —
+   Python computes the POST-PROMO effective €/unit from these fields + pricing + min_purchase_qty + savings_amount.
+   - "500 g"               → value=500,  unit="g",       count=1
+   - "1,5 L"               → value=1.5,  unit="l",       count=1
+   - "33 cl"               → value=33,   unit="cl",      count=1
+   - "6 x 25 cl"           → value=25,   unit="cl",      count=6
+   - "24 blikjes 33 cl"    → value=33,   unit="cl",      count=24
+   - "Box 12 capsules"     → value=12,   unit="capsule", count=1
+   - "10 zakjes thee"      → value=10,   unit="zakje",   count=1
+   - "40 tabs"             → value=40,   unit="tab",     count=1
+   - "80 doekjes"          → value=80,   unit="doekje",  count=1
+   - "Pot 250 g"           → value=250,  unit="g",       count=1
+   - "12 rollen"           → value=12,   unit="rol",     count=1
+   - "4-pack toiletpapier 6 rollen" → value=6, unit="rol", count=4
+   - "3-pack ijsjes"       → value=3,    unit="stuk",    count=1
+   - If ONLY a count is visible with no explicit unit (e.g., "3-pack"): use unit="stuk".
+   - If NOTHING visible: leave all three null/default. Do NOT guess 75cl (wine) or 33cl (beer blik) —
+     Python applies those canonical fallbacks when appropriate.
+   - **SPECIAL CASE — APPROXIMATE WEIGHT ('±', 'ongeveer', 'ca.')**:
+     Items sold BY WEIGHT have approximate pack labels — butcher cuts, whole chickens, deli meats, fresh fish.
+     The `promo_price` is the per-kg shelf price, NOT the price for a single pack. Return:
+       pack_size_value=1, pack_size_unit="kg", pack_count=1
+     Examples:
+       - "Gemarineerde Varkensribbetjes ± 500 g"     → value=1, unit="kg", count=1
+       - "Hele Gebraden Kip Van Weleer ± 1,2 kg"     → value=1, unit="kg", count=1
+       - "Toulouserworst ± 500 g"                    → value=1, unit="kg", count=1
+       - "Zalm Ongeveer 300 g"                       → value=1, unit="kg", count=1
+   - Fill pack_size_reasoning with a one-line trace of which visible tokens you used.
 
 9. **granular_category**: Assign ONE from this list. Use "Other" if nothing fits.
 {categories_list}
@@ -252,7 +273,7 @@ def _build_validation_checklist(config: Dict[str, Any]) -> str:
         "- All prices rounded to 2 decimal places (no 3+ decimals)",
         "- display_mechanism is clean and standardized (not raw OCR text)",
         "- display_mechanism includes 'Vanaf X ...' when the discount requires buying multiple items",
-        "- display_unit_price computed when any size info is visible on the page",
+        "- pack_size_value/pack_size_unit/pack_count extracted verbatim from visible size tokens (no conversion)",
         "- granular_category is from the provided list",
         "- If multiple brands share a promo, split into separate items",
         "- normalized_brand is lowercase, matches the brand visible on the page (NEVER 'in-house')",

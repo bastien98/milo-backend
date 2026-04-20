@@ -259,10 +259,27 @@ class PromoSimilarityService:
 
     @staticmethod
     def _project(row: dict[str, Any]) -> dict[str, Any]:
+        from promo_folders_pipelines.unit_pricing import is_displayable
+
         promo_depth = float(row.get("promo_depth") or 0.0)
         discount_pct = int(round(promo_depth))
         validity_start = row.get("validity_start")
         validity_end = row.get("validity_end")
+
+        # Correctness gate: hide display_unit_price when quality/validation checks fail.
+        display_unit_price = (
+            row.get("display_unit_price")
+            if is_displayable(
+                unit_price_value=row.get("unit_price_value"),
+                unit_price_unit=row.get("unit_price_unit"),
+                quality=row.get("unit_price_quality"),
+                display_name=row.get("display_name") or "",
+                pack_size_value=row.get("pack_size_value"),
+                pack_size_unit=row.get("pack_size_unit"),
+            )
+            else None
+        )
+
         return {
             "item_key": row["id"],
             "brand": row.get("display_brand") or "",
@@ -282,7 +299,7 @@ class PromoSimilarityService:
             "display_name": row.get("display_name"),
             "display_mechanism": row.get("display_mechanism"),
             "display_description": row.get("display_description") or "",
-            "display_unit_price": row.get("display_unit_price"),
+            "display_unit_price": display_unit_price,
             "display_savings_label": row.get("display_savings_label") or "",
             "bucket": None,
             "bucket_label": None,
