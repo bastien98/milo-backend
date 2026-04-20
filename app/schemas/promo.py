@@ -28,6 +28,7 @@ class PromoStoreItem(BaseModel):
     thumbnail_url: Optional[str] = None
     image_url: Optional[str] = None
     store_name: Optional[str] = None
+    price_unavailable: bool = False  # True for assortment tiles with no printed price — iOS should render "Prijs in winkel"
 
 
 # ---------------------------------------------------------------------------
@@ -89,6 +90,7 @@ class PromoFolderHotspot(BaseModel):
     thumbnail_url: Optional[str] = None
     image_url: Optional[str] = None
     store_name: str
+    price_unavailable: bool = False  # True for assortment tiles with no printed price
 
 
 class PromoFolderPage(BaseModel):

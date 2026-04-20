@@ -206,6 +206,7 @@ def _query_hotspots_by_folder_url(today_str: str) -> dict[str, list[PromoFolderH
                 thumbnail_url=thumbnail_url,
                 image_url=image_url,
                 store_name=retailer,
+                price_unavailable=(float(promo_price or 0) == 0.0 and float(original_price or 0) == 0.0),
             )
             key = f"{promo_folder_url}:{page_number}"
             hotspots_map.setdefault(key, []).append(hotspot)

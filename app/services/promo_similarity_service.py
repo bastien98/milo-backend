@@ -266,6 +266,14 @@ class PromoSimilarityService:
         validity_start = row.get("validity_start")
         validity_end = row.get("validity_end")
 
+        promo_price = float(row.get("promo_price") or 0.0)
+        original_price = float(row.get("original_price") or 0.0)
+
+        # Assortment tiles (generic multi-SKU promos) often have no printed price on the
+        # folder page. Keep the row so users can still browse/add to list, but signal
+        # iOS to render "Prijs in winkel" instead of "€0.00".
+        price_unavailable = promo_price == 0.0 and original_price == 0.0
+
         # Correctness gate: hide display_unit_price when quality/validation checks fail.
         display_unit_price = (
             row.get("display_unit_price")
@@ -280,12 +288,14 @@ class PromoSimilarityService:
             else None
         )
 
+        display_savings_label = (row.get("display_savings_label") or "") if not price_unavailable else ""
+
         return {
             "item_key": row["id"],
             "brand": row.get("display_brand") or "",
             "product_name": row.get("display_name") or "",
-            "original_price": float(row.get("original_price") or 0.0),
-            "promo_price": float(row.get("promo_price") or 0.0),
+            "original_price": original_price,
+            "promo_price": promo_price,
             "savings": float(row.get("savings_amount") or 0.0),
             "savings_amount": float(row.get("savings_amount") or 0.0),
             "min_purchase_qty": int(row.get("min_purchase_qty") or 1),
@@ -300,7 +310,8 @@ class PromoSimilarityService:
             "display_mechanism": row.get("display_mechanism"),
             "display_description": row.get("display_description") or "",
             "display_unit_price": display_unit_price,
-            "display_savings_label": row.get("display_savings_label") or "",
+            "display_savings_label": display_savings_label,
+            "price_unavailable": price_unavailable,
             "bucket": None,
             "bucket_label": None,
             "thumbnail_url": row.get("thumbnail_url"),

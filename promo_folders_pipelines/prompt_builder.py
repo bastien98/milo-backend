@@ -225,6 +225,15 @@ Extract EVERY product that has ANY promotional offer, deal, or reduced price on 
        - "Hele Gebraden Kip Van Weleer ± 1,2 kg"     → value=1, unit="kg", count=1
        - "Toulouserworst ± 500 g"                    → value=1, unit="kg", count=1
        - "Zalm Ongeveer 300 g"                       → value=1, unit="kg", count=1
+   - **SPECIAL CASE — SIZE RANGE ('X g - Y g', 'X - Y cl', 'X/Y g')**:
+     Products packed in varying sizes (e.g. cheese wedges, pre-cut fruit, fresh pizza). Always
+     pick the LOWER value — this gives the user the worst-case €/kg so they're never surprised
+     by a more expensive-than-displayed deal.
+     Examples:
+       - "Gesneden Fruit In Ronde Potten 80 g - 175 g" → value=80,  unit="g",  count=1
+       - "Pizza Traiteur Trattoria 410 g - 480 g"      → value=410, unit="g",  count=1
+       - "Groentesnack Alle Soorten 125 g - 250 g"     → value=125, unit="g",  count=1
+       - "Kaas Wedges 200/300 g"                       → value=200, unit="g",  count=1
    - Fill pack_size_reasoning with a one-line trace of which visible tokens you used.
 
 9. **granular_category**: Assign ONE from this list. Use "Other" if nothing fits.
