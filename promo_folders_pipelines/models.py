@@ -53,6 +53,9 @@ class PromoItem:
     granular_category: str = "Other"   # 111-item taxonomy — powers similarity ranking
     category: str = ""                 # Parent category (~22 values) — what iOS displays
 
+    # --- Verbatim tile text (Gemini-extracted, Markdown-formatted, displayed as-is in iOS) ---
+    promo_text_markdown: Optional[str] = None
+
     # --- Pipeline metadata (not from Gemini) ---
     validity_start: Optional[str] = None
     validity_end: Optional[str] = None

@@ -319,4 +319,5 @@ class PromoSimilarityService:
             "mechanism_y": row.get("mechanism_y"),
             "promo_campaign": row.get("promo_campaign"),
             "category": row.get("category"),
+            "promo_text_markdown": row.get("promo_text_markdown"),
         }

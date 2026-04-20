@@ -76,6 +76,8 @@ class PromoItem(Base):
     image_url: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     hero_url: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
 
+    promo_text_markdown: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+
     # Bounding boxes (normalized 0-1 coordinates)
     bbox_x_min: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
     bbox_y_min: Mapped[Optional[float]] = mapped_column(Float, nullable=True)

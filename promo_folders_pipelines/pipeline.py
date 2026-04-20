@@ -201,6 +201,12 @@ class _PromoItemSchema(PydanticBaseModel):
         description="Pick the single best granular category from the provided list. Use 'Other' if none fit."
     )
 
+    # --- Verbatim tile text, reformatted as Markdown. Rules live in the system prompt. ---
+    promo_text_markdown: Optional[str] = Field(
+        default=None,
+        description="All printed text on the tile, reformatted as Markdown per the VERBATIM PROMO TEXT rules.",
+    )
+
     # --- Geometry (mandatory on every item) ---
     bbox: _BboxSchema = Field(
         description=(
@@ -1025,6 +1031,7 @@ def parse_promo_items(
                 pack_count=pack_count,
                 granular_category=granular,
                 category=parent_category,
+                promo_text_markdown=raw.get("promo_text_markdown"),
                 validity_start=validity_start,
                 validity_end=validity_end,
                 source_retailer=store_id,
@@ -1089,9 +1096,20 @@ def _normalize_bbox(raw: Optional[dict]) -> Optional[dict]:
 
 
 def generate_record_id(item: PromoItem) -> str:
-    """Generate a deterministic ID for a promo item."""
+    """Generate a deterministic ID for a promo item.
+
+    Includes page_number and tile_bbox coordinates so same-name variants on the
+    same page (e.g. "Kipfilet" 600g vs 1kg) produce distinct IDs and don't
+    collapse under ON CONFLICT (id) DO UPDATE during upsert.
+    """
+    tb = item.tile_bbox or {}
+    tile_sig = (
+        f"{tb.get('x_min','')}:{tb.get('y_min','')}:"
+        f"{tb.get('x_max','')}:{tb.get('y_max','')}"
+    )
     key = (
         f"{item.source_retailer}:{item.display_name}:"
+        f"{item.page_number}:{tile_sig}:"
         f"{item.validity_start}:{item.validity_end}"
     )
     return hashlib.sha256(key.encode()).hexdigest()[:16]
@@ -1260,11 +1278,25 @@ def upsert_to_postgres(items: list[PromoItem]) -> int:
     import psycopg2
     from psycopg2.extras import Json
 
+    seen_ids: dict[str, PromoItem] = {}
+    for item in items:
+        rid = generate_record_id(item)
+        if rid in seen_ids:
+            prev = seen_ids[rid]
+            logger.warning(
+                "ID COLLISION during upsert — dropping duplicate. "
+                "id=%s retailer=%s page=%s names=(%r, %r) tile_bboxes=(%s, %s)",
+                rid, item.source_retailer, item.page_number,
+                prev.display_name, item.display_name,
+                prev.tile_bbox, item.tile_bbox,
+            )
+            continue
+        seen_ids[rid] = item
+
     conn = psycopg2.connect(_get_pg_connection_string())
     try:
         cur = conn.cursor()
-        for item in items:
-            record_id = generate_record_id(item)
+        for record_id, item in seen_ids.items():
             # Extract bbox coordinates (None if bbox is missing)
             bbox = item.bbox or {}
             tile = item.tile_bbox or {}
@@ -1285,7 +1317,8 @@ def upsert_to_postgres(items: list[PromoItem]) -> int:
                     page_number, promo_folder_url, validity_start, validity_end,
                     thumbnail_url, image_url, hero_url,
                     bbox_x_min, bbox_y_min, bbox_x_max, bbox_y_max,
-                    tile_bbox_x_min, tile_bbox_y_min, tile_bbox_x_max, tile_bbox_y_max
+                    tile_bbox_x_min, tile_bbox_y_min, tile_bbox_x_max, tile_bbox_y_max,
+                    promo_text_markdown
                 ) VALUES (
                     %s, %s, %s, %s, %s, %s, %s,
                     %s, %s, %s, %s,
@@ -1299,7 +1332,8 @@ def upsert_to_postgres(items: list[PromoItem]) -> int:
                     %s, %s, %s, %s,
                     %s, %s, %s,
                     %s, %s, %s, %s,
-                    %s, %s, %s, %s
+                    %s, %s, %s, %s,
+                    %s
                 )
                 ON CONFLICT (id) DO UPDATE SET
                     display_name = EXCLUDED.display_name,
@@ -1346,7 +1380,8 @@ def upsert_to_postgres(items: list[PromoItem]) -> int:
                     tile_bbox_x_min = EXCLUDED.tile_bbox_x_min,
                     tile_bbox_y_min = EXCLUDED.tile_bbox_y_min,
                     tile_bbox_x_max = EXCLUDED.tile_bbox_x_max,
-                    tile_bbox_y_max = EXCLUDED.tile_bbox_y_max
+                    tile_bbox_y_max = EXCLUDED.tile_bbox_y_max,
+                    promo_text_markdown = EXCLUDED.promo_text_markdown
                 """,
                 (
                     record_id,
@@ -1395,6 +1430,7 @@ def upsert_to_postgres(items: list[PromoItem]) -> int:
                     tile.get("y_min"),
                     tile.get("x_max"),
                     tile.get("y_max"),
+                    item.promo_text_markdown,
                 ),
             )
 
@@ -1403,8 +1439,10 @@ def upsert_to_postgres(items: list[PromoItem]) -> int:
     finally:
         conn.close()
 
-    logger.info(f"PostgreSQL upsert complete: {len(items)} records in promo_items table")
-    return len(items)
+    dropped = len(items) - len(seen_ids)
+    suffix = f" ({dropped} dropped as id collisions)" if dropped else ""
+    logger.info(f"PostgreSQL upsert complete: {len(seen_ids)} records in promo_items table{suffix}")
+    return len(seen_ids)
 
 
 def delete_retailer_promos_pg(retailer: str, validity_start: str = None, validity_end: str = None) -> int:

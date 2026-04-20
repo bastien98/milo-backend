@@ -32,6 +32,7 @@ class PromoStoreItem(BaseModel):
     mechanism_y: Optional[float] = None
     promo_campaign: Optional[str] = None
     category: Optional[str] = None  # Parent consumer category (~22 values)
+    promo_text_markdown: Optional[str] = None  # Verbatim tile text as Markdown
 
 
 # ---------------------------------------------------------------------------
@@ -96,6 +97,7 @@ class PromoFolderHotspot(BaseModel):
     price_unavailable: bool = False  # True for assortment tiles with no printed price
     mechanism_kind: Optional[str] = None
     promo_campaign: Optional[str] = None
+    promo_text_markdown: Optional[str] = None
 
 
 class PromoFolderPage(BaseModel):

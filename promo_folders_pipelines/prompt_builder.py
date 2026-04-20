@@ -28,6 +28,34 @@ Classify every promo into ONE canonical `mechanism_kind` and fill `mechanism_x` 
 Put the store's marketing banner (e.g. "Bonus", "Prix Choc", "Mega Deal", "Sunday Deal", "Bonus Card") verbatim in `promo_campaign`. It is ORTHOGONAL to `mechanism_kind` — still pick the underlying mechanism kind from the table above."""
 
 
+_PROMO_TEXT_MARKDOWN_SECTION = """## VERBATIM PROMO TEXT (`promo_text_markdown`)
+Transcribe every piece of text that is actually printed on the promo tile, then reformat it as clean Markdown for display to the end user. This field is shown to shoppers as-is, so it must be faithful and readable.
+
+RULES:
+1. **Verbatim wording** — keep the original Dutch or French exactly as printed. Do not translate, paraphrase, or summarize. Do not invent text that is not on the tile.
+2. **Markdown formatting**:
+   - Use `**bold**` for the mechanism/headline line (e.g. `**1+1 GRATIS**`, `**-25%**`, `**€2,49**`).
+   - Regular lines for the product name and descriptive copy.
+   - Use `- ` bulleted lists for enumerations (multi-brand choices, variant lists, bullet points printed on the tile).
+   - Separate logical blocks with a single blank line.
+3. **Prices** — write them exactly as on the tile: euro sign + comma decimal (e.g. `€2,49`, `€0,99`). Do not round or reformat.
+4. **Do NOT include** image descriptions, bounding box info, or anything not actually printed on the tile.
+5. **Do NOT wrap** the output in a code fence or surrounding quotes.
+6. Return `null` only if the tile literally has no visible text (extremely rare — e.g. purely visual teaser).
+
+EXAMPLE for a Coca-Cola 1+1 tile showing "1+1 GRATIS / Coca-Cola Zero 1,5 L / €2,49 per fles / Geldig t/m zondag":
+```
+**1+1 GRATIS**
+
+Coca-Cola Zero 1,5 L
+
+- €2,49 per fles
+- Geldig t/m zondag
+```
+(Do not include the ``` fences in your output — they are only shown here to delimit the example.)"""
+
+
+
 def build_system_prompt(config: Dict[str, Any], categories_list: str) -> str:
     """Build a complete Gemini system prompt from a store config and the granular category list."""
     display_name = config["display_name"]
@@ -57,6 +85,9 @@ def build_system_prompt(config: Dict[str, Any], categories_list: str) -> str:
 
     # --- Canonical mechanism table (shared across all stores) ---
     sections.append(_CANONICAL_MECHANISM_TABLE)
+
+    # --- Verbatim promo text → Markdown ---
+    sections.append(_PROMO_TEXT_MARKDOWN_SECTION)
 
     # --- Store brands (helps Gemini recognize house brands) ---
     store_brands = config.get("store_brands", [])

@@ -81,6 +81,7 @@ class PromoItemRepository:
                 validity_end,
                 thumbnail_url,
                 image_url,
+                promo_text_markdown,
                 (normalized_brand IS NOT NULL
                  AND CAST(:src_brand AS text) IS NOT NULL
                  AND normalized_brand = CAST(:src_brand AS text))     AS is_same_brand,
@@ -180,6 +181,7 @@ class PromoItemRepository:
                 "thumbnail_url": stmt.excluded.thumbnail_url,
                 "image_url": stmt.excluded.image_url,
                 "hero_url": stmt.excluded.hero_url,
+                "promo_text_markdown": stmt.excluded.promo_text_markdown,
             },
         )
         result = await self.db.execute(stmt)
