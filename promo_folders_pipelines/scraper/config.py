@@ -16,7 +16,6 @@ RETAILERS = {
         "shop_uuid": "86bddb08-7894-4325-bfa8-71ee23c0f26d",
         "store_id": "colruyt",
         "max_folders": 1,
-        "folder_name_filter": "alle acties",
     },
     "carrefour_hyper": {
         "shop_slug": "carrefour",

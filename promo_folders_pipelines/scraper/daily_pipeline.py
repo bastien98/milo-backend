@@ -58,12 +58,11 @@ from promo_folders_pipelines.stores import load_store_config
 from promo_folders_pipelines.scraper.config import get_retailer, list_retailers
 from promo_folders_pipelines.scraper.scrape import (
     discover_folders,
-    download_cover_image,
     download_page_images,
     fetch_folder_pages,
     FolderInfo,
 )
-from promo_folders_pipelines.scraper.classify import classify_folder
+from promo_folders_pipelines.scraper.classify import select_food_folders
 from promo_folders_pipelines.scraper.upload import (
     clear_store,
     upload_folder,
@@ -79,41 +78,13 @@ logger = logging.getLogger(__name__)
 def _select_folders(
     key: str, config: dict, folders: list[FolderInfo],
 ) -> list[FolderInfo]:
-    """Classify and filter folders for a retailer."""
-    max_folders = config["max_folders"]
-
-    # Name-based filter (e.g. Colruyt → only "Alle Acties" folder)
-    name_filter = config.get("folder_name_filter")
-    if name_filter:
-        matched = [f for f in folders if name_filter.lower() in f.name.lower()]
-        if matched:
-            logger.info(f"Name filter '{name_filter}': matched {len(matched)}/{len(folders)} folder(s)")
-            return matched[:max_folders]
-        else:
-            logger.warning(f"Name filter '{name_filter}' matched 0/{len(folders)} folders, falling back to classification")
-
-    if len(folders) == 1:
-        logger.info("Single folder found, skipping classification")
-        return folders
-
-    selected = []
-    for folder in folders:
-        try:
-            cover = download_cover_image(folder)
-            is_food = classify_folder(cover, config["store_id"])
-            if is_food:
-                selected.append(folder)
-                if len(selected) >= max_folders:
-                    logger.info(f"Reached max_folders={max_folders}, stopping classification")
-                    break
-        except Exception as e:
-            logger.warning(f"Classification failed for {folder.uuid}: {e}")
-            continue
-
-    logger.info(
-        f"Classification: {len(selected)}/{len(folders)} folders accepted as food/grocery"
+    """Thin wrapper so the orchestration stays readable; classifier + fail-open
+    + max_folders cap all live in scraper.classify.select_food_folders."""
+    return select_food_folders(
+        folders,
+        max_folders=config["max_folders"],
+        retailer_name=config["store_id"],
     )
-    return selected
 
 
 def process_retailer(

@@ -39,11 +39,10 @@ except ImportError:
 from promo_folders_pipelines.scraper.config import get_retailer, list_retailers
 from promo_folders_pipelines.scraper.scrape import (
     discover_folders,
-    download_cover_image,
     download_page_images,
     fetch_folder_pages,
 )
-from promo_folders_pipelines.scraper.classify import classify_folder
+from promo_folders_pipelines.scraper.classify import select_food_folders
 from promo_folders_pipelines.scraper.upload import clear_store, upload_folder
 
 logging.basicConfig(
@@ -71,31 +70,8 @@ def scrape_retailer(key: str, dry_run: bool = False) -> bool:
         logger.warning(f"No folders found for {key}")
         return False
 
-    # Step 2: Classify folders with Gemini Vision
-    # Always classify when multiple folders exist to filter non-food folders.
-    # Skip classification only for single-folder retailers.
-    if len(folders) == 1:
-        selected = folders
-        logger.info("Single folder found, skipping classification")
-    else:
-        selected = []
-        for folder in folders:
-            try:
-                cover = download_cover_image(folder)
-                is_food = classify_folder(cover, config["store_id"])
-                if is_food:
-                    selected.append(folder)
-                    if len(selected) >= max_folders:
-                        logger.info(f"Reached max_folders={max_folders}, stopping classification")
-                        break
-            except Exception as e:
-                logger.warning(f"Classification failed for {folder.uuid}: {e}")
-                continue
-
-        logger.info(
-            f"Classification: {len(selected)}/{len(folders)} folders accepted as food/grocery "
-            f"(max_folders={max_folders})"
-        )
+    # Step 2: Classify folders (single source of truth — classify.select_food_folders).
+    selected = select_food_folders(folders, max_folders=max_folders, retailer_name=store_id)
 
     if not selected:
         logger.warning(f"No food/grocery folders found for {key}")
