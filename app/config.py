@@ -49,6 +49,12 @@ class Settings(BaseSettings):
     # Set via Railway env var: ADMIN_UIDS=uid1,uid2
     ADMIN_UIDS: List[str] = []
 
+    # Firebase Web SDK config (public config, used by /admin HTML page)
+    # Set via Railway env vars — copy from Firebase Console > Project Settings > Web app
+    FIREBASE_WEB_API_KEY: Optional[str] = None
+    FIREBASE_WEB_AUTH_DOMAIN: Optional[str] = None
+    FIREBASE_WEB_PROJECT_ID: Optional[str] = None
+
     # CORS
     CORS_ORIGINS: List[str] = ["*"]
 

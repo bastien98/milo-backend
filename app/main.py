@@ -23,6 +23,7 @@ from app.core.exceptions import (
     ReceiptFraudError,
 )
 from app.api.v2.router import api_router as api_router_v2
+from app.api.v2 import admin_page
 from app.db.session import init_db
 
 settings = get_settings()
@@ -238,6 +239,9 @@ async def general_exception_handler(request: Request, exc: Exception):
 
 # Include API router
 app.include_router(api_router_v2, prefix="/api/v2")
+
+# Admin HTML page (served at /admin, no API prefix)
+app.include_router(admin_page.router)
 
 
 # Root health check
