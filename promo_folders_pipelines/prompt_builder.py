@@ -1,65 +1,78 @@
 """
 Generic prompt builder for promo folder extraction.
 
-Assembles a Gemini system prompt from a store's YAML config
-and the shared category list.
+The system prompt is intentionally minimal: Gemini only produces the PERCEPTUAL
+signal (visible text, prices, pack tokens, category, mechanism kind, bboxes).
+All display strings, savings math, minimum purchase quantities, and cross-store
+normalization are derived in Python by `promo_folders_pipelines.mechanism`.
 """
 
 from datetime import date
 from typing import Any, Dict
 
 
+_CANONICAL_MECHANISM_TABLE = """## PROMO MECHANISMS
+Classify every promo into ONE canonical `mechanism_kind` and fill `mechanism_x` / `mechanism_y` with the printed numbers. DO NOT output localized labels — Python builds those.
+
+| mechanism_kind         | Typical printed labels (any store, NL/FR)                        | mechanism_x         | mechanism_y         |
+|------------------------|------------------------------------------------------------------|---------------------|---------------------|
+| buy_x_get_y_free       | "X+Y gratis", "X+Y gratuit", "1+1 gratis"                        | X (int)             | Y (int)             |
+| second_half_price      | "2e aan halve prijs", "2e halve prijs", "2ème à moitié prix"     | null                | null                |
+| second_percent_off     | "2e aan -X%", "2e tegen -X%", "2e voor -X%"                      | X (percent)         | null                |
+| percent_off            | "-X%", "X% korting", bare "-30%"                                  | X (percent)         | null                |
+| percent_off_from_n     | "-X% vanaf Y verpakkingen", "-X% bij aankoop van Y", "-X% à partir de Y" | X (percent)  | Y (min qty)         |
+| euro_off               | "€X.XX korting", "-€X korting", "€X.XX réduction"                | X (euro amount)     | null                |
+| n_for_euro             | "X voor €Y", "X pour €Y"                                          | X (qty)             | Y (total euro)      |
+| price_reduction        | plain lowered price, "Prix Choc", "Mega Deal" (no other label)   | null                | null                |
+
+Put the store's marketing banner (e.g. "Bonus", "Prix Choc", "Mega Deal", "Sunday Deal", "Bonus Card") verbatim in `promo_campaign`. It is ORTHOGONAL to `mechanism_kind` — still pick the underlying mechanism kind from the table above."""
+
+
 def build_system_prompt(config: Dict[str, Any], categories_list: str) -> str:
-    """Build a complete Gemini system prompt from a store config and categories."""
-    store_id = config["store_id"]
+    """Build a complete Gemini system prompt from a store config and the granular category list."""
     display_name = config["display_name"]
     language = config.get("language", "nl_fr")
     bilingual_dedup = config.get("bilingual_dedup", False)
 
-    sections = []
+    sections: list[str] = []
 
     # --- Intro ---
     sections.append(
         f"You are a specialist in extracting promotional offers from "
-        f"{display_name} supermarket folders (Belgium).\n"
-        f"You have deep knowledge of {display_name}'s folder layout, pricing labels, "
-        f"and promotional mechanics."
+        f"{display_name} supermarket folders (Belgium)."
     )
 
     # --- Folder format & language ---
     sections.append(_build_language_section(display_name, language, bilingual_dedup))
 
-    # --- Validity format ---
+    # --- Validity dates ---
     validity_fmt = config.get("validity_format")
     if validity_fmt:
         sections.append(
-            f"## VALIDITY DATES\n"
+            "## VALIDITY DATES\n"
             f"The validity period is typically: {validity_fmt}\n"
             f"Convert to YYYY-MM-DD (today is {date.today().isoformat()}, use year {date.today().year} if not shown).\n"
-            f"Apply the SAME validity dates to all items unless an item shows its own date range.\n"
-            f"If no dates are visible on these pages, use null."
+            "Apply the same validity to all items unless an item shows its own range. Use null when no dates are visible."
         )
 
-    # --- Promo mechanisms ---
-    mechanisms = config.get("promo_mechanisms", [])
-    if mechanisms:
-        sections.append(_build_mechanisms_section(mechanisms))
+    # --- Canonical mechanism table (shared across all stores) ---
+    sections.append(_CANONICAL_MECHANISM_TABLE)
 
-    # --- Store brands ---
+    # --- Store brands (helps Gemini recognize house brands) ---
     store_brands = config.get("store_brands", [])
     if store_brands:
         sections.append(_build_store_brands_section(display_name, store_brands))
 
     # --- Extraction rules ---
-    sections.append(_build_extraction_rules(config, categories_list))
+    sections.append(_build_extraction_rules(categories_list))
 
-    # --- Extra rules (escape hatch) ---
+    # --- Extra rules (escape hatch from store YAML) ---
     extra_rules = config.get("extra_rules", [])
     if extra_rules:
         sections.append("## ADDITIONAL RULES\n" + "\n".join(f"- {r}" for r in extra_rules))
 
     # --- Validation checklist ---
-    sections.append(_build_validation_checklist(config))
+    sections.append(_build_validation_checklist())
 
     return "\n\n".join(sections)
 
@@ -67,13 +80,9 @@ def build_system_prompt(config: Dict[str, Any], categories_list: str) -> str:
 def _build_language_section(display_name: str, language: str, bilingual_dedup: bool) -> str:
     lines = [f"## {display_name.upper()} FOLDER FORMAT"]
     if language == "nl_fr":
-        lines.append(
-            f"- {display_name} folders are typically bilingual: Dutch on one side, French on the other."
-        )
+        lines.append(f"- {display_name} folders are typically bilingual: Dutch on one side, French on the other.")
         if bilingual_dedup:
-            lines.append(
-                "  Extract from EITHER language — do not duplicate items that appear in both languages."
-            )
+            lines.append("  Extract from EITHER language — do not duplicate items that appear in both languages.")
     elif language == "nl":
         lines.append(f"- {display_name} folders are in Dutch.")
     elif language == "fr":
@@ -81,213 +90,72 @@ def _build_language_section(display_name: str, language: str, bilingual_dedup: b
     return "\n".join(lines)
 
 
-def _build_mechanisms_section(mechanisms: list) -> str:
-    lines = ["## PROMO MECHANISMS\nRecognize and extract these promotional labels correctly:"]
-    for m in mechanisms:
-        label = m["label"]
-        aliases = m.get("aliases", [])
-        desc = m.get("description", "")
-        alias_str = " / ".join(f'**"{a}"**' for a in aliases) if aliases else ""
-        if alias_str:
-            lines.append(f'- **"{label}"** / {alias_str}: {desc}')
-        else:
-            lines.append(f'- **"{label}"**: {desc}')
-    lines.append('- Simple price reductions with no explicit label: use "Prijsverlaging" (NL) or "Réduction de prix" (FR)')
-    return "\n".join(lines)
-
-
 def _build_store_brands_section(display_name: str, store_brands: list) -> str:
     lines = [
         f"## {display_name.upper()} STORE BRANDS\n"
-        f"These are {display_name}'s house brands — include the brand name in display_name:"
+        f"These are {display_name}'s house brands — include the brand name in `primary_brand`:"
     ]
     for b in store_brands:
         lines.append(f'- **{b["name"].title()}**: {b.get("description", "")}')
-    lines.append(
-        "\nAll other recognized brands are national/premium brands."
-    )
+    lines.append("\nAll other recognized brands are national / premium brands.")
     return "\n".join(lines)
 
 
-def _build_extraction_rules(config: Dict[str, Any], categories_list: str) -> str:
-    # Price calculation table (escape hatch)
-    price_table = config.get("price_calculation_table") or ""
-    if price_table:
-        price_table = f"\n{price_table}"
-
+def _build_extraction_rules(categories_list: str) -> str:
     return f"""## EXTRACTION RULES
 
-### COVERAGE GOAL — READ THIS FIRST
-Extract EVERY product that has ANY promotional offer, deal, or reduced price on the page.
-- Coverage is the top priority: extract ALL promo items on the page.
-- If only one price is visible (no original_price), set original_price = promo_price.
-- If the promo mechanism is unclear, use "Promo" as display_mechanism.
-- DO extract fresh produce, butcher/deli items, and store-brand items — these are promos too.
-- ONLY skip purely decorative elements, recipes, or store information that are clearly NOT product offers.
+### COVERAGE GOAL
+Extract EVERY product that has ANY promotional offer, deal, or reduced price. A single promo tile = ONE item, regardless of how many products are shown inside it.
 
-### For Each Promotional Item Extract:
+### MULTI-PRODUCT TILES (IMPORTANT)
+When a single tile advertises multiple brands or variants together (e.g. "Coca-Cola, Fanta of Sprite", "Lay's, Doritos of Bugles"):
+- Return ONE item, not several.
+- `primary_brand` = the most prominent brand on the tile.
+- `additional_brands` = the other brands listed on the tile (e.g. ["Fanta", "Sprite"]).
+- `product_name` describes the shared product category + size (e.g. "Frisdrank 1,5 L" or keep the prominent brand's name if it dominates).
+- Shared pricing, pack size, mechanism, and bbox apply to the item as a whole.
 
-1. **display_name**: Clean, human-readable product label for the consumer app.
-   - Title Case (capitalize first letter of each significant word)
-   - Format: "[Product Type] [Variant/Flavour] [Size Info]"
-   - The brand is extracted separately in the display_brand field, so OMIT the brand from
-     display_name when the product is still clearly identifiable without it.
-   - However, KEEP the brand in display_name when it is essential to identify the product
-     (e.g., "Coca-Cola Zero" makes no sense as just "Zero", "Jupiler Pils" is too generic as just "Pils").
-   - ALWAYS include size/quantity info when visible (e.g., "4 x 125 g" not just "125 g")
-   - For drinks (beer, soda, wine, water, juice): volume is CRITICAL — always include it
-     (e.g., "33 cl", "50 cl", "1,5 L", "6 x 25 cl"). If a can/bottle ("blik"/"fles") is shown
-     but no explicit volume, infer from the unit price or context on the page.
-   - Include variant/flavour if applicable
-   - Do NOT include promo text, pricing, or mechanism info
-   - Examples (brand omitted — shown separately):
-     - "Yoghurt Appel-Kaneel 4 x 115 g" (brand "Oikos" shown separately)
-     - "Chips Explosions Salt & Pepper 150 g" (brand "Croky" shown separately)
-     - "Serranoham Reserva 200 g" (brand "Boni Selection" shown separately)
-   - Examples (brand kept — essential for identity):
-     - "Coca-Cola Zero 1,5 L" (just "Zero 1,5 L" is meaningless)
-     - "Jupiler Pils 24 x 25 cl" (just "Pils 24 x 25 cl" is too generic)
+### For each promotional item extract:
 
-2. **original_price**: Regular price before promo (float, comma→dot).
-   If not visible, set equal to promo_price. Round to 2 decimal places.{price_table}
+1. **product_name** — clean Title Case label for the consumer app.
+   - Omit the brand when the product is identifiable without it (brand lives in `primary_brand`).
+   - Keep the brand INSIDE `product_name` only when essential for identity ("Coca-Cola Zero", "Jupiler Pils").
+   - For drinks always include volume ("33 cl", "6 x 25 cl", "1,5 L").
+   - No promo text, no pricing.
 
-3. **promo_price**: Price of ONE item/pack as shown on the shelf (float, comma→dot). REQUIRED.
-   - For simple discounts (-25%, -30%): original_price × (1 − discount percentage)
-   - For ANY "X+Y gratis" deal (1+1, 2+1, 3+1, 3+3, 4+1, 8+4, 12+6, etc.): promo_price = original_price. NEVER divide or average — the deal's value goes in savings_amount, not here.
-   - For "2e aan halve prijs": price of one item at full price (same as original_price)
-   - For "X voor €Y": €Y ÷ X
-   - Round to 2 decimal places
-   - The deal's value is communicated via savings_amount and display_savings_label, NOT by manipulating promo_price.
+2. **primary_brand / additional_brands** — Title Case brand names as printed. null for truly unbranded tiles.
 
-4. **savings_amount**: Total euro savings when completing the deal. REQUIRED.
-   - "1+1 gratis" @ €3.00: savings = 3.00 (one free item worth €3)
-   - "2+1 gratis" @ €3.00: savings = 3.00 (one free item worth €3)
-   - "2e aan halve prijs" @ €3.00: savings = 1.50 (half off second item)
-   - "-25%" on a single item @ €4.00: savings = 1.00 (€4 × 0.25)
-   - "-25% vanaf 2 verpakkingen" @ €4.00: savings = 2.00 (€4 × 0.25 × 2 items)
-   - "-20% vanaf 3 verpakkingen" @ €2.00: savings = 1.20 (€2 × 0.20 × 3 items)
-   - "12+6 gratis" @ €2.33: savings = 13.98 (6 free items × €2.33)
-   - "€0.50 korting": savings = 0.50
-   - Round to 2 decimal places
+3. **Pricing (visible only — NEVER compute):**
+   - `original_price`: the struck-through or "was" price, only if visible.
+   - `promo_price`: the shelf price actually printed on the tile.
+   - `stated_savings`: only when the tile explicitly prints a savings amount ("Bespaar €3.00"). Otherwise null.
+   - Do NOT derive one price from another. Do NOT "compute" promo_price from a percentage. Python does that.
 
-5. **display_mechanism**: Standardized promo label. REQUIRED.
-   - Title case for words, keep numbers/symbols as-is
-   - If no explicit promo label is shown, use "Prijsverlaging"
-   - **CRITICAL**: For percentage discounts that require buying multiple items, ALWAYS include
-     the condition: "-25% Vanaf 2 Verpakkingen", NOT just "-25%". Use the correct unit
-     (Verpakkingen, Flessen, Blikken, Bokalen, Bakken, Producten) and quantity.
-     Only use a bare "-25%" if the discount applies to a SINGLE item with no minimum purchase.
-   - Examples: "1+1 Gratis", "-25%", "2e aan Halve Prijs", "2+1 Gratis",
-     "-25% Vanaf 2 Verpakkingen", "-20% Vanaf 3 Flessen", "-30% Vanaf 12 Blikken",
-     "Prijsverlaging", "3+3 Gratis", "12+6 Gratis"
+4. **Pack size (observable tokens — NEVER convert):**
+   - `pack_size_value`, `pack_size_unit`, `pack_count` transcribed exactly as printed.
+   - "500 g" → value=500, unit="g", count=1.
+   - "1,5 L" → value=1.5, unit="l", count=1.
+   - "6 x 25 cl" → value=25, unit="cl", count=6.
+   - "24 blikjes 33 cl" → value=33, unit="cl", count=24.
+   - "4-pack toiletpapier 6 rollen" → value=6, unit="rol", count=4.
+   - Countables without an explicit unit → unit="stuk".
+   - Approximate/per-weight items ("± 500 g", "ongeveer 1,2 kg"): value=1, unit="kg", count=1 — the printed price is then the €/kg shelf price.
+   - Size ranges ("80 g - 175 g", "200/300 g"): pick the LOWER value (worst-case €/kg).
+   - Nothing visible → leave all three null.
 
-6. **display_description**: Plain-language Dutch explanation of the deal (~80 chars max). REQUIRED.
-   - Explain what the shopper needs to DO and what they GET
-   - Must be understandable without seeing the folder
-   - Examples:
-     - "Koop 2 en krijg de 3e gratis"
-     - "Nu €0.80 goedkoper per stuk"
-     - "Alle Croky chips met 25% korting"
-     - "Coca-Cola flessen: koop 12, krijg 6 gratis"
+5. **Mechanism:** classify via `mechanism_kind` + `mechanism_x` / `mechanism_y` per the table above. Put any store marketing banner in `promo_campaign` verbatim.
 
-7. **display_savings_label**: Human-friendly savings text. REQUIRED.
-   - When exact euro savings are known: "Bespaar €X.XX"
-   - For multi-buy free items: "1 Gratis Item", "6 Gratis Items"
-   - For percentage discounts: "Tot -25% Korting"
-   - For second-item deals: "2e aan Halve Prijs"
-   - Examples: "Bespaar €3.00", "1 Gratis Item", "Tot -25% Korting", "2e aan Halve Prijs"
-
-8. **Pack size extraction** (pack_size_value, pack_size_unit, pack_count): REQUIRED when any size info is visible.
-   Read the size tokens EXACTLY as printed on the page. Do NOT compute, divide, or convert units —
-   Python computes the POST-PROMO effective €/unit from these fields + pricing + min_purchase_qty + savings_amount.
-   - "500 g"               → value=500,  unit="g",       count=1
-   - "1,5 L"               → value=1.5,  unit="l",       count=1
-   - "33 cl"               → value=33,   unit="cl",      count=1
-   - "6 x 25 cl"           → value=25,   unit="cl",      count=6
-   - "24 blikjes 33 cl"    → value=33,   unit="cl",      count=24
-   - "Box 12 capsules"     → value=12,   unit="capsule", count=1
-   - "10 zakjes thee"      → value=10,   unit="zakje",   count=1
-   - "40 tabs"             → value=40,   unit="tab",     count=1
-   - "80 doekjes"          → value=80,   unit="doekje",  count=1
-   - "Pot 250 g"           → value=250,  unit="g",       count=1
-   - "12 rollen"           → value=12,   unit="rol",     count=1
-   - "4-pack toiletpapier 6 rollen" → value=6, unit="rol", count=4
-   - "3-pack ijsjes"       → value=3,    unit="stuk",    count=1
-   - If ONLY a count is visible with no explicit unit (e.g., "3-pack"): use unit="stuk".
-   - If NOTHING visible: leave all three null/default. Do NOT guess 75cl (wine) or 33cl (beer blik) —
-     Python applies those canonical fallbacks when appropriate.
-   - **SPECIAL CASE — APPROXIMATE WEIGHT ('±', 'ongeveer', 'ca.')**:
-     Items sold BY WEIGHT have approximate pack labels — butcher cuts, whole chickens, deli meats, fresh fish.
-     The `promo_price` is the per-kg shelf price, NOT the price for a single pack. Return:
-       pack_size_value=1, pack_size_unit="kg", pack_count=1
-     Examples:
-       - "Gemarineerde Varkensribbetjes ± 500 g"     → value=1, unit="kg", count=1
-       - "Hele Gebraden Kip Van Weleer ± 1,2 kg"     → value=1, unit="kg", count=1
-       - "Toulouserworst ± 500 g"                    → value=1, unit="kg", count=1
-       - "Zalm Ongeveer 300 g"                       → value=1, unit="kg", count=1
-   - **SPECIAL CASE — SIZE RANGE ('X g - Y g', 'X - Y cl', 'X/Y g')**:
-     Products packed in varying sizes (e.g. cheese wedges, pre-cut fruit, fresh pizza). Always
-     pick the LOWER value — this gives the user the worst-case €/kg so they're never surprised
-     by a more expensive-than-displayed deal.
-     Examples:
-       - "Gesneden Fruit In Ronde Potten 80 g - 175 g" → value=80,  unit="g",  count=1
-       - "Pizza Traiteur Trattoria 410 g - 480 g"      → value=410, unit="g",  count=1
-       - "Groentesnack Alle Soorten 125 g - 250 g"     → value=125, unit="g",  count=1
-       - "Kaas Wedges 200/300 g"                       → value=200, unit="g",  count=1
-   - Fill pack_size_reasoning with a one-line trace of which visible tokens you used.
-
-9. **granular_category**: Assign ONE from this list. Use "Other" if nothing fits.
-{categories_list}
-
-10. **normalized_brand**: Lowercase brand/manufacturer name for matching against user purchase history.
-   - Output the brand name ONLY, lowercase, no product type or variant
-   - Use the EXACT same conventions as receipt brand extraction:
-     - Hyphenated brands: "coca-cola" (not "coca cola"), "lay's" (keep apostrophes)
-     - Multi-word store brands: "boni selection" (not just "boni" when it's Boni Selection)
-     - Single-word brands: "jupiler", "danone", "heinz", "nestlé"
-   - For store/house brands, use their ACTUAL brand name — NEVER use "in-house" or generic labels:
-     - Colruyt house brands: "boni", "boni selection", "boni bio", "everyday", "cru", "boni plan't"
-     - Delhaize house brands: "365", "delhaize", "p'tits lions"
-     - Carrefour house brands: "simpl", "carrefour bio", "carrefour classic"
-     - Lidl house brands: "milbona", "pikok", "chef select", "deluxe", "freeway", "vemondo", "solevita", "alesto", "snack day", "combino", "trattoria alfredo", "fin carré"
-     - Aldi house brands: "milsani", "moser roth", "gourmet", "cucina", "lyttos", "barissimo", "river", "sun snacks", "bon gelati", "choceur"
-   - null ONLY for truly unbranded generic assortment promos (very rare in promo folders)
-   - Examples:
-     - "Jupiler Pils 24 x 25 cl" → normalized_brand: "jupiler"
-     - "Coca-Cola Zero 1,5 L" → normalized_brand: "coca-cola"
-     - "Boni Selection Serranoham Reserva 200 g" → normalized_brand: "boni selection"
-     - "Milbona Volle Melk 1 L" → normalized_brand: "milbona"
-     - "Croky Chips Explosions 150 g" → normalized_brand: "croky"
-     - "Everyday Afwasmiddel 1 L" → normalized_brand: "everyday"
-
-11. **display_brand**: Brand name in clean Title Case for display in the consumer app.
-   - Same brand as normalized_brand, but properly capitalized
-   - Examples: "Jupiler", "Coca-Cola", "Boni Selection", "Milbona", "Lay's", "365"
-   - null when normalized_brand is null
-
-### IMPORTANT RULES
-- Each unique product appears ONCE — deduplicate across languages if bilingual
-- **Multi-brand promos**: When a promo groups multiple brands together (e.g., "Sprite en Fanta", "Coca-Cola, Fanta of Sprite"), create a SEPARATE item for EACH brand. Each item gets its own display_name but MUST inherit shared attributes from the page: size/volume, pricing, and mechanism. Do NOT drop size info just because it appears once for the group rather than per brand."""
+6. **granular_category:** assign ONE category from the list below (used for similarity ranking — precision matters, e.g. a Pilsner goes in "Pilsners & Lagers", never in "Specialty & Abbey Beers"). Use "Other" only if nothing fits.
+{categories_list}"""
 
 
-def _build_validation_checklist(config: Dict[str, Any]) -> str:
-    checklist = config.get("validation_checklist", [])
-
-    lines = [
-        "## VALIDATION CHECKLIST",
-        "Before outputting each item, verify:",
-        "- display_name is Title Case, includes product + variant + size (no promo text or pricing)",
-        "- Include size/volume for drinks and packaged foods when visible (e.g., '33 cl', '6 x 25 cl', '1,5 L')",
-        "- At least promo_price is present and positive",
-        "- All prices rounded to 2 decimal places (no 3+ decimals)",
-        "- display_mechanism is clean and standardized (not raw OCR text)",
-        "- display_mechanism includes 'Vanaf X ...' when the discount requires buying multiple items",
-        "- pack_size_value/pack_size_unit/pack_count extracted verbatim from visible size tokens (no conversion)",
-        "- granular_category is from the provided list",
-        "- If multiple brands share a promo, split into separate items",
-        "- normalized_brand is lowercase, matches the brand visible on the page (NEVER 'in-house')",
-        "- display_brand is Title Case version of normalized_brand",
-    ]
-    for item in checklist:
-        lines.append(f"- {item}")
-    return "\n".join(lines)
+def _build_validation_checklist() -> str:
+    return """## VALIDATION CHECKLIST
+Before outputting each item, verify:
+- `product_name` is Title Case, includes size/volume when visible, no promo text, no pricing.
+- `mechanism_kind` matches the table; `mechanism_x` / `mechanism_y` are the PRINTED numbers (not derived).
+- Prices are copied verbatim (rounded to 2 decimals if needed). You did NOT compute one from another.
+- Pack size tokens are transcribed verbatim — no unit conversion.
+- A multi-brand tile is ONE item with brands split into primary_brand + additional_brands.
+- `granular_category` is chosen precisely (wine → wine sub-category, beer → beer sub-category; never cross over).
+- Every item has both `bbox` (physical product) and `tile_bbox` (whole tile, contains bbox)."""

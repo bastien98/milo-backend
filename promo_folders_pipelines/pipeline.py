@@ -27,6 +27,17 @@ from app.core.categories import (
     GRANULAR_CATEGORIES,
     get_parent_category,
 )
+from promo_folders_pipelines.mechanism import (
+    ALL_KINDS,
+    MechanismKind,
+    canonical_label,
+    compute_savings,
+    display_description,
+    display_savings_label,
+    infer_original_price,
+    infer_promo_price,
+    min_purchase_qty,
+)
 from promo_folders_pipelines.models import PromoItem
 from promo_folders_pipelines.promo_depth import compute_promo_depth
 from promo_folders_pipelines.prompt_builder import build_system_prompt
@@ -55,49 +66,15 @@ REQUEST_TIMEOUT = 300  # 5 minutes per Gemini call
 
 R2_PUBLIC_BASE_URL = os.environ.get("R2_PUBLIC_BASE_URL", "")
 
-# Appended to the system prompt to instruct Gemini to return bounding boxes
-_BBOX_PROMPT_SUFFIX = """
+# Concise geometry instructions appended to the pass-1 prompt. The heavy bbox
+# validation work happens in `validate_page_bboxes` (pass 2).
+_GEOMETRY_SECTION = """
 
-## BOUNDING BOX (PHYSICAL PRODUCT ONLY)
-For EVERY item, populate the `bbox` field with a bounding box around the **physical product itself** (e.g., the actual bottle, box, can, or crate).
-
-CRITICAL RULES FOR BBOX:
-1. CAPTURE THE WHOLE PRODUCT: The entire physical product must be inside the box. Do NOT clip caps, lids, or edges.
-2. FIXED MARGIN: Leave exactly 2-3% of the tile's shortest side as margin around the physical product — no more, no less. The crop must look consistent across products: neither tight-cropped nor surrounded by whitespace.
-3. EXCLUDE TEXT: Do NOT include product names, price labels, volume information, or health warnings that sit outside the packaging.
-4. EXCLUDE PROMOS: Do NOT include promotional banners, ribbons, or discount badges unless they are physically printed onto the product packaging itself.
-5. Coordinates are integers from 0 to 1000:
-   x_min=0 → left edge, x_max=1000 → right edge
-   y_min=0 → top edge,  y_max=1000 → bottom edge
-6. Validation: x_min < x_max and y_min < y_max (set to null only if the product cannot be located at all).
-7. One bbox per item, even if the product appears in multiple places on the page.
-
-## TILE BOUNDING BOX (FULL PROMO TILE)
-For EVERY item, populate the `tile_bbox` field with a bounding box around the **entire promo tile** — product image, price labels, brand text, promo badges/ribbons, and the background shape or color block that visually groups this item.
-
-CRITICAL RULES FOR TILE_BBOX:
-1. CAPTURE EVERYTHING: Include the product image AND every price/brand/promo element that visually belongs to this item. Missing a price label or promo badge is a failure.
-2. NEIGHBOR OVERLAP IS OK: In dense grids, tile_bboxes MAY touch or slightly overlap their neighbors at the shared edge. Do not shrink a tile_bbox inward just to avoid an overlap — that cuts off price labels. Each item's price label and badges must always be inside its own tile_bbox.
-3. Coordinates are integers 0-1000 (same system as bbox).
-4. Validation: x_min < x_max and y_min < y_max. tile_bbox must always fully contain bbox.
-5. Always provide a tile_bbox for every item. Use your best estimate rather than null.
-
-## WORKED EXAMPLE
-For a 1L milk carton whose packaging spans coords [110, 210, 250, 400] and has a price label below at y=420-500 and a "-25%" badge in the top-right corner of its tile:
-  bbox       = [106, 206, 254, 404]   (product with ~2-3% margin, excludes price label and badge)
-  tile_bbox  = [80,  190, 290, 520]   (includes badge, product, price label, and background)
-
-NEGATIVE EXAMPLE — DO NOT DO THIS:
-  bbox       = [80,  190, 290, 520]   (wrong — that's the tile, not just the product)
-  tile_bbox  = [110, 210, 250, 400]   (wrong — cuts off the price label and badge)
-
-## CONFIDENCE
-For EVERY item, populate `bbox_confidence` with your confidence that BOTH bbox and tile_bbox are correct:
-  1.0 = product edges are crisp, tile boundaries are unambiguous.
-  0.7-0.9 = standard case with minor ambiguity.
-  0.4-0.6 = product is stylized, partially occluded, or the tile layout is unclear.
-  0.0-0.3 = you are guessing the location.
-Be honest — low confidence is more useful than optimistic guesses.
+## GEOMETRY
+Every item MUST have both `bbox` and `tile_bbox`, integer coords 0-1000 (0=left/top, 1000=right/bottom).
+- `bbox`: tight around the PHYSICAL PRODUCT only (bottle/box/can). Leave a ~2-3% margin; exclude price labels, badges, and text outside the packaging.
+- `tile_bbox`: the ENTIRE promo tile — product + price label + brand text + badge + background block. Must fully contain `bbox`.
+- Validation: x_min < x_max, y_min < y_max. Adjacent `tile_bbox`es may touch or lightly overlap in dense grids; never shrink inward past a price label.
 """
 
 
@@ -112,68 +89,130 @@ class _BboxSchema(PydanticBaseModel):
 
 
 class _PromoItemSchema(PydanticBaseModel):
-    # --- Display fields ---
-    display_name: str = Field(description="Clean Title Case product label: product + variant + size. Omit brand when product is identifiable without it (e.g., 'Chips Explosions Salt & Pepper 150 g' not 'Croky Chips...'). Keep brand when it IS the product identity (e.g., 'Coca-Cola Zero 1,5 L' — 'Zero 1,5 L' alone is meaningless). ALWAYS include size/quantity when visible. For drinks, volume is CRITICAL (e.g., '33 cl', '6 x 25 cl', '1,5 L'). No promo text or pricing.")
-    display_mechanism: str = Field(description="Standardized promo label. Title case, consistent formatting. For conditional percentage discounts, ALWAYS include the condition (e.g., '-25% Vanaf 2 Verpakkingen', NOT just '-25%'). Only use bare '-25%' if the discount applies to a single item with no minimum purchase. Examples: '1+1 Gratis', '-25%', '-25% Vanaf 2 Verpakkingen', '-20% Vanaf 3 Flessen', '-30% Vanaf 12 Blikken', '2e aan Halve Prijs', '2+1 Gratis', 'Prijsverlaging'.")
-    display_description: Optional[str] = Field(default=None, description="Plain-language Dutch explanation of the deal (~80 chars max). Explain what the shopper needs to DO and what they GET. Examples: 'Koop 2 en krijg de 3e gratis', 'Nu €0.80 goedkoper per stuk'. null if unclear.")
-    display_savings_label: Optional[str] = Field(default=None, description="Human-friendly savings text. Examples: '1 Gratis Item', 'Bespaar €3.00', 'Tot -25% Korting', '2e aan Halve Prijs'. null if unclear.")
-
-    # --- Pack size (observable tokens; Python computes unit price from these) ---
-    pack_size_value: Optional[float] = Field(default=None, ge=0, description="Numeric size of ONE unit in the pack as printed on the page. '500 g'→500, '1,5 L'→1.5, '6 x 25 cl'→25, 'Box 12 capsules'→12, '4-pack toiletpapier 6 rollen'→6. Comma→dot. null if no size visible.")
-    pack_size_unit: Optional[Literal['g','kg','ml','cl','l','stuk','rol','doekje','capsule','tab','zakje']] = Field(default=None, description="Unit of pack_size_value EXACTLY as implied on the page, lowercased. Do NOT convert (cl stays cl, g stays g). Countables→'stuk'. Toilet/kitchen paper→'rol'. Tea bags→'zakje'. Dishwasher/washing tabs→'tab'. Coffee/Nespresso→'capsule'. Wipes→'doekje'.")
-    pack_count: int = Field(default=1, ge=1, description="Number of individual units in the pack. '6 x 25 cl'→6, '24 blikjes 33 cl'→24, '4-pack toiletpapier 6 rollen'→4, '1,5 L'→1, '500 g'→1, '3-pack'→3. Default 1 for single items.")
-    pack_size_reasoning: Optional[str] = Field(default=None, description="Brief scratchpad: which tokens on the page led to pack_size_value/unit/count. Not displayed to users.")
-
-    # --- Brand identification ---
-    normalized_brand: Optional[str] = Field(default=None, description="Lowercase brand/manufacturer name only. Use the EXACT same format as receipt brand extraction: 'jupiler', 'coca-cola', 'boni', 'boni selection', 'milbona', 'lay\\'s', 'delhaize', '365'. For store/house brands use their actual name (e.g., 'boni', '365', 'everyday', 'milbona', 'pikok'), NEVER 'in-house'. null only for truly unbranded generic assortment promos (very rare in promo folders).")
-    display_brand: Optional[str] = Field(default=None, description="Brand name in clean Title Case for UI display: 'Jupiler', 'Coca-Cola', 'Boni Selection', 'Lay\\'s', '365'. null when normalized_brand is null.")
-
-    # --- Price reasoning (scratchpad — generated before prices to improve accuracy) ---
-    price_reasoning: str = Field(description="Show your work: what is the promo mechanism, what prices are visible on the page, and how you calculated promo_price and savings_amount step by step. This field is not displayed to users.")
-
-    # --- Pricing (all required, non-negative) ---
-    original_price: Optional[float] = Field(default=0.0, ge=0, description="Regular price before promo, rounded to 2 decimal places. If not visible, set equal to promo_price.")
-    promo_price: float = Field(ge=0, description="Price of ONE item/pack as shown on shelf. For ANY X+Y gratis deal (1+1, 2+1, 3+3, 4+1, 12+6, etc.): ALWAYS same as original_price. For -25%: original_price × 0.75. For X voor €Y: €Y ÷ X. Rounded to 2 decimal places.")
-    savings_amount: Optional[float] = Field(default=0.0, ge=0, description="Total euro savings when completing the deal. 0.0 if unknown.")
-
-    # --- Purchase quantity (for promo depth calculation) ---
-    min_purchase_qty: int = Field(ge=1, description="Minimum number of items/packs a shopper must buy to complete the deal. For 1+1 Gratis: 2. For 2+1 Gratis: 3. For 12+6 Gratis: 18. For 2e aan Halve Prijs: 2. For 2e aan -70%: 2. For -25%: 1. For -25% Vanaf 2 Verpakkingen: 2. For -30% Vanaf 12 Blikken: 12. For Prijsverlaging: 1. For 3 voor €5: 3.")
-
-    # --- Category ---
-    granular_category: str = Field(description="Category from the provided list, or 'Other' if nothing fits.")
-
-    # --- Page reference ---
-    page_number: int = Field(ge=1, description="Position of the item's page within THIS batch (1-indexed). For a single-page batch, ALWAYS return 1. For multi-page batches: 1 for first page, 2 for second, etc. Do NOT return the absolute page number from the full document.")
-
-    # --- Bounding box (for image cropping) ---
-    bbox: Optional[_BboxSchema] = Field(
+    # --- Identity ---
+    product_name: str = Field(
+        description=(
+            "Clean Title Case product label visible on the tile: product + variant + size. "
+            "Omit brand when the product is identifiable without it (e.g. 'Chips Explosions Salt & Pepper 150 g'). "
+            "Keep brand when essential for identity (e.g. 'Coca-Cola Zero 1,5 L'). "
+            "For drinks ALWAYS include volume ('33 cl', '6 x 25 cl', '1,5 L'). No promo text or pricing."
+        )
+    )
+    primary_brand: Optional[str] = Field(
         default=None,
         description=(
-            "Bounding box around the physical product only (bottle, box, package, can). "
-            "Exclude text, price labels, and promo badges. Leave a small margin around "
-            "the product. Integer coords 0-1000 (0=left/top, 1000=right/bottom). "
-            "x_min < x_max, y_min < y_max. null if the product cannot be clearly located."
+            "Most prominent brand on the tile, Title Case ('Coca-Cola', 'Boni Selection', 'Lay\\'s', '365'). "
+            "null for truly unbranded / generic assortment tiles."
+        ),
+    )
+    additional_brands: list[str] = Field(
+        default_factory=list,
+        description=(
+            "Other brands listed on the SAME tile when the promo covers multiple brands together "
+            "(e.g. 'Coca-Cola, Fanta of Sprite' → additional_brands=['Fanta','Sprite']). Empty list otherwise."
         ),
     )
 
-    # --- Tile bounding box (for tap hotspots in app) ---
+    # --- Mechanism (canonical, cross-store) ---
+    mechanism_kind: Literal[
+        "buy_x_get_y_free",
+        "second_half_price",
+        "second_percent_off",
+        "percent_off",
+        "percent_off_from_n",
+        "euro_off",
+        "n_for_euro",
+        "price_reduction",
+    ] = Field(
+        description=(
+            "Canonical mechanism type, normalized across stores. "
+            "buy_x_get_y_free: '1+1 Gratis', '2+1 Gratis', '12+6 Gratis' (any X+Y counts). "
+            "second_half_price: '2e aan halve prijs', '2e halve prijs'. "
+            "second_percent_off: '2e aan -50%', '2e tegen -X%', '2e voor -X%'. "
+            "percent_off: bare '-25%', 'X% korting' applied to a single item. "
+            "percent_off_from_n: '-25% vanaf 2 verpakkingen', '-X% bij aankoop van Y'. "
+            "euro_off: '€0.50 korting', '-€1 korting'. "
+            "n_for_euro: 'X voor €Y', '3 pour €5'. "
+            "price_reduction: just a lower price (or 'Prix Choc' / 'Mega Deal' badge) with no labeled mechanism."
+        )
+    )
+    mechanism_x: Optional[float] = Field(
+        default=None,
+        description=(
+            "First parameter of the mechanism. "
+            "buy_x_get_y_free: the X in X+Y (e.g. 1 in '1+1'). "
+            "percent_off / percent_off_from_n / second_percent_off: the percentage (25 for '-25%'). "
+            "euro_off: the euro amount (0.50 for '€0.50 korting'). "
+            "n_for_euro: the quantity (2 for '2 voor €5'). "
+            "null for second_half_price and price_reduction."
+        ),
+    )
+    mechanism_y: Optional[float] = Field(
+        default=None,
+        description=(
+            "Second parameter of the mechanism. "
+            "buy_x_get_y_free: the Y in X+Y (e.g. 1 in '1+1', 6 in '12+6'). "
+            "percent_off_from_n: the minimum qty (2 in 'vanaf 2 verpakkingen'). "
+            "n_for_euro: the total euro amount (5.00 in '2 voor €5'). "
+            "null for all other kinds."
+        ),
+    )
+    promo_campaign: Optional[str] = Field(
+        default=None,
+        description=(
+            "Store marketing banner printed on the tile, verbatim — 'Bonus', 'Bonus Card', 'Prix Choc', "
+            "'Mega Deal', 'Sunday Deal', 'New Deal', 'Extra', 'Extra\\'s'. null when no banner is present."
+        ),
+    )
+
+    # --- Pricing (visible only) ---
+    original_price: Optional[float] = Field(
+        default=None,
+        ge=0,
+        description="Struck-through or 'was' price printed on the tile. null when no original price is visible.",
+    )
+    promo_price: Optional[float] = Field(
+        default=None,
+        ge=0,
+        description="Shelf price actually printed on the tile (price per item or per pack as shown). null if no price is printed (e.g. weighed goods sold per-kg with no unit price).",
+    )
+    stated_savings: Optional[float] = Field(
+        default=None,
+        ge=0,
+        description="Savings amount explicitly printed on the tile (e.g. 'Bespaar €3.00'). null when not stated.",
+    )
+
+    # --- Pack size (visible tokens; Python computes unit price from these) ---
+    pack_size_value: Optional[float] = Field(
+        default=None, ge=0,
+        description="Numeric size of ONE unit as printed. '500 g'→500, '1,5 L'→1.5, '6 x 25 cl'→25. Comma→dot. null if no size visible.",
+    )
+    pack_size_unit: Optional[Literal['g','kg','ml','cl','l','stuk','rol','doekje','capsule','tab','zakje']] = Field(
+        default=None,
+        description="Unit of pack_size_value EXACTLY as implied on the page, lowercased. Countables→'stuk', rollen→'rol', tea bags→'zakje', tabs→'tab', capsules→'capsule', wipes→'doekje'. Do NOT convert.",
+    )
+    pack_count: int = Field(
+        default=1, ge=1,
+        description="Number of individual units in the pack. '6 x 25 cl'→6, '24 blikjes 33 cl'→24, '4-pack 6 rollen'→4. Default 1.",
+    )
+
+    # --- Category (granular taxonomy; Python derives a parent-level consumer category) ---
+    granular_category: str = Field(
+        description="Pick the single best granular category from the provided list. Use 'Other' if none fit."
+    )
+
+    # --- Geometry (mandatory on every item) ---
+    bbox: _BboxSchema = Field(
+        description=(
+            "Bounding box around the physical product only (bottle, box, package, can). "
+            "Exclude text, price labels, and promo badges. Leave a ~2-3% margin around the product. "
+            "Integer coords 0-1000 (0=left/top, 1000=right/bottom)."
+        ),
+    )
     tile_bbox: _BboxSchema = Field(
         description=(
-            "REQUIRED bounding box around the ENTIRE promo tile area for this item — including "
-            "the product image, price label, brand text, promo badge, and background. "
-            "This is always equal to or larger than bbox. Integer coords 0-1000. "
-            "x_min < x_max, y_min < y_max. Always provide your best estimate."
-        ),
-    )
-
-    # --- Bbox confidence (routing signal, not persisted) ---
-    bbox_confidence: float = Field(
-        default=0.7,
-        ge=0.0,
-        le=1.0,
-        description=(
-            "Your confidence that both bbox and tile_bbox are correct, 0.0-1.0. "
-            "Lower it when the product is stylized, occluded, or the tile layout is ambiguous."
+            "Bounding box around the ENTIRE promo tile (product image + price label + brand text + badge + background). "
+            "Must fully contain bbox. Integer coords 0-1000."
         ),
     )
 
@@ -276,7 +315,7 @@ def extract_batch(
     display_name: str,
 ) -> dict:
     """Extract promo items from a single PDF batch via Gemini structured output."""
-    full_system_prompt = system_prompt + _BBOX_PROMPT_SUFFIX
+    full_system_prompt = system_prompt + _GEOMETRY_SECTION
     for attempt in range(1, MAX_RETRIES + 1):
         delay = RETRY_BASE_DELAY * (2 ** (attempt - 1))
         label = f"[Batch {batch_num}]"
@@ -300,7 +339,7 @@ def extract_batch(
                     system_instruction=full_system_prompt,
                     max_output_tokens=MAX_OUTPUT_TOKENS,
                     temperature=0.0,
-                    thinking_config=types.ThinkingConfig(thinking_level="high"),
+                    thinking_config=types.ThinkingConfig(thinking_level="medium"),
                     response_mime_type="application/json",
                     response_schema=_PromoFolderSchema,
                     media_resolution=types.MediaResolution.MEDIA_RESOLUTION_HIGH,
@@ -332,11 +371,10 @@ def extract_batch(
                 raise
             continue
 
-        # Adjust page numbers: batch-relative → actual PDF page
+        # Stamp every item with the batch's starting page number.
+        # Multi-page PDF batches are single-page in practice (PAGES_PER_BATCH = 1).
         for item in data.get("items", []):
-            batch_page = item.get("page_number")
-            if batch_page is not None:
-                item["page_number"] = start_page + batch_page - 1
+            item["page_number"] = start_page
 
         item_count = len(data.get("items", []))
         logger.info(f"{label} Done in {elapsed:.1f}s — {item_count} items extracted")
@@ -358,7 +396,7 @@ def extract_batch_images(
         images: List of (page_number, webp_bytes) tuples (1-indexed page numbers)
         batch_num: Batch sequence number for logging
     """
-    full_system_prompt = system_prompt + _BBOX_PROMPT_SUFFIX
+    full_system_prompt = system_prompt + _GEOMETRY_SECTION
     for attempt in range(1, MAX_RETRIES + 1):
         delay = RETRY_BASE_DELAY * (2 ** (attempt - 1))
         label = f"[Batch {batch_num}]"
@@ -394,7 +432,7 @@ def extract_batch_images(
                     system_instruction=full_system_prompt,
                     max_output_tokens=MAX_OUTPUT_TOKENS,
                     temperature=temp,
-                    thinking_config=types.ThinkingConfig(thinking_level="high"),
+                    thinking_config=types.ThinkingConfig(thinking_level="medium"),
                     response_mime_type="application/json",
                     response_schema=_PromoFolderSchema,
                     media_resolution=types.MediaResolution.MEDIA_RESOLUTION_HIGH,
@@ -424,18 +462,11 @@ def extract_batch_images(
                 raise
             continue
 
-        # Adjust page numbers: batch-relative → absolute page number
+        # Batches are 1 page (PAGES_PER_BATCH = 1); stamp every item with the
+        # batch's absolute page number instead of asking Gemini to emit it.
         first_page = page_nums[0]
-        last_page = page_nums[-1]
         for item in data.get("items", []):
-            batch_page = item.get("page_number")
-            if batch_page is not None:
-                adjusted = first_page + batch_page - 1
-                # Clamp to valid range (Gemini sometimes returns absolute page numbers)
-                if adjusted < first_page or adjusted > last_page:
-                    logger.warning(f"{label} Item '{item.get('display_name', '?')}' had page_number={batch_page}, clamping to batch range")
-                    adjusted = max(first_page, min(adjusted, last_page))
-                item["page_number"] = adjusted
+            item["page_number"] = first_page
 
         item_count = len(data.get("items", []))
         logger.info(f"{label} Done in {elapsed:.1f}s — {item_count} items extracted")
@@ -530,7 +561,6 @@ def _is_suspect_original(bbox: dict | None, confidence: float | None) -> bool:
 IOU_REJECT_THRESHOLD = 0.3
 IOU_REJECT_THRESHOLD_SUSPECT = 0.15
 NEIGHBOR_OVERLAP_IOU_LIMIT = 0.2  # tile_bbox expansion is blocked if it overlaps neighbors more than this
-CONFIDENCE_SKIP_VALIDATION = 0.9  # items above this are not modified by the validation pass
 
 
 def validate_page_bboxes(
@@ -560,32 +590,20 @@ def validate_page_bboxes(
 
     label = f"[{display_name} p{page_number} validate]"
 
-    # Flag high-confidence items so the validator (and our post-processing) leave them alone.
-    skip_modification = [
-        float(item.get("bbox_confidence") or 0.0) >= CONFIDENCE_SKIP_VALIDATION
-        for item in items_on_page
-    ]
-    skip_count = sum(skip_modification)
-
-    # Build the item list for the validation prompt
+    # Build the item list for the validation prompt. Every item goes through review.
     item_descriptions = []
     for i, item in enumerate(items_on_page):
-        name = item.get("display_name", "Unknown")
+        name = item.get("display_name") or item.get("product_name", "Unknown")
         tile_bbox = item.get("tile_bbox")
         bbox = item.get("bbox")
-        confidence = item.get("bbox_confidence")
 
         tile_str = f"[{tile_bbox['x_min']}, {tile_bbox['y_min']}, {tile_bbox['x_max']}, {tile_bbox['y_max']}]" if tile_bbox else "null (LOCATE THIS ITEM)"
         bbox_str = f"[{bbox['x_min']}, {bbox['y_min']}, {bbox['x_max']}, {bbox['y_max']}]" if bbox else "null"
-        flag = "[CONFIRM ONLY — do not modify]" if skip_modification[i] else "[REVIEW — check and correct if wrong]"
-        conf_str = f" conf={confidence:.2f}" if isinstance(confidence, (int, float)) else ""
 
-        item_descriptions.append(f"{i}. {flag} \"{name}\"{conf_str} — tile_bbox: {tile_str}, bbox: {bbox_str}")
+        item_descriptions.append(f"{i}. [REVIEW — check and correct if wrong] \"{name}\" — tile_bbox: {tile_str}, bbox: {bbox_str}")
 
     items_text = "\n".join(item_descriptions)
     full_prompt = _BBOX_VALIDATION_PROMPT + items_text
-    if skip_count:
-        logger.info(f"{label} {skip_count}/{len(items_on_page)} items marked high-confidence and exempt from modification")
 
     for attempt in range(1, MAX_RETRIES + 1):
         delay = RETRY_BASE_DELAY * (2 ** (attempt - 1))
@@ -640,7 +658,7 @@ def validate_page_bboxes(
 
         # Apply validated bboxes back to items
         validated_items = data.get("items", [])
-        confirmed = corrected = added = skipped_high_conf = 0
+        confirmed = corrected = added = 0
 
         for vi in validated_items:
             idx = vi.get("item_index")
@@ -657,60 +675,49 @@ def validate_page_bboxes(
 
             orig_tile = items_on_page[idx].get("tile_bbox")
             orig_bbox = items_on_page[idx].get("bbox")
-            confidence = items_on_page[idx].get("bbox_confidence")
 
-            # High-confidence items are exempt from modification; only missing bboxes can be filled.
-            if skip_modification[idx]:
-                skipped_high_conf += 1
-                if not orig_tile and vi.get("tile_bbox"):
-                    items_on_page[idx]["tile_bbox"] = vi["tile_bbox"]
-                if not orig_bbox and vi.get("bbox"):
-                    items_on_page[idx]["bbox"] = vi["bbox"]
-            else:
-                # Asymmetric IoU threshold: looser bar when the original bbox looks geometrically suspect.
-                tile_threshold = (
-                    IOU_REJECT_THRESHOLD_SUSPECT
-                    if _is_suspect_original(orig_tile, confidence)
-                    else IOU_REJECT_THRESHOLD
-                )
-                bbox_threshold = (
-                    IOU_REJECT_THRESHOLD_SUSPECT
-                    if _is_suspect_original(orig_bbox, confidence)
-                    else IOU_REJECT_THRESHOLD
-                )
+            # Asymmetric IoU threshold: looser bar when the original bbox looks geometrically suspect.
+            tile_threshold = (
+                IOU_REJECT_THRESHOLD_SUSPECT
+                if _is_suspect_original(orig_tile, None)
+                else IOU_REJECT_THRESHOLD
+            )
+            bbox_threshold = (
+                IOU_REJECT_THRESHOLD_SUSPECT
+                if _is_suspect_original(orig_bbox, None)
+                else IOU_REJECT_THRESHOLD
+            )
 
-                # tile_bbox: reject drastic corrections, keep original on null regression
-                new_tile = vi.get("tile_bbox")
-                if new_tile and isinstance(new_tile, dict):
-                    if orig_tile:
-                        iou = _iou(orig_tile, new_tile)
-                        if iou < tile_threshold:
-                            logger.warning(
-                                f"{label} Rejecting tile_bbox correction for item {idx} "
-                                f"('{items_on_page[idx].get('display_name', '?')}'): IoU={iou:.2f} "
-                                f"below threshold {tile_threshold}"
-                            )
-                        else:
-                            items_on_page[idx]["tile_bbox"] = new_tile
+            # tile_bbox: reject drastic corrections, keep original on null regression
+            new_tile = vi.get("tile_bbox")
+            if new_tile and isinstance(new_tile, dict):
+                if orig_tile:
+                    iou = _iou(orig_tile, new_tile)
+                    if iou < tile_threshold:
+                        logger.warning(
+                            f"{label} Rejecting tile_bbox correction for item {idx}: IoU={iou:.2f} "
+                            f"below threshold {tile_threshold}"
+                        )
                     else:
                         items_on_page[idx]["tile_bbox"] = new_tile
-                # else: validator returned null — keep original (null-regression guard)
+                else:
+                    items_on_page[idx]["tile_bbox"] = new_tile
+            # else: validator returned null — keep original (null-regression guard)
 
-                # bbox: same guards
-                new_bbox = vi.get("bbox")
-                if new_bbox and isinstance(new_bbox, dict):
-                    if orig_bbox:
-                        iou = _iou(orig_bbox, new_bbox)
-                        if iou < bbox_threshold:
-                            logger.warning(
-                                f"{label} Rejecting bbox correction for item {idx} "
-                                f"('{items_on_page[idx].get('display_name', '?')}'): IoU={iou:.2f} "
-                                f"below threshold {bbox_threshold}"
-                            )
-                        else:
-                            items_on_page[idx]["bbox"] = new_bbox
+            # bbox: same guards
+            new_bbox = vi.get("bbox")
+            if new_bbox and isinstance(new_bbox, dict):
+                if orig_bbox:
+                    iou = _iou(orig_bbox, new_bbox)
+                    if iou < bbox_threshold:
+                        logger.warning(
+                            f"{label} Rejecting bbox correction for item {idx}: IoU={iou:.2f} "
+                            f"below threshold {bbox_threshold}"
+                        )
                     else:
                         items_on_page[idx]["bbox"] = new_bbox
+                else:
+                    items_on_page[idx]["bbox"] = new_bbox
 
             # Containment: bbox must sit inside tile_bbox. Try non-destructive recovery.
             final_tile = items_on_page[idx].get("tile_bbox")
@@ -752,8 +759,7 @@ def validate_page_bboxes(
                         items_on_page[idx]["bbox"] = dict(final_tile)
 
         logger.info(
-            f"{label} Validation: {confirmed} confirmed, {corrected} corrected, "
-            f"{added} added, {skipped_high_conf} high-confidence exempt"
+            f"{label} Validation: {confirmed} confirmed, {corrected} corrected, {added} added"
         )
         return items_on_page
 
@@ -886,151 +892,139 @@ def parse_promo_items(
 ) -> list[PromoItem]:
     """Parse Gemini structured output into validated PromoItem list.
 
-    Enforces a strict quality gate: items missing any mandatory field
-    are dropped. Quality over coverage.
+    Gemini emits only the perceptual signal; this function derives every display
+    string and numeric field via `mechanism.py`.
     """
     validity_start = data.get("validity_start")
     validity_end = data.get("validity_end")
     if not validity_start or not validity_end:
         raise ValueError("Promo folder extraction is missing validity_start or validity_end")
 
-    items = []
+    items: list[PromoItem] = []
     skipped = 0
     raw_items = data.get("items", [])
     logger.info(f"Parsing {len(raw_items)} raw items from Gemini output")
 
     for raw in raw_items:
-        display_name = (raw.get("display_name") or "").strip()
-        if not display_name:
-            logger.warning("Skipping item with empty display_name")
+        product_name = (raw.get("product_name") or raw.get("display_name") or "").strip()
+        if not product_name:
+            logger.warning("Skipping item with empty product_name")
             skipped += 1
             continue
 
-        # Extract fields with sensible defaults (coverage over quality)
-        original_price = _parse_price(raw.get("original_price")) or 0.0
-        promo_price = _parse_price(raw.get("promo_price")) or 0.0
-        savings_amount = _parse_price(raw.get("savings_amount")) or 0.0
-        display_mechanism = (raw.get("display_mechanism") or "").strip() or "Promo"
-        display_description = (raw.get("display_description") or "").strip() or display_mechanism
-        display_savings_label = (raw.get("display_savings_label") or "").strip() or "Promo"
+        # --- Brand ---
+        primary_brand = (raw.get("primary_brand") or "").strip() or None
+        additional_brands_raw = raw.get("additional_brands") or []
+        if isinstance(additional_brands_raw, str):
+            additional_brands_raw = [additional_brands_raw]
+        additional_brands = [b.strip() for b in additional_brands_raw if isinstance(b, str) and b.strip()]
 
-        if original_price == 0.0 and promo_price == 0.0:
-            logger.warning(f"Item '{display_name}' (p{raw.get('page_number')}): both prices are 0.0")
+        # --- Mechanism (canonical) ---
+        kind = (raw.get("mechanism_kind") or "price_reduction").strip()
+        if kind not in ALL_KINDS:
+            logger.warning(f"Item '{product_name}': unknown mechanism_kind {kind!r}, defaulting to price_reduction")
+            kind = "price_reduction"
+        mechanism_x = _parse_price(raw.get("mechanism_x"))
+        mechanism_y = _parse_price(raw.get("mechanism_y"))
+        promo_campaign = (raw.get("promo_campaign") or "").strip() or None
 
-        # Round prices to 2 decimal places
-        original_price = round(original_price, 2)
-        promo_price = round(promo_price, 2)
-        savings_amount = round(savings_amount, 2)
+        # --- Pricing: visible values, then reverse-infer missing ones ---
+        original_price = _parse_price(raw.get("original_price"))
+        promo_price = _parse_price(raw.get("promo_price"))
+        stated_savings = _parse_price(raw.get("stated_savings"))
 
-        # Purchase quantity & promo depth
-        min_purchase_qty = max(1, int(raw.get("min_purchase_qty", 1)))
-        promo_depth = compute_promo_depth(savings_amount, original_price, min_purchase_qty) if original_price > 0 else 0
+        if original_price is None and promo_price is not None:
+            original_price = infer_original_price(kind, mechanism_x, mechanism_y, promo_price, stated_savings)
+        if promo_price is None and original_price is not None:
+            promo_price = infer_promo_price(kind, mechanism_x, mechanism_y, original_price)
 
-        # Brand extraction (default to "unknown" if missing)
-        normalized_brand = (raw.get("normalized_brand") or "").strip().lower() or "unknown"
-        display_brand = (raw.get("display_brand") or "").strip() or None
+        if original_price is None and promo_price is None:
+            logger.warning(f"Item '{product_name}' (p{raw.get('page_number')}): no pricing extracted")
 
-        # Category validation
-        granular = raw.get("granular_category", "Other")
+        original_price = round(original_price, 2) if original_price is not None else None
+        promo_price = round(promo_price, 2) if promo_price is not None else None
+        stated_savings = round(stated_savings, 2) if stated_savings is not None else None
+
+        # --- Derived fields ---
+        min_qty = min_purchase_qty(kind, mechanism_x, mechanism_y)
+        savings = compute_savings(kind, mechanism_x, mechanism_y, original_price, promo_price, stated_savings)
+        savings_amount = round(savings, 2) if savings is not None else 0.0
+
+        depth_original = original_price if original_price is not None else promo_price
+        promo_depth = (
+            compute_promo_depth(savings_amount, depth_original, min_qty)
+            if depth_original and depth_original > 0 else 0.0
+        )
+
+        display_mechanism = canonical_label(kind, mechanism_x, mechanism_y)
+        dsc = display_description(kind, mechanism_x, mechanism_y)
+        dsl = display_savings_label(kind, mechanism_x, mechanism_y, savings)
+
+        # --- Category: Gemini emits granular; Python derives the parent consumer bucket ---
+        granular = (raw.get("granular_category") or "Other").strip()
         if granular not in GRANULAR_CATEGORIES:
-            logger.warning(f"Unknown category '{granular}' for '{display_name}', defaulting to 'Other'")
+            logger.warning(f"Item '{product_name}': unknown granular_category {granular!r}, defaulting to 'Other'")
             granular = "Other"
-        parent = get_parent_category(granular)
+        parent_category = get_parent_category(granular)
 
-        # Extract bbox (product-only, used for image cropping + persisted)
-        # Gemini returns 0-1000 integers; convert to 0-1 floats for storage
-        raw_bbox = raw.get("bbox")
-        bbox_dict = None
-        if raw_bbox and isinstance(raw_bbox, dict):
-            x_min = raw_bbox.get("x_min")
-            y_min = raw_bbox.get("y_min")
-            x_max = raw_bbox.get("x_max")
-            y_max = raw_bbox.get("y_max")
-            if (
-                x_min is not None and y_min is not None
-                and x_max is not None and y_max is not None
-                and x_min < x_max and y_min < y_max
-            ):
-                bbox_dict = {
-                    "x_min": x_min / 1000.0,
-                    "y_min": y_min / 1000.0,
-                    "x_max": x_max / 1000.0,
-                    "y_max": y_max / 1000.0,
-                }
-
-        # Extract tile_bbox (full promo tile area, used for tap hotspots)
-        raw_tile_bbox = raw.get("tile_bbox")
-        tile_bbox_dict = None
-        if raw_tile_bbox and isinstance(raw_tile_bbox, dict):
-            tx_min = raw_tile_bbox.get("x_min")
-            ty_min = raw_tile_bbox.get("y_min")
-            tx_max = raw_tile_bbox.get("x_max")
-            ty_max = raw_tile_bbox.get("y_max")
-            if (
-                tx_min is not None and ty_min is not None
-                and tx_max is not None and ty_max is not None
-                and tx_min < tx_max and ty_min < ty_max
-            ):
-                tile_bbox_dict = {
-                    "x_min": tx_min / 1000.0,
-                    "y_min": ty_min / 1000.0,
-                    "x_max": tx_max / 1000.0,
-                    "y_max": ty_max / 1000.0,
-                }
-            else:
-                logger.warning(f"Item '{display_name}' (p{raw.get('page_number')}): invalid tile_bbox coords")
-        else:
-            logger.warning(f"Item '{display_name}' (p{raw.get('page_number')}): missing tile_bbox")
-
-        if not bbox_dict:
-            logger.debug(f"Item '{display_name}' (p{raw.get('page_number')}): no product bbox")
-
-        # Pack size tokens (Gemini-extracted); Python computes the unit price from these.
+        # --- Pack size tokens ---
         pack_size_value = _parse_price(raw.get("pack_size_value"))
         pack_size_unit = (raw.get("pack_size_unit") or "").strip().lower() or None
         pack_count = max(1, int(raw.get("pack_count") or 1))
 
         unit_price = compute_unit_price(
-            promo_price=promo_price,
-            original_price=original_price,
-            min_purchase_qty=min_purchase_qty,
+            promo_price=promo_price if promo_price is not None else 0.0,
+            original_price=original_price if original_price is not None else (promo_price or 0.0),
+            min_purchase_qty=min_qty,
             savings_amount=savings_amount,
             pack_size_value=pack_size_value,
             pack_size_unit=pack_size_unit,
             pack_count=pack_count,
-            display_name=display_name,
+            display_name=product_name,
             granular_category=granular,
         )
 
-        # Validation — flag gross pack-size mismatches but don't drop the row.
-        mismatch = validate_pack_size(display_name, pack_size_value, pack_size_unit)
+        mismatch = validate_pack_size(product_name, pack_size_value, pack_size_unit)
         if mismatch:
-            logger.warning(f"Item '{display_name}' (p{raw.get('page_number')}): {mismatch}")
+            logger.warning(f"Item '{product_name}' (p{raw.get('page_number')}): {mismatch}")
         for warn in unit_price.warnings:
-            logger.info(f"Item '{display_name}' (p{raw.get('page_number')}): unit-price {warn}")
+            logger.info(f"Item '{product_name}' (p{raw.get('page_number')}): unit-price {warn}")
+
+        # --- Geometry: normalize 0-1000 ints to 0-1 floats ---
+        bbox_dict = _normalize_bbox(raw.get("bbox"))
+        tile_bbox_dict = _normalize_bbox(raw.get("tile_bbox"))
+        if not tile_bbox_dict:
+            logger.warning(f"Item '{product_name}' (p{raw.get('page_number')}): missing tile_bbox")
+        if not bbox_dict:
+            logger.debug(f"Item '{product_name}' (p{raw.get('page_number')}): no product bbox")
 
         items.append(
             PromoItem(
-                display_name=display_name,
+                display_name=product_name,
+                primary_brand=primary_brand,
+                additional_brands=additional_brands,
                 display_mechanism=display_mechanism,
-                display_description=display_description,
-                display_savings_label=display_savings_label,
+                display_description=dsc,
+                display_savings_label=dsl,
                 display_unit_price=unit_price.display_unit_price,
+                mechanism_kind=kind,
+                mechanism_x=mechanism_x,
+                mechanism_y=mechanism_y,
+                promo_campaign=promo_campaign,
                 original_price=original_price,
                 promo_price=promo_price,
+                stated_savings=stated_savings,
                 savings_amount=savings_amount,
+                min_purchase_qty=min_qty,
+                promo_depth=promo_depth,
                 unit_price_value=unit_price.unit_price_value,
                 unit_price_unit=unit_price.unit_price_unit,
                 unit_price_quality=unit_price.quality,
                 pack_size_value=pack_size_value,
                 pack_size_unit=pack_size_unit,
                 pack_count=pack_count,
-                min_purchase_qty=min_purchase_qty,
-                promo_depth=promo_depth,
-                normalized_brand=normalized_brand,
-                display_brand=display_brand,
                 granular_category=granular,
-                parent_category=parent,
+                category=parent_category,
                 validity_start=validity_start,
                 validity_end=validity_end,
                 source_retailer=store_id,
@@ -1072,6 +1066,26 @@ def _parse_price(val) -> Optional[float]:
         return float(val)
     except (ValueError, TypeError):
         return None
+
+
+def _normalize_bbox(raw: Optional[dict]) -> Optional[dict]:
+    """Convert Gemini's 0-1000 integer bbox to our 0-1 float storage format."""
+    if not raw or not isinstance(raw, dict):
+        return None
+    x_min = raw.get("x_min")
+    y_min = raw.get("y_min")
+    x_max = raw.get("x_max")
+    y_max = raw.get("y_max")
+    if None in (x_min, y_min, x_max, y_max):
+        return None
+    if x_min >= x_max or y_min >= y_max:
+        return None
+    return {
+        "x_min": x_min / 1000.0,
+        "y_min": y_min / 1000.0,
+        "x_max": x_max / 1000.0,
+        "y_max": y_max / 1000.0,
+    }
 
 
 def generate_record_id(item: PromoItem) -> str:
@@ -1244,6 +1258,7 @@ def upsert_to_postgres(items: list[PromoItem]) -> int:
         return 0
 
     import psycopg2
+    from psycopg2.extras import Json
 
     conn = psycopg2.connect(_get_pg_connection_string())
     try:
@@ -1259,22 +1274,28 @@ def upsert_to_postgres(items: list[PromoItem]) -> int:
                 INSERT INTO promo_items (
                     id, display_name, display_name_lower, display_mechanism,
                     display_description, display_savings_label, display_unit_price,
+                    mechanism_kind, mechanism_x, mechanism_y, promo_campaign,
                     unit_price_value, unit_price_unit, unit_price_quality,
                     pack_size_value, pack_size_unit, pack_count,
-                    normalized_brand, display_brand,
-                    original_price, promo_price, savings_amount, min_purchase_qty, promo_depth,
-                    granular_category, source_retailer, source_type,
+                    normalized_brand, display_brand, primary_brand, additional_brands,
+                    original_price, promo_price, stated_savings, savings_amount,
+                    min_purchase_qty, promo_depth,
+                    granular_category, category,
+                    source_retailer, source_type,
                     page_number, promo_folder_url, validity_start, validity_end,
                     thumbnail_url, image_url, hero_url,
                     bbox_x_min, bbox_y_min, bbox_x_max, bbox_y_max,
                     tile_bbox_x_min, tile_bbox_y_min, tile_bbox_x_max, tile_bbox_y_max
                 ) VALUES (
                     %s, %s, %s, %s, %s, %s, %s,
+                    %s, %s, %s, %s,
                     %s, %s, %s,
                     %s, %s, %s,
+                    %s, %s, %s, %s,
+                    %s, %s, %s, %s,
                     %s, %s,
-                    %s, %s, %s, %s, %s,
-                    %s, %s, %s,
+                    %s, %s,
+                    %s, %s,
                     %s, %s, %s, %s,
                     %s, %s, %s,
                     %s, %s, %s, %s,
@@ -1287,6 +1308,10 @@ def upsert_to_postgres(items: list[PromoItem]) -> int:
                     display_description = EXCLUDED.display_description,
                     display_savings_label = EXCLUDED.display_savings_label,
                     display_unit_price = EXCLUDED.display_unit_price,
+                    mechanism_kind = EXCLUDED.mechanism_kind,
+                    mechanism_x = EXCLUDED.mechanism_x,
+                    mechanism_y = EXCLUDED.mechanism_y,
+                    promo_campaign = EXCLUDED.promo_campaign,
                     unit_price_value = EXCLUDED.unit_price_value,
                     unit_price_unit = EXCLUDED.unit_price_unit,
                     unit_price_quality = EXCLUDED.unit_price_quality,
@@ -1295,12 +1320,16 @@ def upsert_to_postgres(items: list[PromoItem]) -> int:
                     pack_count = EXCLUDED.pack_count,
                     normalized_brand = EXCLUDED.normalized_brand,
                     display_brand = EXCLUDED.display_brand,
+                    primary_brand = EXCLUDED.primary_brand,
+                    additional_brands = EXCLUDED.additional_brands,
                     original_price = EXCLUDED.original_price,
                     promo_price = EXCLUDED.promo_price,
+                    stated_savings = EXCLUDED.stated_savings,
                     savings_amount = EXCLUDED.savings_amount,
                     min_purchase_qty = EXCLUDED.min_purchase_qty,
                     promo_depth = EXCLUDED.promo_depth,
                     granular_category = EXCLUDED.granular_category,
+                    category = EXCLUDED.category,
                     source_retailer = EXCLUDED.source_retailer,
                     source_type = EXCLUDED.source_type,
                     page_number = EXCLUDED.page_number,
@@ -1327,6 +1356,10 @@ def upsert_to_postgres(items: list[PromoItem]) -> int:
                     item.display_description,
                     item.display_savings_label,
                     item.display_unit_price,
+                    item.mechanism_kind,
+                    item.mechanism_x,
+                    item.mechanism_y,
+                    item.promo_campaign,
                     item.unit_price_value,
                     item.unit_price_unit,
                     item.unit_price_quality,
@@ -1334,13 +1367,17 @@ def upsert_to_postgres(items: list[PromoItem]) -> int:
                     item.pack_size_unit,
                     item.pack_count,
                     item.normalized_brand,
-                    item.display_brand,
+                    item.primary_brand,  # legacy display_brand column now stores the primary brand
+                    item.primary_brand,
+                    Json(item.additional_brands) if item.additional_brands else None,
                     item.original_price,
                     item.promo_price,
+                    item.stated_savings,
                     item.savings_amount,
                     item.min_purchase_qty,
                     item.promo_depth,
                     item.granular_category,
+                    item.category,
                     item.source_retailer,
                     item.source_type,
                     item.page_number,

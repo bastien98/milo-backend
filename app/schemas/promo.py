@@ -9,12 +9,9 @@ class PromoStoreItem(BaseModel):
     original_price: float
     promo_price: float
     savings: float
-    savings_amount: Optional[float] = None
     min_purchase_qty: int = 1
-    effective_unit_price: Optional[float] = None
     discount_percentage: int
     mechanism: str
-    validity_start: str
     validity_end: str
     promo_folder_url: Optional[str] = None
     page_number: Optional[int] = None
@@ -23,12 +20,18 @@ class PromoStoreItem(BaseModel):
     display_description: Optional[str] = None
     display_unit_price: Optional[str] = None
     display_savings_label: Optional[str] = None
-    bucket: Optional[str] = None
-    bucket_label: Optional[str] = None
     thumbnail_url: Optional[str] = None
     image_url: Optional[str] = None
     store_name: Optional[str] = None
-    price_unavailable: bool = False  # True for assortment tiles with no printed price — iOS should render "Prijs in winkel"
+    price_unavailable: bool = False  # True for assortment tiles with no printed price — iOS renders "Prijs in winkel"
+    # --- New canonical fields (iOS can adopt incrementally) ---
+    primary_brand: Optional[str] = None
+    additional_brands: Optional[List[str]] = None
+    mechanism_kind: Optional[str] = None
+    mechanism_x: Optional[float] = None
+    mechanism_y: Optional[float] = None
+    promo_campaign: Optional[str] = None
+    category: Optional[str] = None  # Parent consumer category (~22 values)
 
 
 # ---------------------------------------------------------------------------
@@ -81,9 +84,9 @@ class PromoFolderHotspot(BaseModel):
     display_name: str
     display_brand: Optional[str] = None
     display_mechanism: str
-    original_price: float
-    promo_price: float
-    savings_amount: float
+    original_price: Optional[float] = None
+    promo_price: Optional[float] = None
+    savings_amount: float = 0.0
     discount_percentage: int
     min_purchase_qty: int = 1
     validity_end: str
@@ -91,6 +94,8 @@ class PromoFolderHotspot(BaseModel):
     image_url: Optional[str] = None
     store_name: str
     price_unavailable: bool = False  # True for assortment tiles with no printed price
+    mechanism_kind: Optional[str] = None
+    promo_campaign: Optional[str] = None
 
 
 class PromoFolderPage(BaseModel):

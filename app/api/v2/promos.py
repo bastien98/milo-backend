@@ -164,10 +164,11 @@ def _query_hotspots_by_folder_url(today_str: str) -> dict[str, list[PromoFolderH
             SELECT
                 id, source_retailer, page_number, promo_folder_url,
                 tile_bbox_x_min, tile_bbox_y_min, tile_bbox_x_max, tile_bbox_y_max,
-                display_name, display_brand, display_mechanism,
+                display_name, primary_brand, display_brand, display_mechanism,
                 original_price, promo_price, savings_amount, promo_depth,
                 min_purchase_qty, validity_end,
-                thumbnail_url, image_url
+                thumbnail_url, image_url,
+                mechanism_kind, promo_campaign
             FROM promo_items
             WHERE tile_bbox_x_min IS NOT NULL
               AND validity_end >= %s
@@ -179,10 +180,11 @@ def _query_hotspots_by_folder_url(today_str: str) -> dict[str, list[PromoFolderH
             (
                 item_id, retailer, page_number, promo_folder_url,
                 tx_min, ty_min, tx_max, ty_max,
-                display_name, display_brand, display_mechanism,
+                display_name, primary_brand, display_brand, display_mechanism,
                 original_price, promo_price, savings_amount, promo_depth,
                 min_purchase_qty, validity_end,
                 thumbnail_url, image_url,
+                mechanism_kind, promo_campaign,
             ) = row
 
             discount_pct = int(round(promo_depth)) if promo_depth else 0
@@ -195,11 +197,11 @@ def _query_hotspots_by_folder_url(today_str: str) -> dict[str, list[PromoFolderH
                 tile_bbox_x_max=tx_max,
                 tile_bbox_y_max=ty_max,
                 display_name=display_name,
-                display_brand=display_brand,
+                display_brand=primary_brand or display_brand,
                 display_mechanism=display_mechanism or "",
                 original_price=original_price,
                 promo_price=promo_price,
-                savings_amount=savings_amount,
+                savings_amount=savings_amount or 0.0,
                 discount_percentage=discount_pct,
                 min_purchase_qty=min_purchase_qty or 1,
                 validity_end=str(validity_end),
@@ -207,6 +209,8 @@ def _query_hotspots_by_folder_url(today_str: str) -> dict[str, list[PromoFolderH
                 image_url=image_url,
                 store_name=retailer,
                 price_unavailable=(float(promo_price or 0) == 0.0 and float(original_price or 0) == 0.0),
+                mechanism_kind=mechanism_kind,
+                promo_campaign=promo_campaign,
             )
             key = f"{promo_folder_url}:{page_number}"
             hotspots_map.setdefault(key, []).append(hotspot)
