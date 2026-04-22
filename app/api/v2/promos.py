@@ -167,7 +167,7 @@ def _query_hotspots_by_folder_url(today_str: str) -> dict[str, list[PromoFolderH
                 display_name, primary_brand, display_brand, display_mechanism,
                 original_price, promo_price, savings_amount, promo_depth,
                 min_purchase_qty, validity_end,
-                thumbnail_url, image_url,
+                thumbnail_url, image_url, hero_url,
                 mechanism_kind, promo_campaign,
                 promo_text_markdown
             FROM promo_items
@@ -184,7 +184,7 @@ def _query_hotspots_by_folder_url(today_str: str) -> dict[str, list[PromoFolderH
                 display_name, primary_brand, display_brand, display_mechanism,
                 original_price, promo_price, savings_amount, promo_depth,
                 min_purchase_qty, validity_end,
-                thumbnail_url, image_url,
+                thumbnail_url, image_url, hero_url,
                 mechanism_kind, promo_campaign,
                 promo_text_markdown,
             ) = row
@@ -209,6 +209,7 @@ def _query_hotspots_by_folder_url(today_str: str) -> dict[str, list[PromoFolderH
                 validity_end=str(validity_end),
                 thumbnail_url=thumbnail_url,
                 image_url=image_url,
+                hero_url=hero_url,
                 store_name=retailer,
                 price_unavailable=(float(promo_price or 0) == 0.0 and float(original_price or 0) == 0.0),
                 mechanism_kind=mechanism_kind,

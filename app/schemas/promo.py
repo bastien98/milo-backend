@@ -22,6 +22,7 @@ class PromoStoreItem(BaseModel):
     display_savings_label: Optional[str] = None
     thumbnail_url: Optional[str] = None
     image_url: Optional[str] = None
+    hero_url: Optional[str] = None  # Full-tile crop for the product-detail view (product + price label + brand + badge)
     store_name: Optional[str] = None
     price_unavailable: bool = False  # True for assortment tiles with no printed price — iOS renders "Prijs in winkel"
     # --- New canonical fields (iOS can adopt incrementally) ---
@@ -93,6 +94,7 @@ class PromoFolderHotspot(BaseModel):
     validity_end: str
     thumbnail_url: Optional[str] = None
     image_url: Optional[str] = None
+    hero_url: Optional[str] = None  # Full-tile crop for the product-detail view (product + price label + brand + badge)
     store_name: str
     price_unavailable: bool = False  # True for assortment tiles with no printed price
     mechanism_kind: Optional[str] = None

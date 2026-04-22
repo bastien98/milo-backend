@@ -81,6 +81,7 @@ class PromoItemRepository:
                 validity_end,
                 thumbnail_url,
                 image_url,
+                hero_url,
                 promo_text_markdown,
                 (normalized_brand IS NOT NULL
                  AND CAST(:src_brand AS text) IS NOT NULL

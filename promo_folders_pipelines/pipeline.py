@@ -1158,6 +1158,32 @@ def _resize_to_max(img: Image.Image, max_dim: int) -> Image.Image:
     return img.resize((int(w * scale), int(h * scale)), Image.LANCZOS)
 
 
+def _crop_from_normalized_bbox(
+    page_img: Image.Image, bbox: dict, min_area: float = 0.0025, min_px: int = 64
+) -> Optional[Image.Image]:
+    """Crop a page image using 0-1 normalized coords. Returns None if invalid."""
+    x_min = bbox.get("x_min", 0)
+    y_min = bbox.get("y_min", 0)
+    x_max = bbox.get("x_max", 0)
+    y_max = bbox.get("y_max", 0)
+
+    if x_min >= x_max or y_min >= y_max:
+        return None
+    if (x_max - x_min) * (y_max - y_min) < min_area:
+        return None
+
+    pw, ph = page_img.size
+    x1 = max(0, int(x_min * pw))
+    y1 = max(0, int(y_min * ph))
+    x2 = min(pw, int(x_max * pw))
+    y2 = min(ph, int(y_max * ph))
+
+    if (x2 - x1) < min_px or (y2 - y1) < min_px:
+        return None
+
+    return page_img.crop((x1, y1, x2, y2))
+
+
 def crop_and_upload_item_images(
     items: list[PromoItem],
     page_images: dict[int, bytes],
@@ -1165,18 +1191,27 @@ def crop_and_upload_item_images(
     store_id: str,
     folder_index: int = 1,
 ) -> None:
-    """Crop each item's product tile from pages and upload 3 sizes to R2.
+    """Crop each item's product and full-tile images from pages and upload to R2.
 
-    Sets thumbnail_url, image_url, hero_url on each item that has a valid bbox.
-    Items without a bbox are skipped gracefully.
+    Produces two crop sets per item:
+      - Product crop (from `bbox`, padded to square): thumb.webp (200px), medium.webp (400px)
+        → thumbnail_url, image_url. Used in carousels and minimal tile views.
+      - Full-tile crop (from `tile_bbox`, natural aspect): tile.webp (800px)
+        → hero_url. Used in the iOS product-detail view to show the whole promo tile
+        (product + price label + brand + badge + background).
+
+    Items without a valid `bbox` are skipped. `tile_bbox` is best-effort; if missing
+    or invalid, hero_url stays None.
     """
     if not R2_PUBLIC_BASE_URL:
         logger.warning("R2_PUBLIC_BASE_URL not set — skipping image upload")
         return
 
-    uploaded = 0
+    product_uploaded = 0
+    tile_uploaded = 0
     skipped_no_bbox = 0
     skipped_invalid = 0
+    tile_missing = 0
 
     for item in items:
         if not item.bbox:
@@ -1188,21 +1223,6 @@ def crop_and_upload_item_images(
             skipped_invalid += 1
             continue
 
-        bbox = item.bbox
-        x_min = bbox.get("x_min", 0)
-        y_min = bbox.get("y_min", 0)
-        x_max = bbox.get("x_max", 0)
-        y_max = bbox.get("y_max", 0)
-
-        # Validate bbox geometry and minimum area
-        if x_min >= x_max or y_min >= y_max:
-            skipped_invalid += 1
-            continue
-        area = (x_max - x_min) * (y_max - y_min)
-        if area < 0.0025:  # 0.25% of page area — allow smaller items
-            skipped_invalid += 1
-            continue
-
         try:
             page_img = Image.open(io.BytesIO(page_images[page_num])).convert("RGB")
         except Exception as e:
@@ -1210,46 +1230,57 @@ def crop_and_upload_item_images(
             skipped_invalid += 1
             continue
 
-        pw, ph = page_img.size
-
-        # No post-crop padding — the extraction prompt already instructs Gemini to leave
-        # a 2-3% margin around the physical product. Adding more here double-pads the crop
-        # and produces inconsistent whitespace across products.
-        x1 = max(0, int(x_min * pw))
-        y1 = max(0, int(y_min * ph))
-        x2 = min(pw, int(x_max * pw))
-        y2 = min(ph, int(y_max * ph))
-
-        if (x2 - x1) < 64 or (y2 - y1) < 64:
+        # Product crop — tight around the product, padded to square for uniform
+        # display in iOS grids. The extraction prompt already leaves a 2-3% margin,
+        # so no extra pre-crop padding is needed here.
+        product_crop = _crop_from_normalized_bbox(page_img, item.bbox)
+        if product_crop is None:
             skipped_invalid += 1
             continue
-
-        crop = page_img.crop((x1, y1, x2, y2))
-
-        # Pad to square for uniform display in iOS grid
-        crop = _pad_to_square(crop)
+        product_crop = _pad_to_square(product_crop)
 
         record_id = generate_record_id(item)
         base_key = f"promo_item_images/{store_id}/{record_id}"
 
         try:
-            for size, suffix in ((200, "thumb"), (400, "medium"), (800, "hero")):
-                resized = _resize_to_max(crop, size)
+            for size, suffix in ((200, "thumb"), (400, "medium")):
+                resized = _resize_to_max(product_crop, size)
                 buf = io.BytesIO()
                 resized.save(buf, format="WEBP", quality=85)
                 r2.upload_image(f"{base_key}/{suffix}.webp", buf.getvalue())
 
             item.thumbnail_url = f"{R2_PUBLIC_BASE_URL}/{base_key}/thumb.webp"
             item.image_url = f"{R2_PUBLIC_BASE_URL}/{base_key}/medium.webp"
-            item.hero_url = f"{R2_PUBLIC_BASE_URL}/{base_key}/hero.webp"
-            uploaded += 1
+            product_uploaded += 1
         except Exception as e:
-            logger.warning(f"Image upload failed for '{item.display_name}': {e}")
+            logger.warning(f"Product image upload failed for '{item.display_name}': {e}")
+            continue
+
+        # Tile crop — full promo tile, natural aspect (no square padding).
+        # Powers the iOS product-detail view.
+        if not item.tile_bbox:
+            tile_missing += 1
+            continue
+        tile_crop = _crop_from_normalized_bbox(page_img, item.tile_bbox)
+        if tile_crop is None:
+            tile_missing += 1
+            continue
+
+        try:
+            resized_tile = _resize_to_max(tile_crop, 800)
+            buf = io.BytesIO()
+            resized_tile.save(buf, format="WEBP", quality=85)
+            r2.upload_image(f"{base_key}/tile.webp", buf.getvalue())
+            item.hero_url = f"{R2_PUBLIC_BASE_URL}/{base_key}/tile.webp"
+            tile_uploaded += 1
+        except Exception as e:
+            logger.warning(f"Tile image upload failed for '{item.display_name}': {e}")
 
     logger.info(
-        f"Item images: {uploaded} uploaded, "
+        f"Item images: {product_uploaded} product crops, {tile_uploaded} tile crops uploaded; "
         f"{skipped_no_bbox} skipped (no bbox), "
-        f"{skipped_invalid} skipped (invalid bbox/page)"
+        f"{skipped_invalid} skipped (invalid bbox/page), "
+        f"{tile_missing} tile crops skipped (missing/invalid tile_bbox)"
     )
 
 
