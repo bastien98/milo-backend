@@ -6,7 +6,7 @@ import time
 from datetime import date, datetime, timezone
 from typing import Optional, Tuple
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
+from fastapi import APIRouter, Depends, Header, HTTPException, Query, Response, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_db, get_optional_db_user
@@ -331,3 +331,30 @@ async def get_promo_folders():
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail="Promo folders are temporarily unavailable.",
         )
+
+
+@router.post("/folders/refresh", status_code=status.HTTP_204_NO_CONTENT)
+async def refresh_promo_folders(
+    x_refresh_token: Optional[str] = Header(None, alias="X-Refresh-Token"),
+):
+    """Invalidate the in-memory folders cache.
+
+    Called by the ingest pipeline after a successful ingestion so newly-added
+    hotspots surface on the next `/folders` request instead of waiting up to an
+    hour for the TTL to expire. Protected by a shared secret — the server must
+    have `PROMO_FOLDERS_REFRESH_TOKEN` set for this endpoint to accept calls.
+    """
+    global _folders_cache
+
+    expected = os.environ.get("PROMO_FOLDERS_REFRESH_TOKEN", "")
+    if not expected:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Folders refresh is not configured on this deployment.",
+        )
+    if not x_refresh_token or x_refresh_token != expected:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Forbidden")
+
+    _folders_cache = None
+    logger.info("Promo folders cache invalidated via /folders/refresh")
+    return Response(status_code=status.HTTP_204_NO_CONTENT)

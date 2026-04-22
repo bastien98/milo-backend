@@ -46,12 +46,14 @@ except ImportError:
     print("ERROR: python-dotenv not installed.")
     sys.exit(1)
 
+from promo_folders_pipelines.cache_refresh import notify_folders_cache_refresh
 from promo_folders_pipelines.r2_storage import R2PromoStorage
 from promo_folders_pipelines.pipeline import (
     extract_promos_from_images,
     parse_promo_items,
     crop_and_upload_item_images,
     upsert_to_postgres,
+    delete_expired_promos_pg,
     delete_retailer_promos_pg,
 )
 from promo_folders_pipelines.stores import load_store_config
@@ -180,11 +182,11 @@ def process_retailer(
         logger.info(f"Extracting promo items via Gemini ({len(page_images)} pages)...")
         raw_data = extract_promos_from_images(page_images, store_config)
 
-        # Inject validity dates from scraper metadata (more reliable than Gemini inference)
-        if not raw_data.get("validity_start"):
-            raw_data["validity_start"] = folder.validity_start
-        if not raw_data.get("validity_end"):
-            raw_data["validity_end"] = folder.validity_end
+        # Folder validity from promopromo.be is authoritative — always override
+        # any Gemini-inferred dates so every item in this folder carries the
+        # exact same (validity_start, validity_end) as its parent folder.
+        raw_data["validity_start"] = folder.validity_start
+        raw_data["validity_end"] = folder.validity_end
 
         # Step 6: Parse & validate
         source_url = f"https://www.promopromo.be/nl/{folder.shop_slug}-folder/{folder.uuid}/0"
@@ -243,6 +245,13 @@ def main():
         os.environ["DATABASE_URL"] = nonprod_url
         logger.info("Targeting NON-PROD database")
 
+    # DB hygiene: drop rows whose validity window is already in the past before
+    # we start pulling fresh folders. Safe to run every invocation; expired rows
+    # are already hidden from the API by query-time filters.
+    if not args.dry_run:
+        from datetime import date
+        delete_expired_promos_pg(date.today())
+
     # Determine retailers to process
     if args.store:
         keys = [args.store]
@@ -273,6 +282,11 @@ def main():
     logger.info(f"  New folders processed: {total_new}")
     logger.info(f"  Items upserted: {total_items}")
     logger.info(f"{'=' * 60}")
+
+    # Drop the API's folders cache so newly-ingested hotspots show up immediately
+    # instead of waiting up to an hour for the TTL to expire.
+    if not args.dry_run and success_count > 0:
+        notify_folders_cache_refresh(args.env)
 
     if fail_count > 0:
         sys.exit(1)

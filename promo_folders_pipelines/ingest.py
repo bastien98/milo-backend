@@ -38,8 +38,13 @@ except ImportError:
     print(f"  .venv/bin/python -m promo_folders_pipelines.ingest ...")
     sys.exit(1)
 
+from promo_folders_pipelines.cache_refresh import notify_folders_cache_refresh
 from promo_folders_pipelines.stores import list_stores, load_store_config
-from promo_folders_pipelines.pipeline import run_pipeline, delete_retailer_promos_pg
+from promo_folders_pipelines.pipeline import (
+    delete_expired_promos_pg,
+    delete_retailer_promos_pg,
+    run_pipeline,
+)
 from promo_folders_pipelines.r2_storage import R2PromoStorage
 
 logging.basicConfig(
@@ -219,6 +224,13 @@ def main():
     if not args.store:
         parser.error("--store is required (use --list-stores to see available stores)")
 
+    # DB hygiene: drop rows whose validity window is already in the past. Safe to
+    # run every invocation; expired rows are already hidden from the API by
+    # query-time filters, this just prevents unbounded table growth.
+    if not args.dry_run:
+        from datetime import date
+        delete_expired_promos_pg(date.today())
+
     # Collect PDFs from R2
     r2 = R2PromoStorage()
     pdf_refs = _collect_pdfs_from_r2(r2, args.store, args.week)
@@ -267,6 +279,8 @@ def main():
             promo_folder_url=meta["promo_folder_url"],
             dry_run=args.dry_run,
             pdf_label=label,
+            validity_start=meta.get("validity_start"),
+            validity_end=meta.get("validity_end"),
         )
         all_items.extend(items)
 
@@ -313,6 +327,11 @@ def main():
                 ensure_ascii=False,
             )
         logger.info(f"Wrote {len(all_items)} items to {output_path}")
+
+    # Drop the API's folders cache so the new hotspots show up immediately.
+    if not args.dry_run and all_items:
+        notify_folders_cache_refresh(args.env)
+
 
 if __name__ == "__main__":
     main()

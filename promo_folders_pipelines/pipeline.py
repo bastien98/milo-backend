@@ -1501,6 +1501,30 @@ def delete_retailer_promos_pg(retailer: str, validity_start: str = None, validit
     return deleted
 
 
+def delete_expired_promos_pg(today) -> int:
+    """Delete promo_items rows whose validity_end is strictly before `today`.
+
+    Called at the start of each ingest run so expired rows don't pile up.
+    Safe to call repeatedly — expired rows are already hidden from the API
+    by query-time filters, this is pure hygiene.
+    """
+    import psycopg2
+
+    conn = psycopg2.connect(_get_pg_connection_string())
+    try:
+        cur = conn.cursor()
+        cur.execute("DELETE FROM promo_items WHERE validity_end < %s", (today,))
+        deleted = cur.rowcount
+        conn.commit()
+        cur.close()
+    finally:
+        conn.close()
+
+    if deleted:
+        logger.info(f"Deleted {deleted} expired promo_items (validity_end < {today})")
+    return deleted
+
+
 # ---------------------------------------------------------------------------
 # Pipeline orchestrator
 # ---------------------------------------------------------------------------
@@ -1510,6 +1534,8 @@ def run_pipeline(
     promo_folder_url: Optional[str] = None,
     dry_run: bool = False,
     pdf_label: str = "",
+    validity_start: Optional[str] = None,
+    validity_end: Optional[str] = None,
 ) -> list[PromoItem]:
     """Run the full ingestion pipeline for a store.
 
@@ -1519,6 +1545,10 @@ def run_pipeline(
         promo_folder_url: Optional URL of the promo folder source
         dry_run: If True, extract and parse only — no database upsert
         pdf_label: Human-readable label for logging (e.g. "colruyt/2026-W12/food.pdf")
+        validity_start: If provided, unconditionally overrides Gemini's inferred
+            folder validity_start so every item carries the folder's authoritative
+            date (sourced from the folder metadata, not the PDF contents).
+        validity_end: Same as validity_start, for the end date.
 
     Returns:
         List of parsed PromoItem objects
@@ -1538,6 +1568,14 @@ def run_pipeline(
 
     # Step 1: Extract from PDF via Gemini
     raw_data = extract_promos_from_pdf(pdf_data, config)
+
+    # Folder metadata validity is authoritative — override Gemini's inference so
+    # every item in this folder carries the exact same validity window as the
+    # parent folder's R2 metadata.
+    if validity_start:
+        raw_data["validity_start"] = validity_start
+    if validity_end:
+        raw_data["validity_end"] = validity_end
 
     # Step 2: Parse and validate
     items = parse_promo_items(raw_data, canonical_store_id, promo_folder_url)

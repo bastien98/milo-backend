@@ -136,7 +136,7 @@ class PromoSimilarityService:
 
         ranked = self._rank(
             candidates=candidates,
-            source_promo_price=source.promo_price,
+            source_promo_price=float(source.promo_price or 0.0),
             today=today,
             category_profile=category_profile,
         )
