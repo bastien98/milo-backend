@@ -73,6 +73,16 @@ class PromoItem:
     image_url: Optional[str] = None
     hero_url: Optional[str] = None
 
+    # --- Coupon fields (set by pipeline when tile classified as coupon + barcode decoded) ---
+    is_coupon: bool = False
+    coupon_type: Optional[str] = None               # loyalty_points | cashback | free_product | percent_off_coupon | other
+    coupon_barcode_value: Optional[str] = None      # decoded digit string, e.g. '0453697700003'
+    coupon_barcode_format: Optional[str] = None     # 'EAN-13' | 'Code-128' | ...
+    coupon_value: Optional[float] = None            # points / €-off / %-off
+    coupon_min_purchase: Optional[str] = None       # verbatim trigger: '1 pot Natù-fruitspread'
+    coupon_validity_end: Optional[str] = None       # YYYY-MM-DD, coupon-level (differs from folder)
+    barcode_bbox: Optional[dict] = None             # normalized 0-1, same shape as bbox / tile_bbox
+
     @property
     def normalized_brand(self) -> Optional[str]:
         """Lowercase primary_brand — kept as a property for backward compat with similarity search."""

@@ -311,6 +311,7 @@ class PromoSimilarityService:
             "price_unavailable": price_unavailable,
             "thumbnail_url": row.get("thumbnail_url"),
             "image_url": row.get("image_url"),
+            "hero_url": row.get("hero_url"),
             "store_name": row.get("source_retailer"),
             "primary_brand": row.get("primary_brand"),
             "additional_brands": row.get("additional_brands"),
@@ -320,4 +321,19 @@ class PromoSimilarityService:
             "promo_campaign": row.get("promo_campaign"),
             "category": row.get("category"),
             "promo_text_markdown": row.get("promo_text_markdown"),
+            "is_coupon": bool(row.get("is_coupon") or False),
+            "coupon_type": row.get("coupon_type"),
+            "coupon_barcode_value": row.get("coupon_barcode_value"),
+            "coupon_barcode_format": row.get("coupon_barcode_format"),
+            "coupon_value": row.get("coupon_value"),
+            "coupon_min_purchase": row.get("coupon_min_purchase"),
+            "coupon_validity_end": (
+                row.get("coupon_validity_end").isoformat()
+                if isinstance(row.get("coupon_validity_end"), date)
+                else row.get("coupon_validity_end")
+            ),
+            "barcode_bbox_x_min": row.get("barcode_bbox_x_min"),
+            "barcode_bbox_y_min": row.get("barcode_bbox_y_min"),
+            "barcode_bbox_x_max": row.get("barcode_bbox_x_max"),
+            "barcode_bbox_y_max": row.get("barcode_bbox_y_max"),
         }

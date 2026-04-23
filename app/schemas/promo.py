@@ -34,6 +34,18 @@ class PromoStoreItem(BaseModel):
     promo_campaign: Optional[str] = None
     category: Optional[str] = None  # Parent consumer category (~22 values)
     promo_text_markdown: Optional[str] = None  # Verbatim tile text as Markdown
+    # --- Coupon fields (scannable 1D barcode redeemable at the till) ---
+    is_coupon: bool = False
+    coupon_type: Optional[str] = None              # loyalty_points | cashback | free_product | percent_off_coupon | other
+    coupon_barcode_value: Optional[str] = None     # decoded digit string, e.g. "0453697700003"
+    coupon_barcode_format: Optional[str] = None    # "EAN-13", "Code-128", ...
+    coupon_value: Optional[float] = None           # points / €-off / %-off
+    coupon_min_purchase: Optional[str] = None      # verbatim trigger condition
+    coupon_validity_end: Optional[str] = None      # YYYY-MM-DD if coupon has its own date
+    barcode_bbox_x_min: Optional[float] = None
+    barcode_bbox_y_min: Optional[float] = None
+    barcode_bbox_x_max: Optional[float] = None
+    barcode_bbox_y_max: Optional[float] = None
 
 
 # ---------------------------------------------------------------------------
@@ -100,6 +112,18 @@ class PromoFolderHotspot(BaseModel):
     mechanism_kind: Optional[str] = None
     promo_campaign: Optional[str] = None
     promo_text_markdown: Optional[str] = None
+    # --- Coupon fields ---
+    is_coupon: bool = False
+    coupon_type: Optional[str] = None
+    coupon_barcode_value: Optional[str] = None
+    coupon_barcode_format: Optional[str] = None
+    coupon_value: Optional[float] = None
+    coupon_min_purchase: Optional[str] = None
+    coupon_validity_end: Optional[str] = None
+    barcode_bbox_x_min: Optional[float] = None
+    barcode_bbox_y_min: Optional[float] = None
+    barcode_bbox_x_max: Optional[float] = None
+    barcode_bbox_y_max: Optional[float] = None
 
 
 class PromoFolderPage(BaseModel):

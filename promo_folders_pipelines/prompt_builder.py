@@ -28,6 +28,31 @@ Classify every promo into ONE canonical `mechanism_kind` and fill `mechanism_x` 
 Put the store's marketing banner (e.g. "Bonus", "Prix Choc", "Mega Deal", "Sunday Deal", "Bonus Card") verbatim in `promo_campaign`. It is ORTHOGONAL to `mechanism_kind` — still pick the underlying mechanism kind from the table above."""
 
 
+_COUPON_DETECTION_SECTION = """## COUPON DETECTION
+A **coupon** is a tile with a scannable barcode the shopper presents at the till to redeem loyalty points, cash back, a free product, or a percentage discount. A non-coupon promo tile is a normal discounted product. Coupons look distinctly different — they always combine these three signals:
+
+1. A **loyalty-program badge** visible on the tile: "Bonuspunten", "Bonus Card", "SuperPlus", "Plus Points", "Xtra", "Fidelity", "Fidélité".
+2. A **1D barcode** (stripes) printed within the tile's own boundary, with human-readable digits underneath (typically EAN-13 or Code-128).
+3. **Redemption fine print** like "Geldig bij afgifte van deze originele bon", "Bon per aankoop", "Valable sur présentation de ce bon", or a coupon-specific "Geldig tot DD/MM/YYYY" date independent of the folder's validity.
+
+For each item, emit:
+
+- `is_coupon: bool` — TRUE only if ALL THREE signals are present. A barcode printed on product PACKAGING (visible in the product photo) is NOT a coupon — that's just the product's own EAN. A QR code is NOT a coupon — coupons are 1D barcodes only.
+- `coupon_type: str | null` — if `is_coupon` is TRUE, classify into ONE of:
+  - `"loyalty_points"` — the reward is loyalty-card points ("X Bonuspunten", "X Plus-punten", "X pts")
+  - `"cashback"` — the reward is a direct euro discount ("€X korting", "-€X", "€X réduction")
+  - `"free_product"` — one product free with a qualifying purchase ("1 gratis product", "produit gratuit")
+  - `"percent_off_coupon"` — the reward is a percentage off ("-X% op", "-X% sur")
+  - `"other"` — clearly a coupon but none of the above fit
+- `coupon_value: float | null` — the numeric reward: points count for `loyalty_points`, euro amount for `cashback`, percent for `percent_off_coupon`, null for `free_product` and `other`.
+- `coupon_min_purchase: str | null` — the verbatim trigger condition ("1 pot Natù-fruitspread", "€20 aan Nivea-gezichtsverzorging", "2 producten van Prince").
+- `coupon_validity_end: str | null` — YYYY-MM-DD parsed from the coupon's own "Geldig tot" / "Valable jusqu'au" date, if printed on the tile. null if only the folder's global validity applies.
+
+Non-coupon items: emit `is_coupon: false` and leave all other coupon_* fields null.
+
+When a coupon tile is present: still fill `product_name`, brands, `promo_text_markdown`, category, `bbox`, `tile_bbox` for the underlying product the coupon applies to. Coupons don't have `original_price` / `promo_price` (unless the tile also prints one) — leave pricing fields null for pure loyalty-points / free-product coupons."""
+
+
 _PROMO_TEXT_MARKDOWN_SECTION = """## VERBATIM PROMO TEXT (`promo_text_markdown`)
 Transcribe every piece of text that is actually printed on the promo tile, then reformat it as clean Markdown for display to the end user. This field is shown to shoppers as-is, so it must be faithful and readable.
 
@@ -85,6 +110,9 @@ def build_system_prompt(config: Dict[str, Any], categories_list: str) -> str:
 
     # --- Canonical mechanism table (shared across all stores) ---
     sections.append(_CANONICAL_MECHANISM_TABLE)
+
+    # --- Coupon detection (bonus points, cashback, free product, % off coupons) ---
+    sections.append(_COUPON_DETECTION_SECTION)
 
     # --- Verbatim promo text → Markdown ---
     sections.append(_PROMO_TEXT_MARKDOWN_SECTION)
@@ -189,4 +217,5 @@ Before outputting each item, verify:
 - Pack size tokens are transcribed verbatim — no unit conversion.
 - A multi-brand tile is ONE item with brands split into primary_brand + additional_brands.
 - `granular_category` is chosen precisely (wine → wine sub-category, beer → beer sub-category; never cross over).
-- Every item has both `bbox` (physical product) and `tile_bbox` (whole tile, contains bbox)."""
+- Every item has both `bbox` (physical product) and `tile_bbox` (whole tile, contains bbox).
+- `is_coupon` is TRUE only when the tile has a loyalty-badge + 1D barcode + redemption fine-print together. Product-packaging EANs and QR codes don't qualify."""

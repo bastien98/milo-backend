@@ -27,6 +27,12 @@ FLAG_TILE_OVERLAP_HIGH = "tile_overlap_high"
 FLAG_AREA_OUTLIER = "area_outlier"
 FLAG_EDGE_HUGGER = "edge_hugger"
 FLAG_IOU_REJECTION = "iou_rejection"
+# Coupon flags. These surface ingestion weaknesses: Gemini said coupon but we
+# couldn't verify the barcode; barcode ended up outside its tile; classifier
+# defaulted to "other" because the coupon's reward type wasn't recognized.
+FLAG_COUPON_NO_BARCODE = "coupon_no_barcode"
+FLAG_COUPON_TYPE_OTHER = "coupon_type_other"
+FLAG_BARCODE_OUTSIDE_TILE = "barcode_outside_tile"
 
 
 @dataclass
@@ -133,6 +139,25 @@ def detect_anomalies(
                 and _approx_equal(item.tile_bbox, item.bbox)
             ):
                 _add_flag(page, item.display_name, FLAG_FELL_BACK_TO_TILE)
+
+            # Coupon-specific checks.
+            if item.is_coupon:
+                if not item.coupon_barcode_value:
+                    _add_flag(page, item.display_name, FLAG_COUPON_NO_BARCODE)
+                if item.coupon_type == "other":
+                    _add_flag(page, item.display_name, FLAG_COUPON_TYPE_OTHER)
+                if item.barcode_bbox and item.tile_bbox:
+                    # Barcode bbox should be strictly inside the tile bbox.
+                    # A bit of margin tolerance for rounding at the borders.
+                    margin = 0.005
+                    outside = (
+                        item.barcode_bbox["x_min"] < item.tile_bbox["x_min"] - margin
+                        or item.barcode_bbox["y_min"] < item.tile_bbox["y_min"] - margin
+                        or item.barcode_bbox["x_max"] > item.tile_bbox["x_max"] + margin
+                        or item.barcode_bbox["y_max"] > item.tile_bbox["y_max"] + margin
+                    )
+                    if outside:
+                        _add_flag(page, item.display_name, FLAG_BARCODE_OUTSIDE_TILE)
 
     # Pass-2 IoU rejections (may be empty on the CLI path where pass-2 isn't wired).
     for page, name in rejections:

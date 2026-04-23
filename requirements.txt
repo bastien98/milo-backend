@@ -28,6 +28,10 @@ Pillow>=11.0.0
 pdf2image>=1.17.0
 PyMuPDF>=1.24.0
 
+# Barcode decoding (coupon detection in promo folders)
+zxing-cpp>=3.0.0
+pyzbar>=0.1.9
+
 # PDF analysis (fraud detection)
 pikepdf>=9.0.0
 

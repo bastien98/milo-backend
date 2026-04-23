@@ -4,6 +4,7 @@ from datetime import date as date_type
 from typing import Optional
 
 from sqlalchemy import (
+    Boolean,
     Date,
     DateTime,
     Float,
@@ -87,6 +88,22 @@ class PromoItem(Base):
     tile_bbox_y_min: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
     tile_bbox_x_max: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
     tile_bbox_y_max: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+
+    # Coupon fields. A coupon is a promo tile with a scannable 1D barcode the user
+    # presents at the till for loyalty points / cashback / free product / % off.
+    # Populated only when the pipeline classifies a tile as a coupon AND the
+    # multi-scale barcode decoder extracts a stable digit string.
+    is_coupon: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default="false", default=False)
+    coupon_type: Mapped[Optional[str]] = mapped_column(String(32), nullable=True)
+    coupon_barcode_value: Mapped[Optional[str]] = mapped_column(String(32), nullable=True)
+    coupon_barcode_format: Mapped[Optional[str]] = mapped_column(String(16), nullable=True)
+    coupon_value: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    coupon_min_purchase: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    coupon_validity_end: Mapped[Optional[date_type]] = mapped_column(Date, nullable=True)
+    barcode_bbox_x_min: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    barcode_bbox_y_min: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    barcode_bbox_x_max: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    barcode_bbox_y_max: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
 
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()

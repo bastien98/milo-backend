@@ -27,6 +27,7 @@ from app.core.categories import (
     GRANULAR_CATEGORIES,
     get_parent_category,
 )
+from promo_folders_pipelines.coupon_barcode import decode_coupon_barcode
 from promo_folders_pipelines.mechanism import (
     ALL_KINDS,
     MechanismKind,
@@ -219,6 +220,46 @@ class _PromoItemSchema(PydanticBaseModel):
         description=(
             "Bounding box around the ENTIRE promo tile (product image + price label + brand text + badge + background). "
             "Must fully contain bbox. Integer coords 0-1000."
+        ),
+    )
+
+    # --- Coupon detection (see COUPON DETECTION section of the system prompt) ---
+    is_coupon: bool = Field(
+        default=False,
+        description=(
+            "TRUE only if this tile is a loyalty-card coupon: loyalty badge + 1D barcode with printed digits "
+            "+ redemption fine print, all present together. Product-packaging EANs and QR codes don't qualify."
+        ),
+    )
+    coupon_type: Optional[Literal["loyalty_points", "cashback", "free_product", "percent_off_coupon", "other"]] = Field(
+        default=None,
+        description=(
+            "Reward type of the coupon. loyalty_points: X Bonuspunten / Plus-punten. "
+            "cashback: €X korting / €X réduction. free_product: 1 product gratis. "
+            "percent_off_coupon: -X% on purchase. other: clearly a coupon but none of the above fit. "
+            "null when is_coupon is false."
+        ),
+    )
+    coupon_value: Optional[float] = Field(
+        default=None,
+        description=(
+            "Numeric reward: points count for loyalty_points, euro amount for cashback, "
+            "percent for percent_off_coupon. null for free_product, other, or when is_coupon is false."
+        ),
+    )
+    coupon_min_purchase: Optional[str] = Field(
+        default=None,
+        description=(
+            "Verbatim trigger condition printed on the coupon "
+            "(e.g. '1 pot Natù-fruitspread', '€20 aan Nivea', '2 producten van Prince'). "
+            "null when is_coupon is false or no trigger is printed."
+        ),
+    )
+    coupon_validity_end: Optional[date] = Field(
+        default=None,
+        description=(
+            "Coupon's own 'Geldig tot DD/MM/YYYY' / 'Valable jusqu'au' end date in YYYY-MM-DD. "
+            "null when the coupon relies on the folder's global validity, or when is_coupon is false."
         ),
     )
 
@@ -1020,6 +1061,13 @@ def parse_promo_items(
         if not bbox_dict:
             logger.debug(f"Item '{product_name}' (p{raw.get('page_number')}): no product bbox")
 
+        # Coupon fields (Gemini-extracted; barcode decoding happens later, in the crop step).
+        is_coupon = bool(raw.get("is_coupon", False))
+        coupon_type = raw.get("coupon_type") if is_coupon else None
+        coupon_value = _parse_price(raw.get("coupon_value")) if is_coupon else None
+        coupon_min_purchase = raw.get("coupon_min_purchase") if is_coupon else None
+        coupon_validity_end = raw.get("coupon_validity_end") if is_coupon else None
+
         items.append(
             PromoItem(
                 display_name=product_name,
@@ -1056,6 +1104,11 @@ def parse_promo_items(
                 promo_folder_url=promo_folder_url,
                 bbox=bbox_dict,
                 tile_bbox=tile_bbox_dict,
+                is_coupon=is_coupon,
+                coupon_type=coupon_type,
+                coupon_value=coupon_value,
+                coupon_min_purchase=coupon_min_purchase,
+                coupon_validity_end=coupon_validity_end,
             )
         )
 
@@ -1292,11 +1345,38 @@ def crop_and_upload_item_images(
         except Exception as e:
             logger.warning(f"Tile image upload failed for '{item.display_name}': {e}")
 
+        # --- Coupon barcode decoding ---
+        # Only attempt decode when Gemini classified this tile as a coupon. We rely on
+        # the semantic classifier to rule out product-packaging EANs that happen to be
+        # visible inside the tile.
+        if item.is_coupon:
+            try:
+                decoded = decode_coupon_barcode(
+                    tile_crop=tile_crop,
+                    tile_bbox_page_normalized=item.tile_bbox,
+                    page_size=page_img.size,
+                )
+                if decoded is not None:
+                    item.coupon_barcode_value = decoded.value
+                    item.coupon_barcode_format = decoded.barcode_format
+                    item.barcode_bbox = decoded.bbox_page_normalized
+                else:
+                    logger.warning(
+                        f"Coupon barcode decode failed for '{item.display_name}' "
+                        f"(p{item.page_number}, store={store_id}) — coupon will be "
+                        f"displayable but unscannable"
+                    )
+            except Exception as e:
+                logger.warning(f"Coupon decode errored for '{item.display_name}': {e}")
+
+    coupon_count = sum(1 for i in items if i.is_coupon)
+    coupon_decoded = sum(1 for i in items if i.is_coupon and i.coupon_barcode_value)
     logger.info(
         f"Item images: {product_uploaded} product crops, {tile_uploaded} tile crops uploaded; "
         f"{skipped_no_bbox} skipped (no bbox), "
         f"{skipped_invalid} skipped (invalid bbox/page), "
-        f"{tile_missing} tile crops skipped (missing/invalid tile_bbox)"
+        f"{tile_missing} tile crops skipped (missing/invalid tile_bbox); "
+        f"coupons: {coupon_decoded}/{coupon_count} barcodes decoded"
     )
 
 
@@ -1455,6 +1535,8 @@ def upsert_to_postgres(items: list[PromoItem]) -> int:
             bbox = item.bbox or {}
             tile = item.tile_bbox or {}
 
+            barcode_bbox = item.barcode_bbox or {}
+
             cur.execute(
                 """
                 INSERT INTO promo_items (
@@ -1472,7 +1554,10 @@ def upsert_to_postgres(items: list[PromoItem]) -> int:
                     thumbnail_url, image_url, hero_url,
                     bbox_x_min, bbox_y_min, bbox_x_max, bbox_y_max,
                     tile_bbox_x_min, tile_bbox_y_min, tile_bbox_x_max, tile_bbox_y_max,
-                    promo_text_markdown
+                    promo_text_markdown,
+                    is_coupon, coupon_type, coupon_barcode_value, coupon_barcode_format,
+                    coupon_value, coupon_min_purchase, coupon_validity_end,
+                    barcode_bbox_x_min, barcode_bbox_y_min, barcode_bbox_x_max, barcode_bbox_y_max
                 ) VALUES (
                     %s, %s, %s, %s, %s, %s, %s,
                     %s, %s, %s, %s,
@@ -1487,7 +1572,10 @@ def upsert_to_postgres(items: list[PromoItem]) -> int:
                     %s, %s, %s,
                     %s, %s, %s, %s,
                     %s, %s, %s, %s,
-                    %s
+                    %s,
+                    %s, %s, %s, %s,
+                    %s, %s, %s,
+                    %s, %s, %s, %s
                 )
                 ON CONFLICT (id) DO UPDATE SET
                     display_name = EXCLUDED.display_name,
@@ -1535,7 +1623,18 @@ def upsert_to_postgres(items: list[PromoItem]) -> int:
                     tile_bbox_y_min = EXCLUDED.tile_bbox_y_min,
                     tile_bbox_x_max = EXCLUDED.tile_bbox_x_max,
                     tile_bbox_y_max = EXCLUDED.tile_bbox_y_max,
-                    promo_text_markdown = EXCLUDED.promo_text_markdown
+                    promo_text_markdown = EXCLUDED.promo_text_markdown,
+                    is_coupon = EXCLUDED.is_coupon,
+                    coupon_type = EXCLUDED.coupon_type,
+                    coupon_barcode_value = EXCLUDED.coupon_barcode_value,
+                    coupon_barcode_format = EXCLUDED.coupon_barcode_format,
+                    coupon_value = EXCLUDED.coupon_value,
+                    coupon_min_purchase = EXCLUDED.coupon_min_purchase,
+                    coupon_validity_end = EXCLUDED.coupon_validity_end,
+                    barcode_bbox_x_min = EXCLUDED.barcode_bbox_x_min,
+                    barcode_bbox_y_min = EXCLUDED.barcode_bbox_y_min,
+                    barcode_bbox_x_max = EXCLUDED.barcode_bbox_x_max,
+                    barcode_bbox_y_max = EXCLUDED.barcode_bbox_y_max
                 """,
                 (
                     record_id,
@@ -1585,6 +1684,17 @@ def upsert_to_postgres(items: list[PromoItem]) -> int:
                     tile.get("x_max"),
                     tile.get("y_max"),
                     item.promo_text_markdown,
+                    item.is_coupon,
+                    item.coupon_type,
+                    item.coupon_barcode_value,
+                    item.coupon_barcode_format,
+                    item.coupon_value,
+                    item.coupon_min_purchase,
+                    item.coupon_validity_end,
+                    barcode_bbox.get("x_min"),
+                    barcode_bbox.get("y_min"),
+                    barcode_bbox.get("x_max"),
+                    barcode_bbox.get("y_max"),
                 ),
             )
 

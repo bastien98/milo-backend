@@ -169,7 +169,10 @@ def _query_hotspots_by_folder_url(today_str: str) -> dict[str, list[PromoFolderH
                 min_purchase_qty, validity_end,
                 thumbnail_url, image_url, hero_url,
                 mechanism_kind, promo_campaign,
-                promo_text_markdown
+                promo_text_markdown,
+                is_coupon, coupon_type, coupon_barcode_value, coupon_barcode_format,
+                coupon_value, coupon_min_purchase, coupon_validity_end,
+                barcode_bbox_x_min, barcode_bbox_y_min, barcode_bbox_x_max, barcode_bbox_y_max
             FROM promo_items
             WHERE tile_bbox_x_min IS NOT NULL
               AND validity_end >= %s
@@ -187,6 +190,9 @@ def _query_hotspots_by_folder_url(today_str: str) -> dict[str, list[PromoFolderH
                 thumbnail_url, image_url, hero_url,
                 mechanism_kind, promo_campaign,
                 promo_text_markdown,
+                is_coupon, coupon_type, coupon_barcode_value, coupon_barcode_format,
+                coupon_value, coupon_min_purchase, coupon_validity_end,
+                bbx_min, bby_min, bbx_max, bby_max,
             ) = row
 
             discount_pct = int(round(promo_depth)) if promo_depth else 0
@@ -215,6 +221,17 @@ def _query_hotspots_by_folder_url(today_str: str) -> dict[str, list[PromoFolderH
                 mechanism_kind=mechanism_kind,
                 promo_campaign=promo_campaign,
                 promo_text_markdown=promo_text_markdown,
+                is_coupon=bool(is_coupon),
+                coupon_type=coupon_type,
+                coupon_barcode_value=coupon_barcode_value,
+                coupon_barcode_format=coupon_barcode_format,
+                coupon_value=coupon_value,
+                coupon_min_purchase=coupon_min_purchase,
+                coupon_validity_end=str(coupon_validity_end) if coupon_validity_end else None,
+                barcode_bbox_x_min=bbx_min,
+                barcode_bbox_y_min=bby_min,
+                barcode_bbox_x_max=bbx_max,
+                barcode_bbox_y_max=bby_max,
             )
             key = f"{promo_folder_url}:{page_number}"
             hotspots_map.setdefault(key, []).append(hotspot)
