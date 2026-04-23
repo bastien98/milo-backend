@@ -854,9 +854,25 @@ def extract_promos_from_images(
     }
 
 
-def extract_promos_from_pdf(pdf_data: bytes, config: Dict[str, Any]) -> dict:
-    """Split PDF into batches and extract promo items sequentially."""
+def extract_promos_from_pdf(
+    pdf_data: bytes,
+    config: Dict[str, Any],
+    page_filter: Optional[int] = None,
+) -> dict:
+    """Split PDF into batches and extract promo items sequentially.
+
+    Args:
+        page_filter: When set, only extract from this 1-indexed page number.
+            Other pages are skipped so the cost of iterating on one bad page
+            stays bounded.
+    """
     batches = split_pdf_into_batches(pdf_data)
+    if page_filter is not None:
+        batches = [(pdf, sp) for pdf, sp in batches if sp == page_filter]
+        if not batches:
+            logger.warning(
+                f"--page {page_filter} requested but PDF has no batch starting on that page"
+            )
     system_prompt = build_system_prompt(config, CATEGORIES_PROMPT_LIST)
     client = genai.Client(
         api_key=GEMINI_API_KEY,
@@ -1285,6 +1301,113 @@ def crop_and_upload_item_images(
 
 
 # ---------------------------------------------------------------------------
+# Manual bbox overrides (promo_item_bbox_overrides table)
+# ---------------------------------------------------------------------------
+def _normalize_override_name(name: str) -> str:
+    """Canonicalize a display_name for override lookup: lowercase + strip.
+
+    Must match the SQL expression `LOWER(TRIM(display_name))` used when we live-patch
+    promo_items rows from set_bbox_override.py, so the two lookup paths agree.
+    """
+    return name.lower().strip() if name else ""
+
+
+def fetch_bbox_overrides(promo_folder_url: str) -> dict[tuple[int, str], dict]:
+    """Load the override rows for a folder into a {(page, name_norm): {tile, bbox}} dict.
+
+    Separated from `apply_bbox_overrides` so the apply logic stays pure and testable.
+    """
+    import psycopg2
+
+    conn = psycopg2.connect(_get_pg_connection_string())
+    try:
+        cur = conn.cursor()
+        cur.execute(
+            """
+            SELECT page_number, display_name_normalized,
+                   tile_bbox_x_min, tile_bbox_y_min, tile_bbox_x_max, tile_bbox_y_max,
+                   bbox_x_min, bbox_y_min, bbox_x_max, bbox_y_max
+              FROM promo_item_bbox_overrides
+             WHERE promo_folder_url = %s
+            """,
+            (promo_folder_url,),
+        )
+        rows = cur.fetchall()
+        cur.close()
+    finally:
+        conn.close()
+
+    overrides: dict[tuple[int, str], dict] = {}
+    for row in rows:
+        page, name_norm, tx_min, ty_min, tx_max, ty_max, bx_min, by_min, bx_max, by_max = row
+        tile = {
+            "x_min": float(tx_min),
+            "y_min": float(ty_min),
+            "x_max": float(tx_max),
+            "y_max": float(ty_max),
+        }
+        if None not in (bx_min, by_min, bx_max, by_max):
+            bbox = {
+                "x_min": float(bx_min),
+                "y_min": float(by_min),
+                "x_max": float(bx_max),
+                "y_max": float(by_max),
+            }
+        else:
+            bbox = dict(tile)
+        overrides[(int(page), name_norm)] = {"tile_bbox": tile, "bbox": bbox}
+    return overrides
+
+
+def _apply_overrides_to_items(
+    items: list[PromoItem],
+    overrides: dict[tuple[int, str], dict],
+) -> int:
+    """Pure apply step — mutates items in place. Returns count applied."""
+    if not items or not overrides:
+        return 0
+    applied = 0
+    for item in items:
+        if item.page_number is None:
+            continue
+        key = (item.page_number, _normalize_override_name(item.display_name))
+        override = overrides.get(key)
+        if override is None:
+            continue
+        item.tile_bbox = dict(override["tile_bbox"])
+        item.bbox = dict(override["bbox"])
+        applied += 1
+        logger.info(
+            f"Applied bbox override: p{item.page_number} '{item.display_name}' "
+            f"tile={item.tile_bbox}"
+        )
+    return applied
+
+
+def apply_bbox_overrides(
+    items: list[PromoItem],
+    promo_folder_url: Optional[str],
+) -> int:
+    """Overwrite `bbox` and `tile_bbox` on items that match a row in promo_item_bbox_overrides.
+
+    The override table is the 100% guarantee: once a box is manually corrected for a
+    (folder_url, page, display_name) triple it stays correct across every re-ingest.
+
+    When the override's `bbox_*` columns are NULL, `bbox` falls back to the overridden
+    tile_bbox. Unmatched items are left untouched.
+
+    Returns the number of items whose bboxes were replaced.
+    """
+    if not items or not promo_folder_url:
+        return 0
+    overrides = fetch_bbox_overrides(promo_folder_url)
+    applied = _apply_overrides_to_items(items, overrides)
+    if applied:
+        logger.info(f"Applied {applied} bbox override(s) for folder {promo_folder_url}")
+    return applied
+
+
+# ---------------------------------------------------------------------------
 # PostgreSQL upsert
 # ---------------------------------------------------------------------------
 def _get_pg_connection_string() -> str:
@@ -1476,20 +1599,40 @@ def upsert_to_postgres(items: list[PromoItem]) -> int:
     return len(seen_ids)
 
 
-def delete_retailer_promos_pg(retailer: str, validity_start: str = None, validity_end: str = None) -> int:
-    """Delete promo items from PostgreSQL for a retailer (optionally filtered by validity window)."""
+def delete_retailer_promos_pg(
+    retailer: str,
+    validity_start: str = None,
+    validity_end: str = None,
+    page_number: Optional[int] = None,
+    promo_folder_url: Optional[str] = None,
+) -> int:
+    """Delete promo items from PostgreSQL for a retailer.
+
+    Optional scopes compose (all AND-ed together):
+      - validity_start + validity_end: restrict to a single week's validity window
+      - page_number: restrict to a single page of the folder (for --page N re-runs)
+      - promo_folder_url: restrict to a single folder URL
+    """
     import psycopg2
+
+    clauses = ["source_retailer = %s"]
+    params: list = [retailer]
+    if validity_start and validity_end:
+        clauses.append("validity_start = %s AND validity_end = %s")
+        params.extend([validity_start, validity_end])
+    if page_number is not None:
+        clauses.append("page_number = %s")
+        params.append(page_number)
+    if promo_folder_url:
+        clauses.append("promo_folder_url = %s")
+        params.append(promo_folder_url)
+
+    sql = f"DELETE FROM promo_items WHERE {' AND '.join(clauses)}"
 
     conn = psycopg2.connect(_get_pg_connection_string())
     try:
         cur = conn.cursor()
-        if validity_start and validity_end:
-            cur.execute(
-                "DELETE FROM promo_items WHERE source_retailer = %s AND validity_start = %s AND validity_end = %s",
-                (retailer, validity_start, validity_end),
-            )
-        else:
-            cur.execute("DELETE FROM promo_items WHERE source_retailer = %s", (retailer,))
+        cur.execute(sql, tuple(params))
         deleted = cur.rowcount
         conn.commit()
         cur.close()
@@ -1536,6 +1679,7 @@ def run_pipeline(
     pdf_label: str = "",
     validity_start: Optional[str] = None,
     validity_end: Optional[str] = None,
+    page_filter: Optional[int] = None,
 ) -> list[PromoItem]:
     """Run the full ingestion pipeline for a store.
 
@@ -1549,6 +1693,7 @@ def run_pipeline(
             folder validity_start so every item carries the folder's authoritative
             date (sourced from the folder metadata, not the PDF contents).
         validity_end: Same as validity_start, for the end date.
+        page_filter: When set, only extract/upsert items for this 1-indexed page.
 
     Returns:
         List of parsed PromoItem objects
@@ -1562,12 +1707,14 @@ def run_pipeline(
     logger.info("=" * 60)
     logger.info(f"PDF: {pdf_label or '(bytes)'} ({len(pdf_data):,} bytes)")
     logger.info(f"Store: {canonical_store_id} ({display_name})")
+    if page_filter is not None:
+        logger.info(f"Page filter: only page {page_filter}")
 
     if not GEMINI_API_KEY:
         raise RuntimeError("GEMINI_API_KEY not set in environment")
 
     # Step 1: Extract from PDF via Gemini
-    raw_data = extract_promos_from_pdf(pdf_data, config)
+    raw_data = extract_promos_from_pdf(pdf_data, config, page_filter=page_filter)
 
     # Folder metadata validity is authoritative — override Gemini's inference so
     # every item in this folder carries the exact same validity window as the
@@ -1584,12 +1731,17 @@ def run_pipeline(
         logger.warning("No items extracted. Exiting.")
         return []
 
+    # Step 2.3: Apply manual bbox overrides. Persists corrections across every re-ingest —
+    # the 100% accuracy guarantee for known-bad pages. Runs before cropping so item
+    # images are generated against the corrected bboxes.
+    apply_bbox_overrides(items, promo_folder_url)
+
     # Step 2.5: Crop item images, enhance via Replicate FLUX, and upload to R2
     page_images = _render_pdf_pages(pdf_data)
     r2 = R2PromoStorage()
     crop_and_upload_item_images(items, page_images, r2, canonical_store_id)
 
-    # Step 3: Summary
+    # Step 3: Summary + anomaly report
     logger.info(f"\nExtracted {len(items)} high-quality promo items")
     if items[0].validity_start:
         logger.info(f"Validity: {items[0].validity_start} to {items[0].validity_end}")
@@ -1602,6 +1754,13 @@ def run_pipeline(
         )
     if len(items) > 5:
         logger.info(f"  ... and {len(items) - 5} more")
+
+    # Bbox QA report — flags items that look suspicious so we can spot-check
+    # without eyeballing every page. Runs even on dry-run.
+    from promo_folders_pipelines.qa_report import detect_anomalies, format_report
+    anomalies = detect_anomalies(items)
+    folder_label = pdf_label or f"{canonical_store_id} folder"
+    logger.info("\n" + format_report(anomalies, folder_label, len(items)))
 
     # Step 4: Upsert or dry-run
     if dry_run:

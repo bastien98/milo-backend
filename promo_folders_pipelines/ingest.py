@@ -196,6 +196,16 @@ def main():
         "--output",
         help="Path to write extracted items as JSON (defaults to ./extracted_promos.json in dry-run mode)",
     )
+    parser.add_argument(
+        "--page",
+        type=int,
+        help=(
+            "1-indexed page number to re-extract in isolation. Scopes extraction and the "
+            "pre-ingest delete to just this page; other pages of the same folder are untouched. "
+            "Only valid when exactly one PDF will be processed (requires --store + --week, and "
+            "that week must resolve to a single PDF)."
+        ),
+    )
     args = parser.parse_args()
 
     # --- Environment override ---
@@ -219,6 +229,10 @@ def main():
     # --- Validate argument combinations ---
     if args.week and not args.store:
         parser.error("--week requires --store")
+    if args.page is not None and not args.week:
+        parser.error("--page requires --week (and --store) so it resolves to a single folder")
+    if args.page is not None and args.page < 1:
+        parser.error("--page must be >= 1")
 
     # --- Full ingestion pipeline ---
     if not args.store:
@@ -239,16 +253,33 @@ def main():
         logger.error("No PDFs to ingest.")
         sys.exit(1)
 
+    if args.page is not None and len(pdf_refs) != 1:
+        parser.error(
+            f"--page {args.page} requires exactly one PDF but {len(pdf_refs)} resolved from "
+            f"store '{args.store}' week '{args.week}'. Narrow the week or remove --page."
+        )
+
     logger.info(f"Will ingest {len(pdf_refs)} PDF(s) for store '{args.store}'")
 
     # Duplicate check: compare ETags against last 3 other weeks
-    if args.week:
+    if args.week and args.page is None:
         _check_duplicate_pdfs(r2, args.store, args.week, pdf_refs)
 
     # Clean slate: delete existing promos before ingesting (idempotent)
     if not args.dry_run:
         canonical = load_store_config(args.store)["store_id"]
-        if args.week:
+        if args.page is not None:
+            # Page-scoped delete: only this single page of this single folder.
+            ref = pdf_refs[0]
+            meta = ref["metadata"]
+            delete_retailer_promos_pg(
+                canonical,
+                validity_start=meta.get("validity_start"),
+                validity_end=meta.get("validity_end"),
+                page_number=args.page,
+                promo_folder_url=meta.get("promo_folder_url"),
+            )
+        elif args.week:
             # Scoped delete: only this week's validity windows
             seen_windows = set()
             for ref in pdf_refs:
@@ -281,6 +312,7 @@ def main():
             pdf_label=label,
             validity_start=meta.get("validity_start"),
             validity_end=meta.get("validity_end"),
+            page_filter=args.page,
         )
         all_items.extend(items)
 
@@ -327,6 +359,28 @@ def main():
                 ensure_ascii=False,
             )
         logger.info(f"Wrote {len(all_items)} items to {output_path}")
+
+        # Sibling QA JSON — one entry per folder_url so the report is diffable
+        # across re-runs and across model versions.
+        from collections import defaultdict as _defaultdict
+        from promo_folders_pipelines.qa_report import anomalies_to_json, detect_anomalies
+
+        by_folder: dict[str, list] = _defaultdict(list)
+        for item in all_items:
+            by_folder[item.promo_folder_url or ""].append(item)
+
+        qa_payload = [
+            {
+                "promo_folder_url": folder_url,
+                "total_items": len(folder_items),
+                "anomalies": anomalies_to_json(detect_anomalies(folder_items)),
+            }
+            for folder_url, folder_items in by_folder.items()
+        ]
+        qa_path = output_path.with_suffix(output_path.suffix + ".qa.json")
+        with open(qa_path, "w") as f:
+            json.dump(qa_payload, f, indent=2, ensure_ascii=False)
+        logger.info(f"Wrote QA anomaly report to {qa_path}")
 
     # Drop the API's folders cache so the new hotspots show up immediately.
     if not args.dry_run and all_items:

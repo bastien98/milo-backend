@@ -12,6 +12,7 @@ from app.models.withdrawal import WithdrawalRequest
 from app.models.streak import StreakReward
 from app.models.spin import SpinTransaction
 from app.models.promo_item import PromoItem
+from app.models.promo_item_bbox_override import PromoItemBboxOverride
 from app.models.promo_interaction_event import PromoInteractionEvent
 from app.models.enums import LoyaltyStatus, PromoInteractionEventType
 from app.models.brand_cashback import BrandCashbackCampaign, BrandCashbackStoreLineItem, UserBrandCashbackClaim
@@ -39,6 +40,7 @@ __all__ = [
     "StreakRewardType",
     "SpinTransaction",
     "PromoItem",
+    "PromoItemBboxOverride",
     "PromoInteractionEvent",
     "PromoInteractionEventType",
     "LoyaltyStatus",
