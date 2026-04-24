@@ -1,0 +1,32 @@
+store_id: "aldi"
+display_name: "Aldi"
+language: "nl_fr"
+bilingual_dedup: true
+
+validity_format: >
+  "Geldig van DD/MM t.e.m. DD/MM" or "Valable du DD/MM au DD/MM"
+
+store_brands: []
+
+promo_mechanisms:
+  - label: "X+Y gratis"
+    aliases: ["X+Y gratuit"]
+    description: "Buy X get Y free — covers all volume deals (1+1, 2+1, 2+2, 3+1, etc.). Output the exact numbers seen. promo_price = original_price (shelf price of one item)."
+  - label: "2e aan halve prijs"
+    aliases: ["2ème à moitié prix"]
+    description: "Second item at half price. promo_price = original_price."
+  - label: "-X%"
+    aliases: []
+    description: "Flat percentage discount on the item (e.g. -20%, -25%, -30%, -40%)"
+  - label: "€X.XX korting"
+    aliases: ["€X.XX réduction"]
+    description: "Fixed euro discount"
+  - label: "X voor €Y"
+    aliases: ["X pour €Y"]
+    description: "Multi-buy deal (set promo_price to per-unit price €Y/X)"
+
+price_calculation_table: null
+extra_rules:
+  - "Aldi is a hard-discount retailer. Most items display a new reduced price without any explicit percentage or mechanism — treat those as a straight promo_price, leaving mechanism_kind null."
+  - "Many brands are Aldi's own private labels (e.g. Milsani, Choceur, Bon Ri, Moreno, Almare, Gut Bio, Specially Selected). Record them verbatim in display_brand."
+validation_checklist: []

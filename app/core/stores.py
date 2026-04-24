@@ -54,15 +54,15 @@ _STORES = [
     {"name": "carrefour express", "display_name": "Carrefour Express", "aliases": ["carrefour express"], "has_promos": False},
 
     # ── Discounters ──
-    {"name": "aldi", "display_name": "Aldi", "aliases": ["aldi"], "has_promos": False},
-    {"name": "lidl", "display_name": "Lidl", "aliases": ["lidl"], "has_promos": False},
+    {"name": "aldi", "display_name": "Aldi", "aliases": ["aldi"], "has_promos": True},
+    {"name": "lidl", "display_name": "Lidl", "aliases": ["lidl"], "has_promos": True},
 
     # ── Albert Heijn ──
     {"name": "albert heijn", "display_name": "Albert Heijn", "aliases": ["albert heijn", "ah"], "has_promos": True},
     {"name": "ah to go", "display_name": "AH To Go", "aliases": ["ah to go", "albert heijn to go"], "has_promos": False},
 
     # ── Other Belgian retailers ──
-    {"name": "intermarche", "display_name": "Intermarché", "aliases": ["intermarché", "intermarche"], "has_promos": False},
+    {"name": "intermarche", "display_name": "Intermarché", "aliases": ["intermarché", "intermarche"], "has_promos": True},
     {"name": "match", "display_name": "Match", "aliases": ["match"], "has_promos": False},
     {"name": "makro", "display_name": "Makro", "aliases": ["makro"], "has_promos": False},
     {"name": "jumbo", "display_name": "Jumbo", "aliases": ["jumbo"], "has_promos": True},

@@ -30,10 +30,25 @@ RETAILERS = {
         "shop_uuid": "d7dbd268-36d1-4230-a633-c1dcb3ad3400",
         "store_id": "delhaize",
     },
+    "intermarche": {
+        "shop_slug": "intermarche",
+        "shop_uuid": "f43e6d61-38d3-4211-b093-7b9b79f8e4e5",
+        "store_id": "intermarche",
+    },
     "jumbo": {
         "shop_slug": "jumbo",
         "shop_uuid": "22c47cef-8cc8-42c4-ae18-ef8bf413f3da",
         "store_id": "jumbo",
+    },
+    "lidl": {
+        "shop_slug": "lidl",
+        "shop_uuid": "219b66e2-2bb2-4df9-9f98-cc66b7159eef",
+        "store_id": "lidl",
+    },
+    "aldi": {
+        "shop_slug": "aldi",
+        "shop_uuid": "d5abeff7-16e7-4e0a-98dc-1c8105ee1d15",
+        "store_id": "aldi",
     },
     "okay": {
         "shop_slug": "okay",

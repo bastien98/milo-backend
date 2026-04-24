@@ -1,0 +1,34 @@
+store_id: "intermarche"
+display_name: "Intermarché"
+language: "nl_fr"
+bilingual_dedup: true
+
+validity_format: >
+  "Geldig van DD/MM t.e.m. DD/MM" or "Valable du DD/MM au DD/MM"
+
+store_brands: []
+
+promo_mechanisms:
+  - label: "X+Y gratis"
+    aliases: ["X+Y gratuit"]
+    description: "Buy X get Y free — covers all volume deals (1+1, 2+1, 2+2, 3+1, etc.). Output the exact numbers seen. promo_price = original_price (shelf price of one item)."
+  - label: "2e aan halve prijs"
+    aliases: ["2ème à moitié prix"]
+    description: "Second item at half price. promo_price = original_price."
+  - label: "-X%"
+    aliases: []
+    description: "Flat percentage discount on the item (e.g. -20%, -25%, -30%, -40%)"
+  - label: "-X% vanaf Y verpakkingen"
+    aliases: ["-X% à partir de Y"]
+    description: "Tiered percentage discount conditional on buying a minimum quantity. Include the condition in display_mechanism."
+  - label: "€X.XX korting"
+    aliases: ["€X.XX réduction"]
+    description: "Fixed euro discount"
+  - label: "X voor €Y"
+    aliases: ["X pour €Y"]
+    description: "Multi-buy deal (set promo_price to per-unit price €Y/X)"
+
+price_calculation_table: null
+extra_rules:
+  - "Intermarché is a French-origin full-range supermarket. Own brands include Pâturages, Monique Ranou, Chabrior, Netto, Fiorini, Itinéraire des Saveurs, and Top Budget — record them verbatim in display_brand."
+validation_checklist: []
