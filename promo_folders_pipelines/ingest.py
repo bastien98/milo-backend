@@ -24,6 +24,7 @@ import json
 import logging
 import os
 import sys
+from datetime import date
 from pathlib import Path
 
 # Ensure backend root is on sys.path so we can import from app.*
@@ -122,6 +123,7 @@ def _collect_pdfs_from_r2(
         logger.info(f"Found {len(weeks)} week(s) for '{store_id}': {weeks}")
 
     pdf_refs = []
+    today_str = date.today().isoformat()
 
     for w in weeks:
         metadata = r2.download_metadata(store_id, w)
@@ -153,6 +155,21 @@ def _collect_pdfs_from_r2(
                     f"so hotspots can be scoped to the correct folder."
                 )
                 sys.exit(1)
+
+            vs = metadata[pdf].get("validity_start")
+            ve = metadata[pdf].get("validity_end")
+            if not vs or not ve:
+                logger.error(
+                    f"PDF '{pdf}' in {store_id}/{w}/metadata.json is missing "
+                    f"validity_start/validity_end. Cannot verify active window."
+                )
+                sys.exit(1)
+            if not (vs <= today_str <= ve):
+                logger.warning(
+                    f"Skipping {store_id}/{w}/{pdf}: validity {vs}..{ve} is outside "
+                    f"today ({today_str}). Only currently-active folders are ingested."
+                )
+                continue
 
             pdf_refs.append({
                 "store_id": store_id,

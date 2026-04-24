@@ -3,7 +3,7 @@
 CLI entry point for the promopromo.be promo folder scraper.
 
 Scrapes promotional folder images from promopromo.be and uploads them
-to Cloudflare R2. Uses Gemini Vision to filter for food/grocery folders.
+to Cloudflare R2.
 
 Usage (from milo-backend/):
     # Scrape one retailer
@@ -12,7 +12,7 @@ Usage (from milo-backend/):
     # Scrape all retailers
     python -m promo_folders_pipelines.scraper.cli --all
 
-    # Dry run (discover + classify, don't download/upload)
+    # Dry run (discover only, don't download/upload)
     python -m promo_folders_pipelines.scraper.cli --store colruyt --dry-run
 
     # List available retailers
@@ -22,6 +22,7 @@ Usage (from milo-backend/):
 import argparse
 import logging
 import sys
+from datetime import date
 from pathlib import Path
 
 # Ensure backend root is on sys.path
@@ -42,7 +43,6 @@ from promo_folders_pipelines.scraper.scrape import (
     download_page_images,
     fetch_folder_pages,
 )
-from promo_folders_pipelines.scraper.classify import select_food_folders
 from promo_folders_pipelines.scraper.upload import clear_store, upload_folder
 
 logging.basicConfig(
@@ -60,40 +60,48 @@ def scrape_retailer(key: str, dry_run: bool = False) -> bool:
     store_id = config["store_id"]
     shop_slug = config["shop_slug"]
     shop_uuid = config["shop_uuid"]
-    max_folders = config["max_folders"]
 
     logger.info(f"=== Scraping {key} (store_id='{store_id}') ===")
 
-    # Step 1: Discover active folders
+    # Step 1: Discover folders
     folders = discover_folders(shop_slug, shop_uuid)
     if not folders:
         logger.warning(f"No folders found for {key}")
         return False
 
-    # Step 2: Classify folders (single source of truth — classify.select_food_folders).
-    selected = select_food_folders(folders, max_folders=max_folders, retailer_name=store_id)
-
-    if not selected:
-        logger.warning(f"No food/grocery folders found for {key}")
+    # Step 1b: Drop folders outside the active window. promopromo.be sometimes
+    # lists folders that haven't started yet (or have already expired).
+    today_str = date.today().isoformat()
+    active_folders = [
+        f for f in folders
+        if f.validity_start <= today_str <= f.validity_end
+    ]
+    skipped = len(folders) - len(active_folders)
+    if skipped:
+        logger.info(f"Skipping {skipped} folder(s) outside active window for {key}:")
+        for f in folders:
+            if not (f.validity_start <= today_str <= f.validity_end):
+                logger.info(f"  - {f.name} ({f.uuid}) valid {f.validity_start}..{f.validity_end}")
+    folders = active_folders
+    if not folders:
+        logger.info(f"No active folders for {key}")
         return False
 
     if dry_run:
-        logger.info(f"[DRY RUN] Would process {len(selected)} folder(s):")
-        for i, f in enumerate(selected, 1):
+        logger.info(f"[DRY RUN] Would process {len(folders)} folder(s):")
+        for i, f in enumerate(folders, 1):
             logger.info(f"  folder_{i}: {f.name} ({f.uuid}) {f.validity_start} - {f.validity_end}")
         return True
 
-    # Step 3: Download page images for each selected folder
+    # Step 2: Set up R2 and clear existing data (idempotent)
     from promo_folders_pipelines.r2_storage import R2PromoStorage
     r2 = R2PromoStorage()
-
-    # Step 4: Clear existing data (idempotent)
     clear_store(r2, store_id)
 
-    # Step 5: Process each folder
+    # Step 3: Process each folder
     total_pages = 0
-    for idx, folder in enumerate(selected, 1):
-        logger.info(f"--- Processing folder {idx}/{len(selected)}: {folder.uuid} ---")
+    for idx, folder in enumerate(folders, 1):
+        logger.info(f"--- Processing folder {idx}/{len(folders)}: {folder.uuid} ---")
 
         # Fetch page image URLs
         folder_pages = fetch_folder_pages(folder)
@@ -109,7 +117,7 @@ def scrape_retailer(key: str, dry_run: bool = False) -> bool:
         total_pages += len(page_images)
 
     logger.info(
-        f"=== Done: {key} — {len(selected)} folder(s), {total_pages} total pages ==="
+        f"=== Done: {key} — {len(folders)} folder(s), {total_pages} total pages ==="
     )
     return True
 
@@ -130,7 +138,7 @@ def main():
     parser.add_argument(
         "--dry-run",
         action="store_true",
-        help="Discover and classify only; don't download images or upload to R2",
+        help="Discover only; don't download images or upload to R2",
     )
     parser.add_argument(
         "--list-stores",
@@ -144,7 +152,7 @@ def main():
         print(f"Available retailers ({len(retailers)}):")
         for r in retailers:
             config = get_retailer(r)
-            print(f"  {r:20s} → store_id='{config['store_id']}', max_folders={config['max_folders']}")
+            print(f"  {r:20s} → store_id='{config['store_id']}'")
         sys.exit(0)
 
     if not args.store and not args.all:

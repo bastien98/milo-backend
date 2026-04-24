@@ -30,7 +30,6 @@ class FolderInfo:
     name: str
     active_from: str  # ISO 8601
     expire_after: str  # ISO 8601
-    cover_url: str
     shop_slug: str
 
     @property
@@ -121,14 +120,12 @@ def discover_folders(shop_slug: str, shop_uuid: str) -> list[FolderInfo]:
 
         brochures = search_results.get("brochures", [])
         for b in brochures:
-            cover = b.get("cover", {})
             shop = b.get("shop", {})
             folders.append(FolderInfo(
                 uuid=b["id"],
                 name=b.get("name", ""),
                 active_from=b.get("activeFrom", ""),
                 expire_after=b.get("expireAfter", ""),
-                cover_url=cover.get("fileUrl", ""),
                 shop_slug=shop.get("slug", shop_slug),
             ))
 
@@ -185,17 +182,6 @@ def fetch_folder_pages(folder: FolderInfo) -> FolderPages:
     result = FolderPages(folder=folder, pages=pages)
     logger.info(f"Found {result.page_count} page(s) for folder {folder.uuid}")
     return result
-
-
-def download_cover_image(folder: FolderInfo) -> bytes:
-    """Download the cover thumbnail image for classification."""
-    if not folder.cover_url:
-        raise ValueError(f"No cover URL for folder {folder.uuid}")
-
-    with httpx.Client(timeout=HTTP_TIMEOUT, follow_redirects=True) as client:
-        response = client.get(folder.cover_url)
-        response.raise_for_status()
-        return response.content
 
 
 def download_page_images(folder_pages: FolderPages) -> list[tuple[int, bytes]]:

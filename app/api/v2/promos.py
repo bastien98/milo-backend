@@ -175,10 +175,11 @@ def _query_hotspots_by_folder_url(today_str: str) -> dict[str, list[PromoFolderH
                 barcode_bbox_x_min, barcode_bbox_y_min, barcode_bbox_x_max, barcode_bbox_y_max
             FROM promo_items
             WHERE tile_bbox_x_min IS NOT NULL
+              AND validity_start <= %s
               AND validity_end >= %s
               AND page_number IS NOT NULL
             """,
-            (today_str,),
+            (today_str, today_str),
         )
         for row in cur.fetchall():
             (
@@ -288,7 +289,10 @@ def _build_folders_response() -> PromoFoldersResponse:
                 continue
 
             validity_end = metadata.get("validity_end", "")
+            validity_start = metadata.get("validity_start", "")
             if validity_end and validity_end < today:
+                continue
+            if validity_start and validity_start > today:
                 continue
 
             page_count = metadata.get("page_count", 0)

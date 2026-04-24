@@ -3,14 +3,13 @@
 Unified daily pipeline: scrape promopromo.be → extract via Gemini → upsert to PostgreSQL.
 
 Single cron job that handles the full promo folder lifecycle:
-1. Discover active folders from promopromo.be
-2. Classify folders (Gemini Vision filter for food/grocery)
-3. Detect changes (compare folder UUIDs against R2 metadata)
-4. Download new folder page images
-5. Upload to Cloudflare R2
-6. Extract promo items via Gemini (expensive — only for new folders)
-7. Upsert to PostgreSQL
-8. Regenerate promo candidates for users
+1. Discover folders from promopromo.be (filtered to the currently-active window)
+2. Detect changes (compare folder UUIDs against R2 metadata)
+3. Download new folder page images
+4. Upload to Cloudflare R2
+5. Extract promo items via Gemini (expensive — only for new folders)
+6. Upsert to PostgreSQL
+7. Regenerate promo candidates for users
 
 Usage (from milo-backend/):
     # Run for all retailers
@@ -33,6 +32,7 @@ import argparse
 import logging
 import os
 import sys
+from datetime import date
 from pathlib import Path
 
 # Ensure backend root is on sys.path
@@ -62,9 +62,7 @@ from promo_folders_pipelines.scraper.scrape import (
     discover_folders,
     download_page_images,
     fetch_folder_pages,
-    FolderInfo,
 )
-from promo_folders_pipelines.scraper.classify import select_food_folders
 from promo_folders_pipelines.scraper.upload import (
     clear_store,
     upload_folder,
@@ -75,18 +73,6 @@ logging.basicConfig(
     level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s"
 )
 logger = logging.getLogger(__name__)
-
-
-def _select_folders(
-    key: str, config: dict, folders: list[FolderInfo],
-) -> list[FolderInfo]:
-    """Thin wrapper so the orchestration stays readable; classifier + fail-open
-    + max_folders cap all live in scraper.classify.select_food_folders."""
-    return select_food_folders(
-        folders,
-        max_folders=config["max_folders"],
-        retailer_name=config["store_id"],
-    )
 
 
 def process_retailer(
@@ -123,20 +109,33 @@ def process_retailer(
         logger.warning(f"No folders found for {key}")
         return result
 
-    # Step 2: Classify
-    selected = _select_folders(key, config, folders)
-    if not selected:
-        logger.warning(f"No food/grocery folders found for {key}")
+    # Step 1b: Drop folders outside the active window. promopromo.be sometimes
+    # lists folders that haven't started yet (or have already expired); we only
+    # ever want to ingest folders where today falls within [validity_start, validity_end].
+    today_str = date.today().isoformat()
+    active_folders = [
+        f for f in folders
+        if f.validity_start <= today_str <= f.validity_end
+    ]
+    skipped = len(folders) - len(active_folders)
+    if skipped:
+        logger.info(f"Skipping {skipped} folder(s) outside active window for {key}:")
+        for f in folders:
+            if not (f.validity_start <= today_str <= f.validity_end):
+                logger.info(f"  - {f.name} ({f.uuid}) valid {f.validity_start}..{f.validity_end}")
+    folders = active_folders
+    if not folders:
+        logger.info(f"No active folders for {key}")
         return result
 
-    # Step 3: Change detection
+    # Step 2: Change detection
     if force:
-        new_folders = selected
-        logger.info(f"Force mode: processing all {len(selected)} folder(s)")
+        new_folders = folders
+        logger.info(f"Force mode: processing all {len(folders)} folder(s)")
     else:
         existing_uuids = get_existing_folder_uuids(r2, store_id)
-        new_folders = [f for f in selected if f.uuid not in existing_uuids]
-        unchanged = len(selected) - len(new_folders)
+        new_folders = [f for f in folders if f.uuid not in existing_uuids]
+        unchanged = len(folders) - len(new_folders)
         if unchanged:
             logger.info(f"Change detection: {unchanged} folder(s) unchanged, {len(new_folders)} new")
 
@@ -152,15 +151,15 @@ def process_retailer(
             logger.info(f"  folder_{i}: {f.name} ({f.uuid}) {f.validity_start} - {f.validity_end}")
         return result
 
-    # Step 4: Clear R2 and re-upload ALL selected folders (keeps R2 in sync)
+    # Step 3: Clear R2 and re-upload ALL active folders (keeps R2 in sync)
     clear_store(r2, store_id)
 
     all_items = []
     store_config = load_store_config(key)
     canonical_store_id = store_config["store_id"]
 
-    for idx, folder in enumerate(selected, 1):
-        logger.info(f"--- Folder {idx}/{len(selected)}: {folder.uuid} ---")
+    for idx, folder in enumerate(folders, 1):
+        logger.info(f"--- Folder {idx}/{len(folders)}: {folder.uuid} ---")
 
         # Download page images
         folder_pages = fetch_folder_pages(folder)
@@ -178,7 +177,7 @@ def process_retailer(
             logger.info(f"Folder {folder.uuid} unchanged, skipping Gemini extraction")
             continue
 
-        # Step 5: Gemini extraction
+        # Step 4: Gemini extraction
         logger.info(f"Extracting promo items via Gemini ({len(page_images)} pages)...")
         raw_data = extract_promos_from_images(page_images, store_config)
 
@@ -188,18 +187,18 @@ def process_retailer(
         raw_data["validity_start"] = folder.validity_start
         raw_data["validity_end"] = folder.validity_end
 
-        # Step 6: Parse & validate
+        # Step 5: Parse & validate
         source_url = f"https://www.promopromo.be/nl/{folder.shop_slug}-folder/{folder.uuid}/0"
         items = parse_promo_items(raw_data, canonical_store_id, source_url)
 
-        # Step 6.5: Crop item images and upload to R2
+        # Step 5.5: Crop item images and upload to R2
         page_images_dict = {num: img for num, img in page_images}
         crop_and_upload_item_images(items, page_images_dict, r2, canonical_store_id, folder_index=idx)
 
         all_items.extend(items)
         result["items_extracted"] += len(items)
 
-    # Step 7: Delete old promos and upsert new ones
+    # Step 6: Delete old promos and upsert new ones
     if all_items:
         # Group items by validity window for scoped deletion
         seen_windows = set()
@@ -249,7 +248,6 @@ def main():
     # we start pulling fresh folders. Safe to run every invocation; expired rows
     # are already hidden from the API by query-time filters.
     if not args.dry_run:
-        from datetime import date
         delete_expired_promos_pg(date.today())
 
     # Determine retailers to process

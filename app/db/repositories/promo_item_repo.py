@@ -102,7 +102,8 @@ class PromoItemRepository:
                 (source_retailer <> CAST(:src_retailer AS text))      AS is_cross_store,
                 similarity(display_name, CAST(:src_name AS text))     AS name_sim
             FROM promo_items
-            WHERE validity_end >= :today
+            WHERE validity_start <= :today
+              AND validity_end >= :today
               AND id <> CAST(:src_id AS text)
               AND (
                     (CAST(:src_brand AS text) IS NOT NULL
