@@ -246,6 +246,52 @@ def _query_hotspots_by_folder_url(today_str: str) -> dict[str, list[PromoFolderH
     return hotspots_map
 
 
+def _retailers_with_active_hotspots(today_str: str) -> Optional[set[str]]:
+    """Retailers with at least one tile-bbox'd promo_item valid today.
+
+    Returns None when the DB is unreachable (so callers can treat that as
+    "unknown" and skip the consistency check rather than falsely concluding
+    no retailer expects hotspots).
+    """
+    import psycopg2
+
+    db_url = os.environ.get("DATABASE_URL", "")
+    for suffix in ("+asyncpg", "+psycopg2"):
+        db_url = db_url.replace(suffix, "")
+
+    if not db_url:
+        return None
+
+    try:
+        conn = psycopg2.connect(db_url)
+    except Exception as e:
+        logger.warning(f"Failed to connect to DB for retailer hotspot check: {e}")
+        return None
+
+    retailers: set[str] = set()
+    try:
+        cur = conn.cursor()
+        cur.execute(
+            """
+            SELECT DISTINCT source_retailer
+            FROM promo_items
+            WHERE tile_bbox_x_min IS NOT NULL
+              AND validity_start <= %s
+              AND validity_end >= %s
+            """,
+            (today_str, today_str),
+        )
+        retailers = {row[0] for row in cur.fetchall() if row[0]}
+        cur.close()
+    except Exception as e:
+        logger.warning(f"Failed to query retailer hotspot presence: {e}")
+        return None
+    finally:
+        conn.close()
+
+    return retailers
+
+
 def _build_folders_response() -> PromoFoldersResponse:
     """Read R2 metadata and build the folders response."""
     from promo_folders_pipelines.scraper.config import RETAILERS
@@ -344,7 +390,45 @@ async def get_promo_folders():
 
     try:
         data = _build_folders_response()
-        _folders_cache = (data, now)
+        # Only cache responses we're confident represent a consistent snapshot.
+        # Two failure modes we want to avoid pinning for the full TTL:
+        #   1. R2 hiccup → every retailer's list_objects_v2 fails, response is
+        #      folders=[], and we'd serve "no deals" to everyone for an hour.
+        #   2. Ingest partial-write race → R2 metadata.json for retailer X is
+        #      up, but promo_items rows for that folder haven't all committed.
+        #      The response renders X's folder with zero hotspots, and caching
+        #      that sticks the empty state until the next refresh.
+        # Guard: require at least one folder, AND every retailer that has
+        # active tile-bbox'd rows in the DB must actually surface ≥1 hotspot
+        # in the rendered response. Retailers with no DB rows (not yet
+        # ingested, or between folders) are fine — no hotspots are expected.
+        if data.folders:
+            expected_retailers = _retailers_with_active_hotspots(date.today().isoformat())
+            if expected_retailers is None:
+                # DB unreachable: we can't verify consistency. Fall back to
+                # the prior "non-empty folders is good enough" behavior.
+                _folders_cache = (data, now)
+            else:
+                rendered_hotspot_counts: dict[str, int] = {}
+                for folder in data.folders:
+                    rendered_hotspot_counts[folder.store_id] = (
+                        rendered_hotspot_counts.get(folder.store_id, 0)
+                        + sum(len(p.hotspots) for p in folder.pages)
+                    )
+                # Only retailers rendered in the response count — a retailer
+                # with active DB rows but no R2 metadata can't be rendered
+                # anyway, so it shouldn't block caching.
+                stale = sorted(
+                    store_id for store_id, count in rendered_hotspot_counts.items()
+                    if count == 0 and store_id in expected_retailers
+                )
+                if stale:
+                    logger.info(
+                        f"Skipping folders cache: retailers with active DB rows but "
+                        f"zero rendered hotspots (likely mid-ingest): {stale}"
+                    )
+                else:
+                    _folders_cache = (data, now)
         return data
     except Exception as e:
         logger.error(f"Failed to build promo folders response: {e}", exc_info=True)
