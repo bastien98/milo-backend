@@ -208,20 +208,14 @@ class _PromoItemSchema(PydanticBaseModel):
         description="All printed text on the tile, reformatted as Markdown per the VERBATIM PROMO TEXT rules.",
     )
 
-    # --- Search enrichment (powers /api/v2/promos/search; rules in system prompt) ---
+    # --- Search enrichment (rules live in the SEARCH ENRICHMENT system prompt section) ---
     search_text: Optional[str] = Field(
         default=None,
-        description=(
-            "Lowercase, unaccented, space-separated blob of every word a shopper "
-            "in NL, FR, or EN might type to find this item. Rules in the SEARCH TEXT section."
-        ),
+        description="Multilingual search blob per the SEARCH ENRICHMENT rules.",
     )
     generic_product_type: Optional[str] = Field(
         default=None,
-        description=(
-            "Single lowercase English noun phrase identifying the item across brands "
-            "(e.g. 'beer', 'chocolate bar', 'diaper'). Max ~32 chars. null only if no clear type fits."
-        ),
+        description="Generic English product noun per the SEARCH ENRICHMENT rules.",
     )
 
     # --- Geometry (mandatory on every item) ---
