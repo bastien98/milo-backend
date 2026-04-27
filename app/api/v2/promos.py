@@ -10,18 +10,22 @@ from fastapi import APIRouter, Depends, Header, HTTPException, Query, Response, 
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_db, get_optional_db_user
+from app.core.categories import get_granulars_for_search_term
 from app.core.stores import STORE_DISPLAY_NAMES
 from app.db.repositories.enriched_profile_repo import EnrichedProfileRepository
 from app.db.repositories.promo_interaction_event_repo import (
     PromoInteractionEventRepository,
 )
+from app.db.repositories.promo_item_repo import PromoItemRepository
 from app.models.user import User
 from app.schemas.promo import (
+    PopularBrand,
     PromoFolderHotspot,
     PromoFolderInfo,
     PromoFolderPage,
     PromoFoldersResponse,
     PromoInteractionEventCreate,
+    PromoSearchResponse,
     PromoStoreItem,
     SimilarPromosResponse,
     SimilarPromosSource,
@@ -124,6 +128,76 @@ async def create_promo_interaction_event(
             detail="Could not log interaction event.",
         )
     return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+# ---------------------------------------------------------------------------
+# Promo Search (search bar in the folders tab)
+# ---------------------------------------------------------------------------
+
+# Popular-brands cache (1h TTL — same shape as the folders cache).
+_popular_brands_cache: Optional[Tuple[list[PopularBrand], float]] = None
+_POPULAR_BRANDS_TTL = 3600
+
+
+@router.get("/search", response_model=PromoSearchResponse)
+async def search_promos(
+    q: str = Query(..., min_length=1, max_length=64, description="Search query (NL/FR/EN)"),
+    store: Optional[str] = Query(None, description="Optional store_id filter (e.g. 'colruyt')"),
+    limit: int = Query(20, ge=1, le=50),
+    db: AsyncSession = Depends(get_db),
+):
+    """Search active promo items by product name, brand, or category synonym.
+
+    Powers the search bar in the iOS folders tab. Public endpoint.
+    Short queries (<2 chars) return empty without hitting the DB.
+    """
+    query = q.strip()
+    if len(query) < 2:
+        return PromoSearchResponse(items=[], total=0, query=query, matched_categories=[])
+
+    matched_categories = get_granulars_for_search_term(query)
+
+    repo = PromoItemRepository(db)
+    rows = await repo.search_active(
+        query=query,
+        today=date.today(),
+        matched_categories=matched_categories,
+        store_filter=store,
+        limit=limit,
+    )
+
+    items = [PromoStoreItem(**PromoSimilarityService._project(row)) for row in rows]
+
+    return PromoSearchResponse(
+        items=items,
+        total=len(items),
+        query=query,
+        matched_categories=matched_categories,
+    )
+
+
+@router.get("/search/popular-brands", response_model=list[PopularBrand])
+async def get_popular_brands(
+    limit: int = Query(10, ge=1, le=30),
+    db: AsyncSession = Depends(get_db),
+):
+    """Top brands among currently-active promos. Cached 1h.
+
+    Used by the search bar's empty-focused state to suggest things to tap.
+    """
+    global _popular_brands_cache
+
+    now = time.time()
+    if _popular_brands_cache is not None:
+        cached, ts = _popular_brands_cache
+        if now - ts < _POPULAR_BRANDS_TTL and len(cached) >= limit:
+            return cached[:limit]
+
+    repo = PromoItemRepository(db)
+    rows = await repo.popular_brands(today=date.today(), limit=max(limit, 30))
+    brands = [PopularBrand(name=name, count=count) for name, count in rows]
+    _popular_brands_cache = (brands, now)
+    return brands[:limit]
 
 
 # ---------------------------------------------------------------------------

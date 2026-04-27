@@ -149,3 +149,21 @@ class PromoFolderInfo(BaseModel):
 class PromoFoldersResponse(BaseModel):
     """Response for GET /api/v2/promos/folders."""
     folders: List[PromoFolderInfo]
+
+
+# ---------------------------------------------------------------------------
+# Promo Search (search bar in folders tab)
+# ---------------------------------------------------------------------------
+
+class PromoSearchResponse(BaseModel):
+    """Response for GET /api/v2/promos/search."""
+    items: List[PromoStoreItem]
+    total: int
+    query: str
+    matched_categories: List[str] = []  # Granulars matched via synonym lookup, for telemetry
+
+
+class PopularBrand(BaseModel):
+    """Top brand surfaced in the empty-state of the search bar."""
+    name: str
+    count: int

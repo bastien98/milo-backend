@@ -79,6 +79,13 @@ class PromoItem(Base):
 
     promo_text_markdown: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
 
+    # Search enrichment (Gemini-extracted at ingest time). search_text is a
+    # multilingual blob of brand + name + generic noun + flavor variants used
+    # by the /promos/search trigram path. generic_product_type is a single
+    # English noun ("beer", "diaper") for cross-brand matching.
+    search_text: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    generic_product_type: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
+
     # Bounding boxes (normalized 0-1 coordinates)
     bbox_x_min: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
     bbox_y_min: Mapped[Optional[float]] = mapped_column(Float, nullable=True)

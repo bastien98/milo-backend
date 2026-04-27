@@ -119,6 +119,40 @@ Trace each fact to the tile: mechanism + product + the explanatory clarifier (sa
 
 
 
+_SEARCH_ENRICHMENT_SECTION = """## SEARCH ENRICHMENT (`search_text`, `generic_product_type`)
+
+These two fields power the in-app product search bar. Shoppers search in Dutch, French, OR English — so every item must be findable from all three languages, even when the tile only prints one.
+
+### `search_text`
+ONE lowercase, unaccented, space-separated string covering every word a shopper might type to find this item. Include:
+- The brand (if any) — `primary_brand` plus each name in `additional_brands`.
+- All meaningful words from `product_name` (size/volume tokens are fine but not required).
+- The generic product noun in **NL, FR, AND EN** — even if only one language is on the tile. Example: a beer tile gets "bier biere beer" added; a chocolate bar gets "chocolade chocolat chocolate"; a diaper gets "luier couche diaper".
+- Obvious flavor/variant words ("vanilla", "blond", "tripel", "salt pepper", "lait entier").
+- Common abbreviations or shop-floor synonyms ("coke" for Coca-Cola, "lays" alongside "lay's", "pamper" for Pampers).
+
+Rules:
+- Strip apostrophes, accents, punctuation. Keep digits and the letter `x` (so "6 x 33 cl" survives).
+- Lowercase everything.
+- Single spaces between tokens. No commas, slashes, or hyphens.
+- No promo mechanism, no prices, no validity, no marketing slogans, no store names.
+- Hard limit: ~120 characters. Pick the most useful tokens; do NOT pad.
+
+Example outputs:
+
+| Tile shows | search_text |
+|---|---|
+| Stella Artois 6 x 0,33 L (Pilsners & Lagers) | `stella artois pils blond bier biere beer pilsner lager 6 33 cl` |
+| Côte d'Or Tablet Lait 200 g (Chocolate & Confectionery) | `cote dor cote d or tablet lait melk milk chocolade chocolat chocolate bar 200 g` |
+| Pampers Cruisers Taille 4+ 37 luiers (Baby Care) | `pampers cruisers luier luiers couche diaper taille 4+ 37` |
+| Lay's Bugles Cheese 100 g (Salty Snacks & Nuts) | `lays bugles cheese kaas fromage chips snack 100 g` |
+
+### `generic_product_type`
+ONE short lowercase English noun phrase (max 32 chars) — what the item IS, ignoring brand. Used for cross-brand grouping ("show me all crisps").
+
+Examples: `"beer"`, `"chocolate bar"`, `"diaper"`, `"shampoo"`, `"laundry detergent"`, `"crisps"`, `"yogurt"`, `"frozen pizza"`, `"olive oil"`, `"toilet paper"`. Never include brand or size. Null only if no clear generic type exists (extremely rare — almost every promo item has one)."""
+
+
 def build_system_prompt(config: Dict[str, Any], categories_list: str) -> str:
     """Build a complete Gemini system prompt from a store config and the granular category list."""
     display_name = config["display_name"]
@@ -154,6 +188,9 @@ def build_system_prompt(config: Dict[str, Any], categories_list: str) -> str:
 
     # --- Verbatim promo text → Markdown ---
     sections.append(_PROMO_TEXT_MARKDOWN_SECTION)
+
+    # --- Search enrichment (search_text + generic_product_type) ---
+    sections.append(_SEARCH_ENRICHMENT_SECTION)
 
     # --- Store brands (helps Gemini recognize house brands) ---
     store_brands = config.get("store_brands", [])
@@ -256,4 +293,6 @@ Before outputting each item, verify:
 - A multi-brand tile is ONE item with brands split into primary_brand + additional_brands.
 - `granular_category` is chosen precisely (wine → wine sub-category, beer → beer sub-category; never cross over).
 - Every item has both `bbox` (physical product) and `tile_bbox` (whole tile, contains bbox).
-- `is_coupon` is TRUE only when the tile has a loyalty-badge + 1D barcode + redemption fine-print together. Product-packaging EANs and QR codes don't qualify."""
+- `is_coupon` is TRUE only when the tile has a loyalty-badge + 1D barcode + redemption fine-print together. Product-packaging EANs and QR codes don't qualify.
+- `search_text` includes the generic product noun in NL, FR, AND EN (e.g. "bier biere beer" on every beer item) — never assume the shopper types in the same language as the tile.
+- `generic_product_type` is a short English noun phrase, no brand, no size."""

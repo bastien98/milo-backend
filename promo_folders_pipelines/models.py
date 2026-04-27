@@ -56,6 +56,10 @@ class PromoItem:
     # --- Verbatim tile text (Gemini-extracted, Markdown-formatted, displayed as-is in iOS) ---
     promo_text_markdown: Optional[str] = None
 
+    # --- Search enrichment (Gemini-extracted; powers /api/v2/promos/search) ---
+    search_text: Optional[str] = None
+    generic_product_type: Optional[str] = None
+
     # --- Pipeline metadata (not from Gemini) ---
     validity_start: Optional[str] = None
     validity_end: Optional[str] = None

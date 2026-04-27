@@ -208,6 +208,22 @@ class _PromoItemSchema(PydanticBaseModel):
         description="All printed text on the tile, reformatted as Markdown per the VERBATIM PROMO TEXT rules.",
     )
 
+    # --- Search enrichment (powers /api/v2/promos/search; rules in system prompt) ---
+    search_text: Optional[str] = Field(
+        default=None,
+        description=(
+            "Lowercase, unaccented, space-separated blob of every word a shopper "
+            "in NL, FR, or EN might type to find this item. Rules in the SEARCH TEXT section."
+        ),
+    )
+    generic_product_type: Optional[str] = Field(
+        default=None,
+        description=(
+            "Single lowercase English noun phrase identifying the item across brands "
+            "(e.g. 'beer', 'chocolate bar', 'diaper'). Max ~32 chars. null only if no clear type fits."
+        ),
+    )
+
     # --- Geometry (mandatory on every item) ---
     bbox: _BboxSchema = Field(
         description=(
@@ -1096,6 +1112,8 @@ def parse_promo_items(
                 granular_category=granular,
                 category=parent_category,
                 promo_text_markdown=raw.get("promo_text_markdown"),
+                search_text=_clean_search_text(raw.get("search_text")),
+                generic_product_type=_clean_generic_product_type(raw.get("generic_product_type")),
                 validity_start=validity_start,
                 validity_end=validity_end,
                 source_retailer=store_id,
@@ -1142,6 +1160,28 @@ def _parse_price(val) -> Optional[float]:
         return float(val)
     except (ValueError, TypeError):
         return None
+
+
+def _clean_search_text(val: Any) -> Optional[str]:
+    """Normalize Gemini's search_text: lowercase, unaccent, collapse whitespace.
+
+    Gemini is asked to emit the blob in this format already, but we enforce
+    it here so the trgm index sees uniform values regardless of model drift.
+    """
+    if not val or not isinstance(val, str):
+        return None
+    import unicodedata
+    s = unicodedata.normalize("NFD", val.strip().lower())
+    s = "".join(c for c in s if unicodedata.category(c) != "Mn")
+    s = re.sub(r"\s+", " ", s)
+    return s[:512] or None
+
+
+def _clean_generic_product_type(val: Any) -> Optional[str]:
+    if not val or not isinstance(val, str):
+        return None
+    s = val.strip().lower()
+    return s[:64] or None
 
 
 def _normalize_bbox(raw: Optional[dict]) -> Optional[dict]:
@@ -1555,6 +1595,7 @@ def upsert_to_postgres(items: list[PromoItem]) -> int:
                     bbox_x_min, bbox_y_min, bbox_x_max, bbox_y_max,
                     tile_bbox_x_min, tile_bbox_y_min, tile_bbox_x_max, tile_bbox_y_max,
                     promo_text_markdown,
+                    search_text, generic_product_type,
                     is_coupon, coupon_type, coupon_barcode_value, coupon_barcode_format,
                     coupon_value, coupon_min_purchase, coupon_validity_end,
                     barcode_bbox_x_min, barcode_bbox_y_min, barcode_bbox_x_max, barcode_bbox_y_max
@@ -1573,6 +1614,7 @@ def upsert_to_postgres(items: list[PromoItem]) -> int:
                     %s, %s, %s, %s,
                     %s, %s, %s, %s,
                     %s,
+                    %s, %s,
                     %s, %s, %s, %s,
                     %s, %s, %s,
                     %s, %s, %s, %s
@@ -1624,6 +1666,8 @@ def upsert_to_postgres(items: list[PromoItem]) -> int:
                     tile_bbox_x_max = EXCLUDED.tile_bbox_x_max,
                     tile_bbox_y_max = EXCLUDED.tile_bbox_y_max,
                     promo_text_markdown = EXCLUDED.promo_text_markdown,
+                    search_text = EXCLUDED.search_text,
+                    generic_product_type = EXCLUDED.generic_product_type,
                     is_coupon = EXCLUDED.is_coupon,
                     coupon_type = EXCLUDED.coupon_type,
                     coupon_barcode_value = EXCLUDED.coupon_barcode_value,
@@ -1684,6 +1728,8 @@ def upsert_to_postgres(items: list[PromoItem]) -> int:
                     tile.get("x_max"),
                     tile.get("y_max"),
                     item.promo_text_markdown,
+                    item.search_text,
+                    item.generic_product_type,
                     item.is_coupon,
                     item.coupon_type,
                     item.coupon_barcode_value,

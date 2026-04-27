@@ -136,6 +136,121 @@ class PromoItemRepository:
         result = await self.db.execute(sql, params)
         return [dict(row) for row in result.mappings().all()]
 
+    async def search_active(
+        self,
+        *,
+        query: str,
+        today: date,
+        matched_categories: Sequence[str] = (),
+        store_filter: Optional[str] = None,
+        limit: int = 20,
+    ) -> list[dict[str, Any]]:
+        """Search active promos using stacked match paths, ranked in one query.
+
+        Paths:
+          1. Trigram similarity on display_name / display_brand / search_text /
+             generic_product_type (all unaccented + lowercased on both sides).
+          2. Prefix ILIKE bonus on display_name_lower.
+          3. Category-synonym membership: items whose granular_category is in
+             matched_categories get a baseline score so 'bier' surfaces
+             Stella Artois etc. that the trigram path alone would miss.
+
+        Returns plain dicts (not ORM objects) — service layer projects to
+        PromoStoreItem.
+        """
+        sql = text(
+            """
+            WITH q AS (
+                SELECT unaccent(lower(CAST(:q AS text))) AS norm
+            ),
+            scored AS (
+                SELECT
+                    p.*,
+                    GREATEST(
+                        similarity(unaccent(lower(p.display_name)), q.norm),
+                        similarity(unaccent(lower(coalesce(p.display_brand, ''))), q.norm) * 0.9,
+                        similarity(unaccent(lower(coalesce(p.search_text, ''))), q.norm) * 0.85,
+                        similarity(unaccent(lower(coalesce(p.generic_product_type, ''))), q.norm) * 0.8,
+                        CASE
+                            WHEN cardinality(CAST(:matched_cats AS text[])) > 0
+                                 AND p.granular_category = ANY(CAST(:matched_cats AS text[]))
+                            THEN 0.5
+                            ELSE 0
+                        END
+                    )
+                    + CASE
+                        WHEN p.display_name_lower ILIKE q.norm || '%' THEN 0.3
+                        ELSE 0
+                      END AS score
+                FROM promo_items p, q
+                WHERE p.validity_start <= :today
+                  AND p.validity_end >= :today
+                  AND (CAST(:store AS text) IS NULL OR p.source_retailer = CAST(:store AS text))
+                  AND (
+                        similarity(unaccent(lower(p.display_name)), q.norm) > 0.25
+                     OR similarity(unaccent(lower(coalesce(p.display_brand, ''))), q.norm) > 0.30
+                     OR similarity(unaccent(lower(coalesce(p.search_text, ''))), q.norm) > 0.25
+                     OR similarity(unaccent(lower(coalesce(p.generic_product_type, ''))), q.norm) > 0.30
+                     OR p.display_name_lower ILIKE '%' || q.norm || '%'
+                     OR (
+                            cardinality(CAST(:matched_cats AS text[])) > 0
+                            AND p.granular_category = ANY(CAST(:matched_cats AS text[]))
+                        )
+                  )
+            )
+            SELECT
+                id, display_name, display_mechanism, display_description,
+                display_savings_label, display_unit_price,
+                mechanism_kind, mechanism_x, mechanism_y, promo_campaign,
+                unit_price_value, unit_price_unit, unit_price_quality,
+                pack_size_value, pack_size_unit, pack_count,
+                normalized_brand, display_brand, primary_brand, additional_brands,
+                original_price, promo_price, stated_savings, savings_amount,
+                min_purchase_qty, promo_depth,
+                granular_category, category, source_retailer,
+                page_number, promo_folder_url, validity_start, validity_end,
+                thumbnail_url, image_url, hero_url, promo_text_markdown,
+                is_coupon, coupon_type, coupon_barcode_value, coupon_barcode_format,
+                coupon_value, coupon_min_purchase, coupon_validity_end,
+                barcode_bbox_x_min, barcode_bbox_y_min,
+                barcode_bbox_x_max, barcode_bbox_y_max,
+                score
+            FROM scored
+            WHERE score > 0
+            ORDER BY score DESC, validity_end ASC
+            LIMIT :lim
+            """
+        )
+        params = {
+            "q": query,
+            "today": today,
+            "matched_cats": list(matched_categories),
+            "store": store_filter,
+            "lim": limit,
+        }
+        result = await self.db.execute(sql, params)
+        return [dict(row) for row in result.mappings().all()]
+
+    async def popular_brands(
+        self, today: date, limit: int = 10
+    ) -> list[tuple[str, int]]:
+        """Top display_brand values among currently-active promos."""
+        sql = text(
+            """
+            SELECT display_brand, COUNT(*) AS n
+            FROM promo_items
+            WHERE validity_start <= :today
+              AND validity_end >= :today
+              AND display_brand IS NOT NULL
+              AND display_brand <> ''
+            GROUP BY display_brand
+            ORDER BY n DESC, display_brand ASC
+            LIMIT :lim
+            """
+        )
+        result = await self.db.execute(sql, {"today": today, "lim": limit})
+        return [(row[0], row[1]) for row in result.all()]
+
     async def get_active(
         self, today: date, retailer: Optional[str] = None
     ) -> list[PromoItem]:
@@ -195,6 +310,8 @@ class PromoItemRepository:
                 "image_url": stmt.excluded.image_url,
                 "hero_url": stmt.excluded.hero_url,
                 "promo_text_markdown": stmt.excluded.promo_text_markdown,
+                "search_text": stmt.excluded.search_text,
+                "generic_product_type": stmt.excluded.generic_product_type,
                 "is_coupon": stmt.excluded.is_coupon,
                 "coupon_type": stmt.excluded.coupon_type,
                 "coupon_barcode_value": stmt.excluded.coupon_barcode_value,
