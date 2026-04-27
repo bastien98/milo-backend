@@ -158,6 +158,10 @@ class PromoItemRepository:
         Returns plain dicts (not ORM objects) — service layer projects to
         PromoStoreItem.
         """
+        # Trigram similarity falls off sharply for short queries (a 4-char "coke"
+        # against a 50-char blob can score ~0.10 even though "coke" is right there).
+        # We complement trigrams with explicit substring (ILIKE) bonuses so exact-
+        # word matches always rank above pure category-synonym matches.
         sql = text(
             """
             WITH q AS (
@@ -178,20 +182,29 @@ class PromoItemRepository:
                             ELSE 0
                         END
                     )
-                    + CASE
-                        WHEN p.display_name_lower ILIKE q.norm || '%' THEN 0.3
-                        ELSE 0
-                      END AS score
+                    -- Prefix and substring bonuses (additive, stack with trigram
+                    -- and category scores so substring matches outrank pure
+                    -- category-synonym hits).
+                    + CASE WHEN unaccent(lower(p.display_name)) ILIKE q.norm || '%' THEN 0.35 ELSE 0 END
+                    + CASE WHEN unaccent(lower(p.display_name)) ILIKE '%' || q.norm || '%'
+                              AND NOT (unaccent(lower(p.display_name)) ILIKE q.norm || '%')
+                           THEN 0.25 ELSE 0 END
+                    + CASE WHEN unaccent(lower(coalesce(p.search_text, ''))) ILIKE '%' || q.norm || '%' THEN 0.20 ELSE 0 END
+                    + CASE WHEN unaccent(lower(coalesce(p.display_brand, ''))) ILIKE '%' || q.norm || '%' THEN 0.25 ELSE 0 END
+                    AS score
                 FROM promo_items p, q
                 WHERE p.validity_start <= :today
                   AND p.validity_end >= :today
                   AND (CAST(:store AS text) IS NULL OR p.source_retailer = CAST(:store AS text))
                   AND (
-                        similarity(unaccent(lower(p.display_name)), q.norm) > 0.25
-                     OR similarity(unaccent(lower(coalesce(p.display_brand, ''))), q.norm) > 0.30
-                     OR similarity(unaccent(lower(coalesce(p.search_text, ''))), q.norm) > 0.25
-                     OR similarity(unaccent(lower(coalesce(p.generic_product_type, ''))), q.norm) > 0.30
-                     OR p.display_name_lower ILIKE '%' || q.norm || '%'
+                        similarity(unaccent(lower(p.display_name)), q.norm) > 0.20
+                     OR similarity(unaccent(lower(coalesce(p.display_brand, ''))), q.norm) > 0.25
+                     OR similarity(unaccent(lower(coalesce(p.search_text, ''))), q.norm) > 0.18
+                     OR similarity(unaccent(lower(coalesce(p.generic_product_type, ''))), q.norm) > 0.25
+                     OR unaccent(lower(p.display_name)) ILIKE '%' || q.norm || '%'
+                     OR unaccent(lower(coalesce(p.search_text, ''))) ILIKE '%' || q.norm || '%'
+                     OR unaccent(lower(coalesce(p.display_brand, ''))) ILIKE '%' || q.norm || '%'
+                     OR unaccent(lower(coalesce(p.generic_product_type, ''))) ILIKE '%' || q.norm || '%'
                      OR (
                             cardinality(CAST(:matched_cats AS text[])) > 0
                             AND p.granular_category = ANY(CAST(:matched_cats AS text[]))
