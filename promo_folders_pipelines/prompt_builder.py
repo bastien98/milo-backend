@@ -53,31 +53,52 @@ Non-coupon items: emit `is_coupon: false` and leave all other coupon_* fields nu
 When a coupon tile is present: still fill `product_name`, brands, `promo_text_markdown`, category, `bbox`, `tile_bbox` for the underlying product the coupon applies to. Coupons don't have `original_price` / `promo_price` (unless the tile also prints one) — leave pricing fields null for pure loyalty-points / free-product coupons."""
 
 
-_PROMO_TEXT_MARKDOWN_SECTION = """## VERBATIM PROMO TEXT (`promo_text_markdown`)
-Transcribe every piece of text that is actually printed on the promo tile, then reformat it as clean Markdown for display to the end user. This field is shown to shoppers as-is, so it must be faithful and readable.
+_PROMO_TEXT_MARKDOWN_SECTION = """## CONSUMER-FACING PROMO TEXT (`promo_text_markdown`)
+Produce a clean, Markdown-formatted summary of the printed text that is **relevant to the consumer about THIS specific promotion**. This field is shown to shoppers as-is in the product / coupon detail screen, so it must be faithful, focused, and readable.
 
-RULES:
-1. **Verbatim wording** — keep the original Dutch or French exactly as printed. Do not translate, paraphrase, or summarize. Do not invent text that is not on the tile.
-2. **Markdown formatting**:
-   - Use `**bold**` for the mechanism/headline line (e.g. `**1+1 GRATIS**`, `**-25%**`, `**€2,49**`).
-   - Regular lines for the product name and descriptive copy.
-   - Use `- ` bulleted lists for enumerations (multi-brand choices, variant lists, bullet points printed on the tile).
-   - Separate logical blocks with a single blank line.
-3. **Prices** — write them exactly as on the tile: euro sign + comma decimal (e.g. `€2,49`, `€0,99`). Do not round or reformat.
-4. **Do NOT include** image descriptions, bounding box info, or anything not actually printed on the tile.
-5. **Do NOT wrap** the output in a code fence or surrounding quotes.
-6. Return `null` only if the tile literally has no visible text (extremely rare — e.g. purely visual teaser).
+### WHAT TO INCLUDE (consumer-relevant deal info)
+- The mechanism / headline as printed (e.g. `1+1 GRATIS`, `-25%`, `€2,49`).
+- Product name & variant info printed on the tile.
+- Both prices when shown: the current promo price AND any "was" / original price (see strikethrough rule below).
+- Pack size / volume if printed on the tile (e.g. `1,5 L`, `6 x 25 cl`, `500 g`).
+- Explicit savings claim ("Bespaar €3,00", "Économisez €3,00").
+- Validity date if explicitly printed on this tile (e.g. "Geldig t/m zondag", "Valable jusqu'au 12/05").
+- Meaningful purchase conditions / restrictions ("vanaf 2 stuks", "max. 4 per klant", "bij aankoop van 2").
+- For COUPONS: the loyalty reward ("X Bonuspunten", "€X korting") AND the trigger condition ("bij aankoop van 1 pot Natù-fruitspread").
 
-EXAMPLE for a Coca-Cola 1+1 tile showing "1+1 GRATIS / Coca-Cola Zero 1,5 L / €2,49 per fles / Geldig t/m zondag":
+### WHAT TO EXCLUDE (not useful for the consumer here)
+- Store-wide marketing banners that are decorative and already captured separately (e.g. "Sunday Deal", "Bonus Card", "Mega Deal", "Prix Choc" used as a banner) — those live in `promo_campaign`.
+- Generic slogans / filler ("Lekker voordelig!", "De beste prijs van de week", "Nieuw!").
+- Legal / redemption fine-print not specific to the offer ("Geldig bij afgifte van deze originele bon", "Bon per aankoop", barcode digits).
+- Page numbers, section headers, navigation text, anything bleeding in from neighbouring tiles.
+- Sustainability / origin / nutrition labels that are not part of THIS deal ("Bio", "Belgisch", "Nutri-Score") unless they are the headline of the offer itself.
+- Image descriptions, bounding box info, anything not actually printed on the tile.
+
+### MARKDOWN FORMATTING
+1. **Verbatim wording** — keep the original Dutch or French exactly as printed for the text you DO include. Do not translate, paraphrase, summarize, or invent text. You may, however, freely **restructure the layout** — add or remove line breaks, regroup lines, choose where blank lines go, and turn enumerations into bullet lists — purely so the output reads cleanly in a mobile detail screen. Aim for this reading order: headline → product → price line → conditions / validity.
+2. **Bold** — wrap the mechanism/headline and standalone prices in `**…**` (e.g. `**1+1 GRATIS**`, `**-25%**`, `**€2,49**`).
+3. **Strikethrough** — if a piece of text is printed on the tile with a visible line struck through it (almost always the original "was" price), wrap it in `~~…~~`. Combine with `**bold**` when both apply (e.g. `~~**€3,49**~~ **€2,49**`). Do NOT add strikethrough to text that is merely faded, greyed, or smaller — only when an actual line is drawn through it.
+4. **Bullet lists** — use `- ` for enumerations: multi-brand/variant choices, multi-line conditions, validity + savings on separate lines, etc.
+5. **Blocks** — separate logical blocks (headline, product, price line, conditions) with a single blank line.
+6. **Prices** — write exactly as on the tile: euro sign + comma decimal (`€2,49`, `€0,99`). Do not round or reformat.
+7. **No code fences, no surrounding quotes** in the output.
+8. Return `null` if, after filtering, there is nothing consumer-relevant left to show (rare).
+
+### EXAMPLE
+Tile prints (Dutch): banner "Sunday Deal", headline "1+1 GRATIS", product "Coca-Cola Zero 1,5 L", prices "~~€3,49~~ €2,49 per fles", "Bespaar €1,00", validity "Geldig t/m zondag", footer "Lekker voordelig!".
+
 ```
 **1+1 GRATIS**
 
 Coca-Cola Zero 1,5 L
 
-- €2,49 per fles
+~~**€3,49**~~ **€2,49** per fles
+
+- Bespaar €1,00
 - Geldig t/m zondag
 ```
-(Do not include the ``` fences in your output — they are only shown here to delimit the example.)"""
+
+Note the "Sunday Deal" banner and "Lekker voordelig!" slogan are dropped (banner → `promo_campaign`, slogan → filler). Do not include the ``` fences in your output — they only delimit the example here."""
 
 
 
