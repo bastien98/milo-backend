@@ -63,7 +63,6 @@ Produce a clear, **grounded explanation** of THIS specific promotion in Markdown
 - Unit / per-quantity price if printed on the tile (e.g. `€1,66/L`, `€4,98/kg`, `€0,50 per stuk`, `€0,42 par pièce`). If it's printed, always carry it through — it's important for shoppers comparing value.
 - Pack size / volume if printed on the tile (e.g. `1,5 L`, `6 x 25 cl`, `500 g`).
 - Explicit savings claim ("Bespaar €3,00", "Économisez €3,00").
-- Validity date if explicitly printed on this tile (e.g. "Geldig t/m zondag", "Valable jusqu'au 12/05").
 - Meaningful purchase conditions / restrictions ("vanaf 2 stuks", "max. 4 per klant", "bij aankoop van 2").
 - For COUPONS: the loyalty reward ("X Bonuspunten", "€X korting") AND the trigger condition ("bij aankoop van 1 pot Natù-fruitspread").
 
@@ -73,6 +72,7 @@ Produce a clear, **grounded explanation** of THIS specific promotion in Markdown
 - Legal / redemption fine-print not specific to the offer ("Geldig bij afgifte van deze originele bon", "Bon per aankoop", barcode digits).
 - Page numbers, section headers, navigation text, anything bleeding in from neighbouring tiles.
 - Sustainability / origin / nutrition labels that are not part of THIS deal ("Bio", "Belgisch", "Nutri-Score") unless they are the headline of the offer itself.
+- **Validity periods** ("Geldig t/m zondag", "Valable jusqu'au 12/05", "Geldig van 02/05 t/m 08/05") — these are shown separately in the UI from the folder/coupon validity dates, so omitting them avoids duplicate information. The only exception is a hard, offer-specific time restriction printed on the tile that's tighter than the folder window (e.g. "enkel vandaag", "uniquement le dimanche", "le matin uniquement") — keep those, since they're a real shopping constraint.
 - Image descriptions, bounding box info, anything not actually printed on the tile.
 
 ### MARKDOWN FORMATTING
@@ -80,7 +80,7 @@ Produce a clear, **grounded explanation** of THIS specific promotion in Markdown
 
    You MAY:
    - Spell out cryptic shorthand into plain wording (e.g. `1+1 GRATIS` → also explain "koop er 1, krijg de 2e gratis"; `-25% vanaf 2` → also "korting geldt vanaf 2 stuks"; `2 voor €5` → "betaal €5 voor 2 stuks").
-   - Reorder lines, merge or split them, choose where blank lines go, and turn enumerations into bullets, all to make the text easy to scan. Aim for the reading order: headline → product → price line → conditions / validity.
+   - Reorder lines, merge or split them, choose where blank lines go, and turn enumerations into bullets, all to make the text easy to scan. Aim for the reading order: headline → product → price line → conditions.
    - Restate a fact in slightly clearer phrasing if the tile's exact wording is awkward.
 
    You MUST NOT:
@@ -90,9 +90,9 @@ Produce a clear, **grounded explanation** of THIS specific promotion in Markdown
    - Add marketing language, opinions, or comparisons ("great deal", "the best price", "compared to last week").
 
    If you'd write a sentence and can't point to the tile for every concrete detail in it, drop the sentence. Currency-symbol placement is governed by rule 6, not by this rule: prepending `€` to a price token that lacks the symbol on the tile is required, not a violation.
-2. **Bold for highlights** — wrap the key data points the shopper's eye should catch: the mechanism / headline (`**1+1 GRATIS**`, `**-25%**`), the promo price (`**€2,49**`), and the savings amount (`**€1,00**`). Use bold sparingly — if everything is bold, nothing stands out. Plain product names, conditions, validity, and explanatory clauses stay un-bolded.
+2. **Bold for highlights** — wrap the key data points the shopper's eye should catch: the mechanism / headline (`**1+1 GRATIS**`, `**-25%**`), the promo price (`**€2,49**`), and the savings amount (`**€1,00**`). Use bold sparingly — if everything is bold, nothing stands out. Plain product names, conditions, and explanatory clauses stay un-bolded.
 3. **Strikethrough** — if a piece of text is printed on the tile with a visible line struck through it (almost always the original "was" price), wrap it in `~~…~~`. Combine with `**bold**` when both apply (e.g. `~~**€3,49**~~ **€2,49**`). Do NOT add strikethrough to text that is merely faded, greyed, or smaller — only when an actual line is drawn through it.
-4. **Bullet lists** — use `- ` for enumerations: multi-brand/variant choices, multi-line conditions, validity + savings on separate lines, etc.
+4. **Bullet lists** — use `- ` for enumerations: multi-brand/variant choices, multi-line conditions, savings + restrictions on separate lines, etc.
 5. **Blocks** — separate logical blocks (headline, product, price line, conditions) with a single blank line.
 6. **Prices** — always render every price token as `€X,YY`, regardless of how the tile prints it. The euro symbol goes immediately before the digits, with no space. The amount itself stays verbatim: keep the comma as decimal separator, do not round, do not derive a price from another (Python does that). Examples of normalization:
    - tile prints `€ 2,49` → `€2,49`
@@ -113,11 +113,9 @@ Tile prints (Dutch): banner "Sunday Deal", headline "1+1 GRATIS", product "Coca-
 **1+1 GRATIS** op Coca-Cola Zero 1,5 L — koop er 1, krijg de 2e gratis.
 
 Per fles: ~~**€3,49**~~ **€2,49** (€1,66/L). Je bespaart **€1,00**.
-
-Geldig t/m zondag.
 ```
 
-Trace each fact to the tile: mechanism + product + the explanatory clarifier (same idea, plainer Dutch), both prices verbatim (and `€` added to the un-symbolled price per rule 6), per-unit price verbatim, savings verbatim, validity verbatim. The "Sunday Deal" banner (→ `promo_campaign`) and "Lekker voordelig!" slogan (→ filler) are dropped. No new numbers, no NL→FR translation. A French tile would produce the same shape in French; never mix languages. Do not include the ``` fences in your output — they only delimit the example here."""
+Trace each fact to the tile: mechanism + product + the explanatory clarifier (same idea, plainer Dutch), both prices verbatim (and `€` added to the un-symbolled price per rule 6), per-unit price verbatim, savings verbatim. The "Sunday Deal" banner (→ `promo_campaign`), "Lekker voordelig!" slogan (→ filler), and the "Geldig t/m zondag" validity (→ shown separately in the UI) are all dropped. No new numbers, no NL→FR translation. A French tile would produce the same shape in French; never mix languages. Do not include the ``` fences in your output — they only delimit the example here."""
 
 
 
