@@ -1,3 +1,4 @@
+import re
 from datetime import date
 from typing import Any, Optional, Sequence
 
@@ -160,12 +161,17 @@ class PromoItemRepository:
         """
         # Trigram similarity falls off sharply for short queries (a 4-char "coke"
         # against a 50-char blob can score ~0.10 even though "coke" is right there).
-        # We complement trigrams with explicit substring (ILIKE) bonuses so exact-
-        # word matches always rank above pure category-synonym matches.
+        # We complement trigrams with word-anchored regex bonuses so exact-word
+        # matches always rank above pure category-synonym matches. The `\m`
+        # anchor is critical: a plain `%cola%` substring would also fire on
+        # "rucola" and "chocolade", which is the source of the filler items
+        # users were seeing at the bottom of the list.
         sql = text(
-            """
+            r"""
             WITH q AS (
-                SELECT unaccent(lower(CAST(:q AS text))) AS norm
+                SELECT
+                    unaccent(lower(CAST(:q AS text))) AS norm,
+                    unaccent(lower(CAST(:q_re AS text))) AS norm_re
             ),
             scored AS (
                 SELECT
@@ -182,15 +188,15 @@ class PromoItemRepository:
                             ELSE 0
                         END
                     )
-                    -- Prefix and substring bonuses (additive, stack with trigram
-                    -- and category scores so substring matches outrank pure
-                    -- category-synonym hits).
+                    -- Prefix and word-start substring bonuses (additive, stack
+                    -- with trigram and category scores so word-boundary matches
+                    -- outrank pure category-synonym hits).
                     + CASE WHEN unaccent(lower(p.display_name)) ILIKE q.norm || '%' THEN 0.35 ELSE 0 END
-                    + CASE WHEN unaccent(lower(p.display_name)) ILIKE '%' || q.norm || '%'
+                    + CASE WHEN unaccent(lower(p.display_name)) ~* ('\m' || q.norm_re)
                               AND NOT (unaccent(lower(p.display_name)) ILIKE q.norm || '%')
                            THEN 0.25 ELSE 0 END
-                    + CASE WHEN unaccent(lower(coalesce(p.search_text, ''))) ILIKE '%' || q.norm || '%' THEN 0.20 ELSE 0 END
-                    + CASE WHEN unaccent(lower(coalesce(p.display_brand, ''))) ILIKE '%' || q.norm || '%' THEN 0.25 ELSE 0 END
+                    + CASE WHEN unaccent(lower(coalesce(p.search_text, ''))) ~* ('\m' || q.norm_re) THEN 0.20 ELSE 0 END
+                    + CASE WHEN unaccent(lower(coalesce(p.display_brand, ''))) ~* ('\m' || q.norm_re) THEN 0.25 ELSE 0 END
                     AS score
                 FROM promo_items p, q
                 WHERE p.validity_start <= :today
@@ -198,13 +204,13 @@ class PromoItemRepository:
                   AND (CAST(:store AS text) IS NULL OR p.source_retailer = CAST(:store AS text))
                   AND (
                         similarity(unaccent(lower(p.display_name)), q.norm) > 0.20
-                     OR similarity(unaccent(lower(coalesce(p.display_brand, ''))), q.norm) > 0.25
+                     OR similarity(unaccent(lower(coalesce(p.display_brand, ''))), q.norm) > 0.50
                      OR similarity(unaccent(lower(coalesce(p.search_text, ''))), q.norm) > 0.18
-                     OR similarity(unaccent(lower(coalesce(p.generic_product_type, ''))), q.norm) > 0.25
-                     OR unaccent(lower(p.display_name)) ILIKE '%' || q.norm || '%'
-                     OR unaccent(lower(coalesce(p.search_text, ''))) ILIKE '%' || q.norm || '%'
-                     OR unaccent(lower(coalesce(p.display_brand, ''))) ILIKE '%' || q.norm || '%'
-                     OR unaccent(lower(coalesce(p.generic_product_type, ''))) ILIKE '%' || q.norm || '%'
+                     OR similarity(unaccent(lower(coalesce(p.generic_product_type, ''))), q.norm) > 0.50
+                     OR unaccent(lower(p.display_name)) ~* ('\m' || q.norm_re)
+                     OR unaccent(lower(coalesce(p.search_text, ''))) ~* ('\m' || q.norm_re)
+                     OR unaccent(lower(coalesce(p.display_brand, ''))) ~* ('\m' || q.norm_re)
+                     OR unaccent(lower(coalesce(p.generic_product_type, ''))) ~* ('\m' || q.norm_re)
                      OR (
                             cardinality(CAST(:matched_cats AS text[])) > 0
                             AND p.granular_category = ANY(CAST(:matched_cats AS text[]))
@@ -229,13 +235,14 @@ class PromoItemRepository:
                 barcode_bbox_x_max, barcode_bbox_y_max,
                 score
             FROM scored
-            WHERE score > 0
+            WHERE score > 0.3
             ORDER BY score DESC, validity_end ASC
             LIMIT :lim
             """
         )
         params = {
             "q": query,
+            "q_re": re.escape(query),
             "today": today,
             "matched_cats": list(matched_categories),
             "store": store_filter,
