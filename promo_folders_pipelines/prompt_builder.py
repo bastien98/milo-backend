@@ -75,17 +75,24 @@ Produce a clean, Markdown-formatted summary of the printed text that is **releva
 - Image descriptions, bounding box info, anything not actually printed on the tile.
 
 ### MARKDOWN FORMATTING
-1. **Verbatim wording** — keep the original Dutch or French exactly as printed for the text you DO include. Do not translate, paraphrase, summarize, or invent text. You may, however, freely **restructure the layout** — add or remove line breaks, regroup lines, choose where blank lines go, and turn enumerations into bullet lists — purely so the output reads cleanly in a mobile detail screen. Aim for this reading order: headline → product → price line → conditions / validity.
+1. **Verbatim wording** — keep the original Dutch or French exactly as printed for the text you DO include. Do not translate, paraphrase, summarize, or invent text. You may, however, freely **restructure the layout** — add or remove line breaks, regroup lines, choose where blank lines go, and turn enumerations into bullet lists — purely so the output reads cleanly in a mobile detail screen. Aim for this reading order: headline → product → price line → conditions / validity. Currency-symbol placement is governed by rule 6, not by this rule: prepending `€` to a price token that lacks the symbol on the tile is required, not a violation of "verbatim".
 2. **Bold** — wrap the mechanism/headline and standalone prices in `**…**` (e.g. `**1+1 GRATIS**`, `**-25%**`, `**€2,49**`).
 3. **Strikethrough** — if a piece of text is printed on the tile with a visible line struck through it (almost always the original "was" price), wrap it in `~~…~~`. Combine with `**bold**` when both apply (e.g. `~~**€3,49**~~ **€2,49**`). Do NOT add strikethrough to text that is merely faded, greyed, or smaller — only when an actual line is drawn through it.
 4. **Bullet lists** — use `- ` for enumerations: multi-brand/variant choices, multi-line conditions, validity + savings on separate lines, etc.
 5. **Blocks** — separate logical blocks (headline, product, price line, conditions) with a single blank line.
-6. **Prices** — write exactly as on the tile: euro sign + comma decimal (`€2,49`, `€0,99`). Do not round or reformat.
+6. **Prices** — always render every price token as `€X,YY`, regardless of how the tile prints it. The euro symbol goes immediately before the digits, with no space. The amount itself stays verbatim: keep the comma as decimal separator, do not round, do not derive a price from another (Python does that). Examples of normalization:
+   - tile prints `€ 2,49` → `€2,49`
+   - tile prints `2,49 €` → `€2,49`
+   - tile prints `2,49` (no symbol, but clearly a price) → `€2,49`
+   - tile prints big `2` with superscript `49` → `€2,49`
+   - tile prints `0,⁹⁹` or `0,99` → `€0,99`
+   - whole-euro price like `€5` or `5 €` → `€5,00` only if both decimals are visible on the tile; otherwise `€5`.
+   Only apply this to **prices**. Do NOT prepend `€` to volumes (`1,5 L`), weights (`500 g`), pack counts (`6 x 25 cl`), percentages (`-25%`), or loyalty-point values (`50 Bonuspunten`).
 7. **No code fences, no surrounding quotes** in the output.
 8. Return `null` if, after filtering, there is nothing consumer-relevant left to show (rare).
 
 ### EXAMPLE
-Tile prints (Dutch): banner "Sunday Deal", headline "1+1 GRATIS", product "Coca-Cola Zero 1,5 L", prices "~~€3,49~~ €2,49 per fles", "Bespaar €1,00", validity "Geldig t/m zondag", footer "Lekker voordelig!".
+Tile prints (Dutch): banner "Sunday Deal", headline "1+1 GRATIS", product "Coca-Cola Zero 1,5 L", prices "~~€ 3,49~~ 2,49 per fles" (note: symbol only on the struck-through price, not on the promo price — both get normalized to `€…`), "Bespaar €1,00", validity "Geldig t/m zondag", footer "Lekker voordelig!".
 
 ```
 **1+1 GRATIS**
