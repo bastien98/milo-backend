@@ -60,6 +60,7 @@ Produce a clean, Markdown-formatted summary of the printed text that is **releva
 - The mechanism / headline as printed (e.g. `1+1 GRATIS`, `-25%`, `€2,49`).
 - Product name & variant info printed on the tile.
 - Both prices when shown: the current promo price AND any "was" / original price (see strikethrough rule below).
+- Unit / per-quantity price if printed on the tile (e.g. `€1,66/L`, `€4,98/kg`, `€0,50 per stuk`, `€0,42 par pièce`). If it's printed, always carry it through — it's important for shoppers comparing value.
 - Pack size / volume if printed on the tile (e.g. `1,5 L`, `6 x 25 cl`, `500 g`).
 - Explicit savings claim ("Bespaar €3,00", "Économisez €3,00").
 - Validity date if explicitly printed on this tile (e.g. "Geldig t/m zondag", "Valable jusqu'au 12/05").
@@ -87,7 +88,8 @@ Produce a clean, Markdown-formatted summary of the printed text that is **releva
    - tile prints big `2` with superscript `49` → `€2,49`
    - tile prints `0,⁹⁹` or `0,99` → `€0,99`
    - whole-euro price like `€5` or `5 €` → `€5,00` only if both decimals are visible on the tile; otherwise `€5`.
-   Only apply this to **prices**. Do NOT prepend `€` to volumes (`1,5 L`), weights (`500 g`), pack counts (`6 x 25 cl`), percentages (`-25%`), or loyalty-point values (`50 Bonuspunten`).
+   Apply the same `€X,YY` normalization to per-unit prices: `1,66/L` → `€1,66/L`, `4,98 /kg` → `€4,98/kg`, `0,50 per stuk` → `€0,50 per stuk`. Keep the unit suffix (`/L`, `/kg`, `/stuk`, `per pièce`, etc.) exactly as printed.
+   Only apply the `€` prefix to **prices**. Do NOT prepend `€` to volumes (`1,5 L`), weights (`500 g`), pack counts (`6 x 25 cl`), percentages (`-25%`), or loyalty-point values (`50 Bonuspunten`).
 7. **No code fences, no surrounding quotes** in the output.
 8. Return `null` if, after filtering, there is nothing consumer-relevant left to show (rare).
 
@@ -101,6 +103,7 @@ Coca-Cola Zero 1,5 L
 
 ~~**€3,49**~~ **€2,49** per fles
 
+- €1,66/L
 - Bespaar €1,00
 - Geldig t/m zondag
 ```
