@@ -67,16 +67,6 @@ REQUEST_TIMEOUT = 300  # 5 minutes per Gemini call
 
 R2_PUBLIC_BASE_URL = os.environ.get("R2_PUBLIC_BASE_URL", "")
 
-_GEOMETRY_SECTION = """
-
-## GEOMETRY
-Every item MUST have both `bbox` and `tile_bbox`, integer coords 0-1000 (0=left/top, 1000=right/bottom).
-- `bbox`: tight around the PHYSICAL PRODUCT only (bottle/box/can). Leave a ~2-3% margin; exclude price labels, badges, and text outside the packaging.
-- `tile_bbox`: the ENTIRE promo tile — product + price label + brand text + badge + background block. Must fully contain `bbox`.
-- Validation: x_min < x_max, y_min < y_max. Adjacent `tile_bbox`es may touch or lightly overlap in dense grids; never shrink inward past a price label.
-"""
-
-
 # ---------------------------------------------------------------------------
 # Pydantic schemas for Gemini structured output
 # ---------------------------------------------------------------------------
@@ -216,18 +206,21 @@ class _PromoItemSchema(PydanticBaseModel):
         description="Generic English product noun per the SEARCH ENRICHMENT rules.",
     )
 
-    # --- Geometry (mandatory on every item) ---
+    # --- Geometry (mandatory on every item; see GEOMETRY section of the system prompt) ---
     bbox: _BboxSchema = Field(
         description=(
-            "Bounding box around the physical product only (bottle, box, package, can). "
-            "Exclude text, price labels, and promo badges. Leave a ~2-3% margin around the product. "
-            "Integer coords 0-1000 (0=left/top, 1000=right/bottom)."
+            "Product-only bounding box: tight rectangle around the physical product packaging. "
+            "Integer coords 0-1000 (0=left/top, 1000=right/bottom). "
+            "See the GEOMETRY section of the system prompt for sizing and exclusion rules."
         ),
     )
     tile_bbox: _BboxSchema = Field(
         description=(
-            "Bounding box around the ENTIRE promo tile (product image + price label + brand text + badge + background). "
-            "Must fully contain bbox. Integer coords 0-1000."
+            "Whole-promo-block bounding box: rectangle around every visual element of this offer "
+            "(product photo, name, all price labels, mechanism/badge, descriptive text, coloured background). "
+            "Must fully contain `bbox`. Integer coords 0-1000 (0=left/top, 1000=right/bottom). "
+            "See the GEOMETRY section of the system prompt for the exact element list, outward-expansion "
+            "rule, and overlap policy."
         ),
     )
 
@@ -336,7 +329,6 @@ def extract_batch(
     cache_name: Optional[str] = None,
 ) -> dict:
     """Extract promo items from a single PDF batch via Gemini structured output."""
-    full_system_prompt = system_prompt + _GEOMETRY_SECTION
     for attempt in range(1, MAX_RETRIES + 1):
         delay = RETRY_BASE_DELAY * (2 ** (attempt - 1))
         label = f"[Batch {batch_num}]"
@@ -352,7 +344,7 @@ def extract_batch(
         try:
             config_kwargs: Dict[str, Any] = dict(
                 max_output_tokens=MAX_OUTPUT_TOKENS,
-                temperature=0.0,
+                temperature=0.2,
                 thinking_config=types.ThinkingConfig(thinking_level="medium"),
                 response_mime_type="application/json",
                 response_schema=_PromoFolderSchema,
@@ -361,7 +353,7 @@ def extract_batch(
             if cache_name:
                 config_kwargs["cached_content"] = cache_name
             else:
-                config_kwargs["system_instruction"] = full_system_prompt
+                config_kwargs["system_instruction"] = system_prompt
             response = client.models.generate_content(
                 model=GEMINI_MODEL,
                 contents=[
@@ -422,7 +414,6 @@ def extract_batch_images(
         images: List of (page_number, webp_bytes) tuples (1-indexed page numbers)
         batch_num: Batch sequence number for logging
     """
-    full_system_prompt = system_prompt + _GEOMETRY_SECTION
     for attempt in range(1, MAX_RETRIES + 1):
         delay = RETRY_BASE_DELAY * (2 ** (attempt - 1))
         label = f"[Batch {batch_num}]"
@@ -447,8 +438,9 @@ def extract_batch_images(
             )
         )
 
-        # Bump temperature on retries to avoid deterministic truncation
-        temp = 0.0 if attempt == 1 else 0.2
+        # Slightly higher entropy than greedy (0.0) to avoid deterministic truncation /
+        # skipping loops on dense pages; bumped further on retries.
+        temp = 0.2 if attempt == 1 else 0.4
 
         try:
             config_kwargs: Dict[str, Any] = dict(
@@ -462,7 +454,7 @@ def extract_batch_images(
             if cache_name:
                 config_kwargs["cached_content"] = cache_name
             else:
-                config_kwargs["system_instruction"] = full_system_prompt
+                config_kwargs["system_instruction"] = system_prompt
             response = client.models.generate_content(
                 model=GEMINI_MODEL,
                 contents=parts,
@@ -506,7 +498,7 @@ def extract_batch_images(
 
 
 def _create_extraction_cache(
-    client: genai.Client, full_system_prompt: str, label: str = ""
+    client: genai.Client, system_prompt: str, label: str = ""
 ) -> Optional[str]:
     """Cache the extraction system prompt for the duration of a pipeline run.
 
@@ -518,7 +510,7 @@ def _create_extraction_cache(
         cache = client.caches.create(
             model=GEMINI_MODEL,
             config=types.CreateCachedContentConfig(
-                system_instruction=full_system_prompt,
+                system_instruction=system_prompt,
                 ttl="3600s",
             ),
         )
@@ -553,7 +545,6 @@ def extract_promos_from_images(
         Dict with keys: validity_start, validity_end, items
     """
     system_prompt = build_system_prompt(config, CATEGORIES_PROMPT_LIST)
-    full_system_prompt = system_prompt + _GEOMETRY_SECTION
     client = genai.Client(
         api_key=GEMINI_API_KEY,
         http_options={"timeout": REQUEST_TIMEOUT * 1000},
@@ -572,7 +563,7 @@ def extract_promos_from_images(
     validity_start = None
     validity_end = None
 
-    cache_name = _create_extraction_cache(client, full_system_prompt, f"[{display_name}]")
+    cache_name = _create_extraction_cache(client, system_prompt, f"[{display_name}]")
     try:
         for i, batch in enumerate(batches):
             data = extract_batch_images(
@@ -615,7 +606,6 @@ def extract_promos_from_pdf(
                 f"--page {page_filter} requested but PDF has no batch starting on that page"
             )
     system_prompt = build_system_prompt(config, CATEGORIES_PROMPT_LIST)
-    full_system_prompt = system_prompt + _GEOMETRY_SECTION
     client = genai.Client(
         api_key=GEMINI_API_KEY,
         http_options={"timeout": REQUEST_TIMEOUT * 1000},  # milliseconds
@@ -629,7 +619,7 @@ def extract_promos_from_pdf(
     validity_start = None
     validity_end = None
 
-    cache_name = _create_extraction_cache(client, full_system_prompt, f"[{display_name}]")
+    cache_name = _create_extraction_cache(client, system_prompt, f"[{display_name}]")
     try:
         for i, (batch_pdf, start_page) in enumerate(batches):
             data = extract_batch(

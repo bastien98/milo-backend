@@ -11,6 +11,44 @@ from datetime import date
 from typing import Any, Dict
 
 
+_GEOMETRY_SECTION = """## GEOMETRY
+Every item MUST have both `bbox` and `tile_bbox`, integer coords 0-1000 (0=left/top, 1000=right/bottom).
+
+### `bbox` — the product only
+Tight around the PHYSICAL PRODUCT (bottle/box/can/package), with a ~2-3% margin. Exclude price labels, badges, and text outside the packaging.
+
+### `tile_bbox` — the WHOLE promo block
+WARNING: A `tile_bbox` that ends immediately at the bottom of the product packaging is almost always wrong. You MUST actively scan outward from the product, not just trace its silhouette.
+
+It MUST fully contain every visual element belonging to this offer:
+1. The product photo or illustration (and any secondary product photos that are part of the same offer).
+2. The product name / variant text.
+3. EVERY price label that belongs to the offer — original price, promo price, per-unit price, savings amount. If a price sits below, beside, or above the product photo, the tile_bbox extends to include it.
+4. The promo mechanism / badge ("1+1 GRATIS", "-25%", "€2 korting", "Prix Choc", "Bonus", coupon stamps) wherever it sits, including corner badges that stick out past the photo.
+5. The brand block, slogan, fine-print and any descriptive text printed inside the tile boundary that belongs to this offer.
+6. The tile's own background colour block / coloured frame, if it has one — extend the rectangle out to the visible edge of that coloured block.
+
+### Active spatial checklist (run this for EVERY tile before emitting tile_bbox)
+1. ANCHOR: locate the product image.
+2. SCAN DOWN: is there a price, per-unit price, or "Bespaar / Économisez" line below the product? Push `y_max` past the bottom of the lowest such line.
+3. SCAN UP / SIDES: is a "-25%" badge, "1+1" stamp, or coupon mark floating above or to the side of the product? Push `y_min`, `x_min`, or `x_max` outward to capture it. Corner stickers count.
+4. SCAN BACKGROUND: is there a coloured background box / frame enclosing the offer? Snap `tile_bbox` to the OUTER edges of that coloured block, not to the product silhouette.
+5. EXPAND: after the four scans, expand the rectangle outward by ~1-2% on every side so nothing skims the edge. Better too generous than clipping a price line or badge.
+
+### Overlap & containment
+- Adjacent `tile_bbox`es in a dense grid may touch or lightly overlap — that is acceptable. NEVER shrink a tile inward to avoid touching a neighbour if doing so would clip price text, a badge, or a description line.
+- `tile_bbox` must fully contain `bbox`.
+- Validation: x_min < x_max, y_min < y_max."""
+
+
+_EXTRACTION_PROCESS_SECTION = """## YOUR EXTRACTION PROCESS (THINKING PHASE)
+Before generating the JSON output, use your reasoning phase to map the page spatially so that ZERO items are skipped.
+1. Scan the page systematically in a grid: top row (left → right), middle row (left → right), bottom row (left → right). For multi-column or staggered layouts, scan column-by-column the same way.
+2. Count the total number of valid promotional tiles you see (a "valid tile" is defined in the EXCLUSIONS section: it must have its OWN price label or mechanism).
+3. Briefly list every valid tile by product name in your thought process to build an internal checklist.
+4. Only after this checklist exists, begin generating the JSON `items` array — and emit one entry for every name on your checklist, in order. Do NOT close the array until every checklist item has been emitted."""
+
+
 _CANONICAL_MECHANISM_TABLE = """## PROMO MECHANISMS
 Classify every promo into ONE canonical `mechanism_kind` and fill `mechanism_x` / `mechanism_y` with the printed numbers. DO NOT output localized labels — Python builds those.
 
@@ -167,6 +205,9 @@ def build_system_prompt(config: Dict[str, Any], categories_list: str) -> str:
         f"{display_name} supermarket folders (Belgium)."
     )
 
+    # --- Reasoning-phase scaffolding (force a spatial pre-scan before JSON emission) ---
+    sections.append(_EXTRACTION_PROCESS_SECTION)
+
     # --- Folder format & language ---
     sections.append(_build_language_section(display_name, language, bilingual_dedup))
 
@@ -205,7 +246,11 @@ def build_system_prompt(config: Dict[str, Any], categories_list: str) -> str:
     if extra_rules:
         sections.append("## ADDITIONAL RULES\n" + "\n".join(f"- {r}" for r in extra_rules))
 
-    # --- Validation checklist ---
+    # --- Geometry rules (kept right before the validation checklist) ---
+    sections.append(_GEOMETRY_SECTION)
+
+    # --- Validation checklist (LAST on purpose: recency bias — this is the model's
+    # final mental pass before it begins streaming the JSON `items` array) ---
     sections.append(_build_validation_checklist())
 
     return "\n\n".join(sections)
@@ -248,6 +293,9 @@ When a single tile advertises multiple brands or variants together (e.g. "Coca-C
 - `additional_brands` = the other brands listed on the tile (e.g. ["Fanta", "Sprite"]).
 - `product_name` describes the shared product category + size (e.g. "Frisdrank 1,5 L" or keep the prominent brand's name if it dominates).
 - Shared pricing, pack size, mechanism, and bbox apply to the item as a whole.
+
+### EXCLUSIONS (WHAT NOT TO EXTRACT)
+Do NOT extract lifestyle images, decorative background products, or broad thematic hero banners (e.g. a large picture of a BBQ scene with no specific price, a "Greek week" banner with stylised feta photos, a "Bonus Card" cover panel). To be a valid item, a product MUST be physically adjacent to its OWN specific, actionable price tag or promotional mechanism (e.g. "1+1 Gratis", "-25%", "€4,99"). If a product is just a generic illustration that belongs to a page-wide banner — not its own tile with its own price/mechanism — ignore it entirely. When a banner-illustrated product also appears further down the page as a real priced tile, only the priced tile is an item.
 
 ### For each promotional item extract:
 
