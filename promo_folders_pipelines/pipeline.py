@@ -56,7 +56,7 @@ PdfData = bytes
 # ---------------------------------------------------------------------------
 GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "")
 
-GEMINI_MODEL = "gemini-3-pro-preview"
+GEMINI_MODEL = "gemini-3-flash-preview"
 MAX_OUTPUT_TOKENS = 65536
 PAGES_PER_BATCH = 1  # Single page per Gemini call for maximum bbox accuracy
 MAX_BATCH_BYTES = 1_500_000  # 1.5 MB — split oversized batches into single pages
@@ -370,6 +370,7 @@ def extract_batch(
     start_page: int,
     system_prompt: str,
     display_name: str,
+    cache_name: Optional[str] = None,
 ) -> dict:
     """Extract promo items from a single PDF batch via Gemini structured output."""
     full_system_prompt = system_prompt + _GEOMETRY_SECTION
@@ -386,21 +387,25 @@ def extract_batch(
         start_time = time.time()
 
         try:
+            config_kwargs: Dict[str, Any] = dict(
+                max_output_tokens=MAX_OUTPUT_TOKENS,
+                temperature=0.0,
+                thinking_config=types.ThinkingConfig(thinking_level="medium"),
+                response_mime_type="application/json",
+                response_schema=_PromoFolderSchema,
+                media_resolution=types.MediaResolution.MEDIA_RESOLUTION_HIGH,
+            )
+            if cache_name:
+                config_kwargs["cached_content"] = cache_name
+            else:
+                config_kwargs["system_instruction"] = full_system_prompt
             response = client.models.generate_content(
                 model=GEMINI_MODEL,
                 contents=[
                     types.Part.from_bytes(data=batch_pdf, mime_type="application/pdf"),
                     f"Extract all promotional product offers from this {display_name} promo folder page.",
                 ],
-                config=types.GenerateContentConfig(
-                    system_instruction=full_system_prompt,
-                    max_output_tokens=MAX_OUTPUT_TOKENS,
-                    temperature=0.0,
-                    thinking_config=types.ThinkingConfig(thinking_level="medium"),
-                    response_mime_type="application/json",
-                    response_schema=_PromoFolderSchema,
-                    media_resolution=types.MediaResolution.MEDIA_RESOLUTION_HIGH,
-                ),
+                config=types.GenerateContentConfig(**config_kwargs),
             )
         except Exception as e:
             elapsed = time.time() - start_time
@@ -446,6 +451,7 @@ def extract_batch_images(
     batch_num: int,
     system_prompt: str,
     display_name: str,
+    cache_name: Optional[str] = None,
 ) -> dict:
     """Extract promo items from a batch of page images via Gemini structured output.
 
@@ -482,18 +488,22 @@ def extract_batch_images(
         temp = 0.0 if attempt == 1 else 0.2
 
         try:
+            config_kwargs: Dict[str, Any] = dict(
+                max_output_tokens=MAX_OUTPUT_TOKENS,
+                temperature=temp,
+                thinking_config=types.ThinkingConfig(thinking_level="medium"),
+                response_mime_type="application/json",
+                response_schema=_PromoFolderSchema,
+                media_resolution=types.MediaResolution.MEDIA_RESOLUTION_HIGH,
+            )
+            if cache_name:
+                config_kwargs["cached_content"] = cache_name
+            else:
+                config_kwargs["system_instruction"] = full_system_prompt
             response = client.models.generate_content(
                 model=GEMINI_MODEL,
                 contents=parts,
-                config=types.GenerateContentConfig(
-                    system_instruction=full_system_prompt,
-                    max_output_tokens=MAX_OUTPUT_TOKENS,
-                    temperature=temp,
-                    thinking_config=types.ThinkingConfig(thinking_level="medium"),
-                    response_mime_type="application/json",
-                    response_schema=_PromoFolderSchema,
-                    media_resolution=types.MediaResolution.MEDIA_RESOLUTION_HIGH,
-                ),
+                config=types.GenerateContentConfig(**config_kwargs),
             )
         except Exception as e:
             elapsed = time.time() - start_time
@@ -530,6 +540,40 @@ def extract_batch_images(
         return data
 
     return {"items": []}
+
+
+def _create_extraction_cache(
+    client: genai.Client, full_system_prompt: str, label: str = ""
+) -> Optional[str]:
+    """Cache the extraction system prompt for the duration of a pipeline run.
+
+    Returns the cache resource name, or None if creation failed (caller falls
+    back to inline `system_instruction`, which still works but pays full price
+    on every page).
+    """
+    try:
+        cache = client.caches.create(
+            model=GEMINI_MODEL,
+            config=types.CreateCachedContentConfig(
+                system_instruction=full_system_prompt,
+                ttl="3600s",
+            ),
+        )
+        logger.info(f"{label} Created extraction cache {cache.name} (TTL 1h)")
+        return cache.name
+    except Exception as e:
+        logger.warning(f"{label} Cache creation failed, falling back to inline prompt: {e}")
+        return None
+
+
+def _delete_cache(client: genai.Client, cache_name: Optional[str], label: str = "") -> None:
+    if not cache_name:
+        return
+    try:
+        client.caches.delete(name=cache_name)
+        logger.info(f"{label} Deleted cache {cache_name}")
+    except Exception as e:
+        logger.warning(f"{label} Cache deletion failed (will expire by TTL): {e}")
 
 
 def _iou(a: dict | None, b: dict | None) -> float:
@@ -618,6 +662,110 @@ def _is_suspect_original(bbox: dict | None, confidence: float | None) -> bool:
 IOU_REJECT_THRESHOLD = 0.3
 IOU_REJECT_THRESHOLD_SUSPECT = 0.15
 NEIGHBOR_OVERLAP_IOU_LIMIT = 0.2  # tile_bbox expansion is blocked if it overlaps neighbors more than this
+
+
+def _resolve_tile_overlaps(
+    items_on_page: list[dict],
+    label: str,
+    max_iters: int = 20,
+) -> None:
+    """Mutate `tile_bbox`es in place so no two items overlap.
+
+    For each overlapping pair we split the encroachment along the shorter overlap
+    axis, area-weighted: the larger box gives up proportionally more, so small
+    tiles are protected from being shrunk into nothing. Iterates until no
+    pairwise overlap remains or `max_iters` is reached. Inner `bbox`es are
+    re-clipped to the (possibly shrunken) tile to preserve containment.
+    """
+    tiles = [(i, item) for i, item in enumerate(items_on_page) if item.get("tile_bbox")]
+    if len(tiles) < 2:
+        return
+
+    initial_overlaps = 0
+    for ai in range(len(tiles)):
+        a = tiles[ai][1]["tile_bbox"]
+        for bi in range(ai + 1, len(tiles)):
+            b = tiles[bi][1]["tile_bbox"]
+            if min(a["x_max"], b["x_max"]) > max(a["x_min"], b["x_min"]) and \
+               min(a["y_max"], b["y_max"]) > max(a["y_min"], b["y_min"]):
+                initial_overlaps += 1
+
+    if initial_overlaps == 0:
+        return
+
+    converged_in = None
+    for iteration in range(1, max_iters + 1):
+        any_overlap = False
+        for ai in range(len(tiles)):
+            for bi in range(ai + 1, len(tiles)):
+                a = tiles[ai][1]["tile_bbox"]
+                b = tiles[bi][1]["tile_bbox"]
+                ix1 = max(a["x_min"], b["x_min"])
+                iy1 = max(a["y_min"], b["y_min"])
+                ix2 = min(a["x_max"], b["x_max"])
+                iy2 = min(a["y_max"], b["y_max"])
+                ow = ix2 - ix1
+                oh = iy2 - iy1
+                if ow <= 0 or oh <= 0:
+                    continue
+                any_overlap = True
+
+                area_a = (a["x_max"] - a["x_min"]) * (a["y_max"] - a["y_min"])
+                area_b = (b["x_max"] - b["x_min"]) * (b["y_max"] - b["y_min"])
+                total = area_a + area_b
+                if total <= 0:
+                    continue
+                share_a = area_a / total
+                share_b = area_b / total
+
+                if ow <= oh:
+                    delta_a = max(1, round(ow * share_a))
+                    delta_b = max(1, round(ow * share_b))
+                    a_center = a["x_min"] + a["x_max"]
+                    b_center = b["x_min"] + b["x_max"]
+                    if a_center < b_center:
+                        a["x_max"] = max(a["x_min"] + 1, a["x_max"] - delta_a)
+                        b["x_min"] = min(b["x_max"] - 1, b["x_min"] + delta_b)
+                    else:
+                        a["x_min"] = min(a["x_max"] - 1, a["x_min"] + delta_a)
+                        b["x_max"] = max(b["x_min"] + 1, b["x_max"] - delta_b)
+                else:
+                    delta_a = max(1, round(oh * share_a))
+                    delta_b = max(1, round(oh * share_b))
+                    a_center = a["y_min"] + a["y_max"]
+                    b_center = b["y_min"] + b["y_max"]
+                    if a_center < b_center:
+                        a["y_max"] = max(a["y_min"] + 1, a["y_max"] - delta_a)
+                        b["y_min"] = min(b["y_max"] - 1, b["y_min"] + delta_b)
+                    else:
+                        a["y_min"] = min(a["y_max"] - 1, a["y_min"] + delta_a)
+                        b["y_max"] = max(b["y_min"] + 1, b["y_max"] - delta_b)
+
+        if not any_overlap:
+            converged_in = iteration
+            break
+
+    if converged_in is not None:
+        logger.info(
+            f"{label} Resolved {initial_overlaps} tile_bbox overlap(s) "
+            f"in {converged_in} iteration(s)"
+        )
+    else:
+        logger.warning(
+            f"{label} Tile overlap resolver hit max_iters={max_iters}; "
+            f"started with {initial_overlaps} overlapping pair(s) — some may remain"
+        )
+
+    # Re-enforce containment: a shrunken tile may no longer enclose its product bbox.
+    for _, item in tiles:
+        tile = item["tile_bbox"]
+        bbox = item.get("bbox")
+        if bbox and not _contains(tile, bbox):
+            clipped = _clip_to(bbox, tile)
+            if clipped["x_max"] > clipped["x_min"] and clipped["y_max"] > clipped["y_min"]:
+                item["bbox"] = clipped
+            else:
+                item["bbox"] = dict(tile)
 
 
 def validate_page_bboxes(
@@ -837,6 +985,7 @@ def extract_promos_from_images(
         Dict with keys: validity_start, validity_end, items
     """
     system_prompt = build_system_prompt(config, CATEGORIES_PROMPT_LIST)
+    full_system_prompt = system_prompt + _GEOMETRY_SECTION
     client = genai.Client(
         api_key=GEMINI_API_KEY,
         http_options={"timeout": REQUEST_TIMEOUT * 1000},
@@ -855,48 +1004,55 @@ def extract_promos_from_images(
     validity_start = None
     validity_end = None
 
-    for i, batch in enumerate(batches):
-        data = extract_batch_images(client, batch, i + 1, system_prompt, display_name)
-        if data.get("validity_start") and not validity_start:
-            validity_start = data["validity_start"]
-            validity_end = data.get("validity_end")
-        all_items.extend(data.get("items", []))
+    cache_name = _create_extraction_cache(client, full_system_prompt, f"[{display_name}]")
+    try:
+        for i, batch in enumerate(batches):
+            data = extract_batch_images(
+                client, batch, i + 1, system_prompt, display_name, cache_name=cache_name
+            )
+            if data.get("validity_start") and not validity_start:
+                validity_start = data["validity_start"]
+                validity_end = data.get("validity_end")
+            all_items.extend(data.get("items", []))
 
-    elapsed = time.time() - start_time
-    logger.info(f"All batches complete in {elapsed:.1f}s — {len(all_items)} total items")
+        elapsed = time.time() - start_time
+        logger.info(f"All batches complete in {elapsed:.1f}s — {len(all_items)} total items")
 
-    # Validation pass: verify and correct bboxes per page
-    validate = config.get("validate_bboxes", True)
-    if validate and all_items:
-        logger.info("Starting bbox validation pass...")
-        validation_start = time.time()
+        # Validation pass: verify and correct bboxes per page
+        validate = config.get("validate_bboxes", True)
+        if validate and all_items:
+            logger.info("Starting bbox validation pass...")
+            validation_start = time.time()
 
-        # Build a lookup of page_number → image bytes
-        image_lookup = {num: img for num, img in page_images}
+            # Build a lookup of page_number → image bytes
+            image_lookup = {num: img for num, img in page_images}
 
-        # Group items by page_number
-        from collections import defaultdict
-        items_by_page: dict[int, list[tuple[int, dict]]] = defaultdict(list)
-        for idx, item in enumerate(all_items):
-            pn = item.get("page_number")
-            if pn is not None:
-                items_by_page[pn].append((idx, item))
+            # Group items by page_number
+            from collections import defaultdict
+            items_by_page: dict[int, list[tuple[int, dict]]] = defaultdict(list)
+            for idx, item in enumerate(all_items):
+                pn = item.get("page_number")
+                if pn is not None:
+                    items_by_page[pn].append((idx, item))
 
-        for pn, indexed_items in sorted(items_by_page.items()):
-            page_img = image_lookup.get(pn)
-            if not page_img:
-                logger.warning(f"No image found for page {pn} — skipping bbox validation for {len(indexed_items)} item(s)")
-                continue
+            for pn, indexed_items in sorted(items_by_page.items()):
+                page_img = image_lookup.get(pn)
+                if not page_img:
+                    logger.warning(f"No image found for page {pn} — skipping bbox validation for {len(indexed_items)} item(s)")
+                    continue
 
-            page_items = [item for _, item in indexed_items]
-            validated = validate_page_bboxes(client, page_img, pn, page_items, display_name)
+                page_items = [item for _, item in indexed_items]
+                validated = validate_page_bboxes(client, page_img, pn, page_items, display_name)
+                _resolve_tile_overlaps(validated, f"[{display_name} p{pn} resolve]")
 
-            # Write validated items back to all_items
-            for (orig_idx, _), new_item in zip(indexed_items, validated):
-                all_items[orig_idx] = new_item
+                # Write validated items back to all_items
+                for (orig_idx, _), new_item in zip(indexed_items, validated):
+                    all_items[orig_idx] = new_item
 
-        validation_elapsed = time.time() - validation_start
-        logger.info(f"Bbox validation complete in {validation_elapsed:.1f}s")
+            validation_elapsed = time.time() - validation_start
+            logger.info(f"Bbox validation complete in {validation_elapsed:.1f}s")
+    finally:
+        _delete_cache(client, cache_name, f"[{display_name}]")
 
     return {
         "validity_start": validity_start,
@@ -925,6 +1081,7 @@ def extract_promos_from_pdf(
                 f"--page {page_filter} requested but PDF has no batch starting on that page"
             )
     system_prompt = build_system_prompt(config, CATEGORIES_PROMPT_LIST)
+    full_system_prompt = system_prompt + _GEOMETRY_SECTION
     client = genai.Client(
         api_key=GEMINI_API_KEY,
         http_options={"timeout": REQUEST_TIMEOUT * 1000},  # milliseconds
@@ -938,15 +1095,21 @@ def extract_promos_from_pdf(
     validity_start = None
     validity_end = None
 
-    for i, (batch_pdf, start_page) in enumerate(batches):
-        data = extract_batch(client, batch_pdf, i + 1, start_page, system_prompt, display_name)
-        if data.get("validity_start") and not validity_start:
-            validity_start = data["validity_start"]
-            validity_end = data.get("validity_end")
-        all_items.extend(data.get("items", []))
+    cache_name = _create_extraction_cache(client, full_system_prompt, f"[{display_name}]")
+    try:
+        for i, (batch_pdf, start_page) in enumerate(batches):
+            data = extract_batch(
+                client, batch_pdf, i + 1, start_page, system_prompt, display_name, cache_name=cache_name
+            )
+            if data.get("validity_start") and not validity_start:
+                validity_start = data["validity_start"]
+                validity_end = data.get("validity_end")
+            all_items.extend(data.get("items", []))
 
-    elapsed = time.time() - start_time
-    logger.info(f"All batches complete in {elapsed:.1f}s — {len(all_items)} total items")
+        elapsed = time.time() - start_time
+        logger.info(f"All batches complete in {elapsed:.1f}s — {len(all_items)} total items")
+    finally:
+        _delete_cache(client, cache_name, f"[{display_name}]")
 
     return {
         "validity_start": validity_start,
