@@ -9,6 +9,67 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.models.promo_item import PromoItem
 
 
+def _interleave_by_store(
+    rows: list[dict[str, Any]], limit: int
+) -> list[dict[str, Any]]:
+    """Round-robin search results across retailers within score-tied buckets.
+
+    Without this, a retailer that uploaded more tiles for a given category in
+    a given week monopolizes the visible top of the search results — e.g. a
+    Colruyt-heavy week makes the first 5 chocolate hits all Colruyt. Most
+    multi-retailer deals UIs interleave so each retailer gets at least one
+    early slot, letting the user compare deals across stores at a glance.
+
+    Bucketing rules:
+      - Rows with the same `score` (within float epsilon) form a bucket.
+      - Within a bucket, group by `source_retailer`, preserving SQL order
+        (which is promo_depth DESC, validity_end ASC after the tiebreaker
+        change). Iterate retailers in the order their first row appeared
+        in the bucket — so the retailer holding the bucket's top item
+        leads the round.
+      - Round-robin: round 1 takes each retailer's #1, round 2 each #2,
+        etc. Stop when we've collected `limit` items.
+      - Across buckets we preserve score-DESC ordering, so a less-relevant
+        retailer never jumps a more-relevant one.
+    """
+    if not rows or limit <= 0:
+        return rows[:limit]
+
+    EPS = 1e-9
+
+    out: list[dict[str, Any]] = []
+    bucket: list[dict[str, Any]] = [rows[0]]
+    bucket_score = float(rows[0].get("score") or 0)
+
+    def flush(b: list[dict[str, Any]]) -> bool:
+        """Round-robin a single bucket into `out`. Returns True if `limit`
+        is reached and the caller should stop.
+        """
+        by_retailer: dict[str, list[dict[str, Any]]] = {}
+        for r in b:
+            by_retailer.setdefault(r.get("source_retailer") or "", []).append(r)
+        retailers = list(by_retailer.keys())
+        while any(by_retailer[r] for r in retailers):
+            for r in retailers:
+                if by_retailer[r]:
+                    out.append(by_retailer[r].pop(0))
+                    if len(out) >= limit:
+                        return True
+        return False
+
+    for row in rows[1:]:
+        s = float(row.get("score") or 0)
+        if abs(s - bucket_score) <= EPS:
+            bucket.append(row)
+        else:
+            if flush(bucket):
+                return out[:limit]
+            bucket = [row]
+            bucket_score = s
+    flush(bucket)
+    return out[:limit]
+
+
 class PromoItemRepository:
     def __init__(self, db: AsyncSession):
         self.db = db
@@ -149,9 +210,16 @@ class PromoItemRepository:
         """Search active promos using stacked match paths, ranked in one query.
 
         Paths:
-          1. Trigram similarity on display_name / display_brand / search_text /
-             generic_product_type (all unaccented + lowercased on both sides).
-          2. Prefix ILIKE bonus on display_name_lower.
+          1. Trigram similarity on display_name_norm / display_brand_norm /
+             search_text_norm / generic_product_type_norm. The _norm columns
+             are STORED generated columns (f_unaccent(lower(...))) — ingest
+             pays the normalization cost once at write, and every search
+             reads pre-normalized values. This lets the GIN trgm indexes
+             (which are built on the same expression) actually be used by
+             the planner; the previous form wrapping each column in
+             `unaccent(lower(...))` per-row defeated index matching.
+          2. Prefix ILIKE / word-anchored regex bonuses on the same
+             _norm columns.
           3. Category-synonym membership: items whose granular_category is in
              matched_categories get a baseline score so 'bier' surfaces
              Stella Artois etc. that the trigram path alone would miss.
@@ -166,38 +234,67 @@ class PromoItemRepository:
         # anchor is critical: a plain `%cola%` substring would also fire on
         # "rucola" and "chocolade", which is the source of the filler items
         # users were seeing at the bottom of the list.
+        #
+        # The query computes each similarity / regex predicate exactly once
+        # in the inner CTE and reuses those values in both the threshold
+        # filter and the GREATEST(...) score expression. Without this dedup
+        # the planner re-evaluates similarity() up to twice per column per
+        # row (once in WHERE, once in SELECT).
         sql = text(
             r"""
             WITH q AS (
                 SELECT
-                    unaccent(lower(CAST(:q AS text))) AS norm,
-                    unaccent(lower(CAST(:q_re AS text))) AS norm_re
+                    f_unaccent(lower(CAST(:q AS text))) AS norm,
+                    f_unaccent(lower(CAST(:q_re AS text))) AS norm_re
             ),
-            scored AS (
+            candidates AS (
                 SELECT
-                    p.*,
-                    GREATEST(
-                        similarity(unaccent(lower(p.display_name)), q.norm),
-                        similarity(unaccent(lower(coalesce(p.display_brand, ''))), q.norm) * 0.9,
-                        similarity(unaccent(lower(coalesce(p.search_text, ''))), q.norm) * 0.85,
-                        similarity(unaccent(lower(coalesce(p.generic_product_type, ''))), q.norm) * 0.8,
-                        CASE
-                            WHEN cardinality(CAST(:matched_cats AS text[])) > 0
-                                 AND p.granular_category = ANY(CAST(:matched_cats AS text[]))
-                            THEN 0.5
-                            ELSE 0
-                        END
-                    )
-                    -- Prefix and word-start substring bonuses (additive, stack
-                    -- with trigram and category scores so word-boundary matches
-                    -- outrank pure category-synonym hits).
-                    + CASE WHEN unaccent(lower(p.display_name)) ILIKE q.norm || '%' THEN 0.35 ELSE 0 END
-                    + CASE WHEN unaccent(lower(p.display_name)) ~* ('\m' || q.norm_re)
-                              AND NOT (unaccent(lower(p.display_name)) ILIKE q.norm || '%')
-                           THEN 0.25 ELSE 0 END
-                    + CASE WHEN unaccent(lower(coalesce(p.search_text, ''))) ~* ('\m' || q.norm_re) THEN 0.20 ELSE 0 END
-                    + CASE WHEN unaccent(lower(coalesce(p.display_brand, ''))) ~* ('\m' || q.norm_re) THEN 0.25 ELSE 0 END
-                    AS score
+                    -- Only the columns we actually return. Avoids dragging
+                    -- p.* (~60 cols, including big TEXT blobs) through the
+                    -- CTE materialization.
+                    p.id, p.display_name, p.display_mechanism, p.display_description,
+                    p.display_savings_label, p.display_unit_price,
+                    p.mechanism_kind, p.mechanism_x, p.mechanism_y, p.promo_campaign,
+                    p.unit_price_value, p.unit_price_unit, p.unit_price_quality,
+                    p.pack_size_value, p.pack_size_unit, p.pack_count,
+                    p.normalized_brand, p.display_brand, p.primary_brand, p.additional_brands,
+                    p.original_price, p.promo_price, p.stated_savings, p.savings_amount,
+                    p.min_purchase_qty, p.promo_depth,
+                    p.granular_category, p.category, p.source_retailer,
+                    p.page_number, p.promo_folder_url, p.validity_start, p.validity_end,
+                    p.thumbnail_url, p.image_url, p.hero_url, p.promo_text_markdown,
+                    p.is_coupon, p.coupon_type, p.coupon_barcode_value, p.coupon_barcode_format,
+                    p.coupon_value, p.coupon_min_purchase, p.coupon_validity_end,
+                    p.barcode_bbox_x_min, p.barcode_bbox_y_min,
+                    p.barcode_bbox_x_max, p.barcode_bbox_y_max,
+                    -- Compute every similarity / regex / prefix predicate once.
+                    similarity(p.display_name_norm, q.norm)         AS sim_name,
+                    similarity(p.display_brand_norm, q.norm)        AS sim_brand,
+                    similarity(p.search_text_norm, q.norm)          AS sim_text,
+                    similarity(p.generic_product_type_norm, q.norm) AS sim_type,
+                    (p.display_name_norm LIKE q.norm || '%')        AS prefix_hit,
+                    (p.display_name_norm ~ ('\m' || q.norm_re))     AS name_word_hit,
+                    (p.search_text_norm ~ ('\m' || q.norm_re))      AS text_word_hit,
+                    (p.display_brand_norm ~ ('\m' || q.norm_re))    AS brand_word_hit,
+                    (p.generic_product_type_norm ~ ('\m' || q.norm_re)) AS type_word_hit,
+                    (cardinality(CAST(:matched_cats AS text[])) > 0
+                     AND p.granular_category = ANY(CAST(:matched_cats AS text[]))) AS cat_hit,
+                    -- Per-row quality signal in [0, 1]. Used to multiplicatively
+                    -- scale the category-floor below so category-synonym matches
+                    -- (e.g. "cote dor" → all chocolate items) don't all collapse
+                    -- to the same flat 0.5. Each component is bounded; weights
+                    -- sum to 1.0:
+                    --   discount depth  (40%): 50%+ off saturates the slot
+                    --   folder freshness (30%): linear decay over 14 days
+                    --   has hero image  (15%): richer rendering
+                    --   has any price    (15%): excludes "Prijs in winkel" tiles
+                    LEAST(1.0,
+                        0.40 * LEAST(coalesce(p.promo_depth, 0) / 50.0, 1.0)
+                      + 0.30 * GREATEST(0, 1.0 - (:today - p.validity_start) / 14.0)
+                      + 0.15 * CASE WHEN p.hero_url IS NOT NULL AND p.hero_url <> '' THEN 1 ELSE 0 END
+                      + 0.15 * CASE WHEN coalesce(p.promo_price, 0) > 0
+                                      OR coalesce(p.original_price, 0) > 0 THEN 1 ELSE 0 END
+                    ) AS quality
                 FROM promo_items p, q
                 WHERE p.validity_start <= :today
                   AND p.validity_end >= :today
@@ -207,19 +304,40 @@ class PromoItemRepository:
                      OR p.source_retailer = ANY(CAST(:stores AS text[]))
                   )
                   AND (
-                        similarity(unaccent(lower(p.display_name)), q.norm) > 0.20
-                     OR similarity(unaccent(lower(coalesce(p.display_brand, ''))), q.norm) > 0.50
-                     OR similarity(unaccent(lower(coalesce(p.search_text, ''))), q.norm) > 0.18
-                     OR similarity(unaccent(lower(coalesce(p.generic_product_type, ''))), q.norm) > 0.50
-                     OR unaccent(lower(p.display_name)) ~* ('\m' || q.norm_re)
-                     OR unaccent(lower(coalesce(p.search_text, ''))) ~* ('\m' || q.norm_re)
-                     OR unaccent(lower(coalesce(p.display_brand, ''))) ~* ('\m' || q.norm_re)
-                     OR unaccent(lower(coalesce(p.generic_product_type, ''))) ~* ('\m' || q.norm_re)
+                        similarity(p.display_name_norm, q.norm) > 0.20
+                     OR similarity(p.display_brand_norm, q.norm) > 0.50
+                     OR similarity(p.search_text_norm, q.norm) > 0.18
+                     OR similarity(p.generic_product_type_norm, q.norm) > 0.50
+                     OR p.display_name_norm ~ ('\m' || q.norm_re)
+                     OR p.search_text_norm ~ ('\m' || q.norm_re)
+                     OR p.display_brand_norm ~ ('\m' || q.norm_re)
+                     OR p.generic_product_type_norm ~ ('\m' || q.norm_re)
                      OR (
                             cardinality(CAST(:matched_cats AS text[])) > 0
                             AND p.granular_category = ANY(CAST(:matched_cats AS text[]))
                         )
                   )
+            ),
+            scored AS (
+                SELECT
+                    c.*,
+                    GREATEST(
+                        sim_name,
+                        sim_brand * 0.9,
+                        sim_text * 0.85,
+                        sim_type * 0.8,
+                        -- Multiplicative floor: scales with per-row quality so
+                        -- two category-synonym hits in the same category no
+                        -- longer tie at exactly 0.5. Cap at 0.5 (when quality=1)
+                        -- so the category path can't outrank a real name match.
+                        CASE WHEN cat_hit THEN 0.5 * quality ELSE 0 END
+                    )
+                    + CASE WHEN prefix_hit THEN 0.35 ELSE 0 END
+                    + CASE WHEN name_word_hit AND NOT prefix_hit THEN 0.25 ELSE 0 END
+                    + CASE WHEN text_word_hit THEN 0.20 ELSE 0 END
+                    + CASE WHEN brand_word_hit THEN 0.25 ELSE 0 END
+                    AS score
+                FROM candidates c
             )
             SELECT
                 id, display_name, display_mechanism, display_description,
@@ -240,20 +358,26 @@ class PromoItemRepository:
                 score
             FROM scored
             WHERE score > 0.3
-            ORDER BY score DESC, validity_end ASC
+            ORDER BY score DESC, promo_depth DESC NULLS LAST, validity_end ASC
             LIMIT :lim
             """
         )
+        # Pull a wider candidate pool than the user asked for so the Python
+        # store-interleaving pass below has rows from multiple retailers to
+        # round-robin through within each score-tied bucket. Capped so a
+        # large `limit` doesn't balloon the per-row work.
+        fetch_limit = min(max(limit * 3, limit + 20), 80)
         params = {
             "q": query,
             "q_re": re.escape(query),
             "today": today,
             "matched_cats": list(matched_categories),
             "stores": list(store_filter) if store_filter else None,
-            "lim": limit,
+            "lim": fetch_limit,
         }
         result = await self.db.execute(sql, params)
-        return [dict(row) for row in result.mappings().all()]
+        rows = [dict(row) for row in result.mappings().all()]
+        return _interleave_by_store(rows, limit)
 
     async def popular_brands(
         self, today: date, limit: int = 10
