@@ -827,7 +827,7 @@ def validate_page_bboxes(
                     system_instruction=full_prompt,
                     max_output_tokens=MAX_OUTPUT_TOKENS,
                     temperature=0.0,
-                    thinking_config=types.ThinkingConfig(thinking_level="high"),
+                    thinking_config=types.ThinkingConfig(thinking_level="medium"),
                     response_mime_type="application/json",
                     response_schema=_BboxValidationResult,
                     media_resolution=types.MediaResolution.MEDIA_RESOLUTION_HIGH,
@@ -1019,7 +1019,7 @@ def extract_promos_from_images(
         logger.info(f"All batches complete in {elapsed:.1f}s — {len(all_items)} total items")
 
         # Validation pass: verify and correct bboxes per page
-        validate = config.get("validate_bboxes", False)
+        validate = config.get("validate_bboxes", True)
         if validate and all_items:
             logger.info("Starting bbox validation pass...")
             validation_start = time.time()
