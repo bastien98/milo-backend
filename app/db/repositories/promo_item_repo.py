@@ -143,7 +143,7 @@ class PromoItemRepository:
         query: str,
         today: date,
         matched_categories: Sequence[str] = (),
-        store_filter: Optional[str] = None,
+        store_filter: Optional[Sequence[str]] = None,
         limit: int = 20,
     ) -> list[dict[str, Any]]:
         """Search active promos using stacked match paths, ranked in one query.
@@ -201,7 +201,11 @@ class PromoItemRepository:
                 FROM promo_items p, q
                 WHERE p.validity_start <= :today
                   AND p.validity_end >= :today
-                  AND (CAST(:store AS text) IS NULL OR p.source_retailer = CAST(:store AS text))
+                  AND (
+                        CAST(:stores AS text[]) IS NULL
+                     OR cardinality(CAST(:stores AS text[])) = 0
+                     OR p.source_retailer = ANY(CAST(:stores AS text[]))
+                  )
                   AND (
                         similarity(unaccent(lower(p.display_name)), q.norm) > 0.20
                      OR similarity(unaccent(lower(coalesce(p.display_brand, ''))), q.norm) > 0.50
@@ -245,7 +249,7 @@ class PromoItemRepository:
             "q_re": re.escape(query),
             "today": today,
             "matched_cats": list(matched_categories),
-            "store": store_filter,
+            "stores": list(store_filter) if store_filter else None,
             "lim": limit,
         }
         result = await self.db.execute(sql, params)

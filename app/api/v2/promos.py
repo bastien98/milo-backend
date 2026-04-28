@@ -142,7 +142,14 @@ _POPULAR_BRANDS_TTL = 3600
 @router.get("/search", response_model=PromoSearchResponse)
 async def search_promos(
     q: str = Query(..., min_length=1, max_length=64, description="Search query (NL/FR/EN)"),
-    store: Optional[str] = Query(None, description="Optional store_id filter (e.g. 'colruyt')"),
+    store: Optional[list[str]] = Query(
+        None,
+        description=(
+            "Optional store_id filter. Repeat the param to scope the search to "
+            "multiple retailers, e.g. ?store=colruyt&store=delhaize. Omit to "
+            "include all retailers."
+        ),
+    ),
     limit: int = Query(20, ge=1, le=50),
     db: AsyncSession = Depends(get_db),
 ):
@@ -157,12 +164,14 @@ async def search_promos(
 
     matched_categories = get_granulars_for_search_term(query)
 
+    cleaned_stores = [s for s in (store or []) if s]
+
     repo = PromoItemRepository(db)
     rows = await repo.search_active(
         query=query,
         today=date.today(),
         matched_categories=matched_categories,
-        store_filter=store,
+        store_filter=cleaned_stores or None,
         limit=limit,
     )
 
