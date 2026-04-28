@@ -56,7 +56,7 @@ PdfData = bytes
 # ---------------------------------------------------------------------------
 GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "")
 
-GEMINI_MODEL = "gemini-3-flash-preview"
+GEMINI_MODEL = "gemini-3.1-flash-lite-preview"
 MAX_OUTPUT_TOKENS = 65536
 PAGES_PER_BATCH = 1  # Single page per Gemini call for maximum bbox accuracy
 MAX_BATCH_BYTES = 1_500_000  # 1.5 MB — split oversized batches into single pages
@@ -1019,7 +1019,7 @@ def extract_promos_from_images(
         logger.info(f"All batches complete in {elapsed:.1f}s — {len(all_items)} total items")
 
         # Validation pass: verify and correct bboxes per page
-        validate = config.get("validate_bboxes", True)
+        validate = config.get("validate_bboxes", False)
         if validate and all_items:
             logger.info("Starting bbox validation pass...")
             validation_start = time.time()

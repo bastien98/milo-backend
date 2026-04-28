@@ -249,6 +249,19 @@ When a single tile advertises multiple brands or variants together (e.g. "Coca-C
 - `product_name` describes the shared product category + size (e.g. "Frisdrank 1,5 L" or keep the prominent brand's name if it dominates).
 - Shared pricing, pack size, mechanism, and bbox apply to the item as a whole.
 
+### HERO / THEMATIC FEATURE PAGES (IMPORTANT)
+Some pages are not a uniform grid of priced product tiles. They are **thematic feature pages** built around a hero banner — a large styled artwork that occupies a big part of the page (often the top half or a full column) and carries:
+- A campaign title / theme line ("Griekse week", "Italiaanse weken", "BBQ-tijd", "Op=Op", "Meer dan 70 specialiteiten op Griekse wijze").
+- One or more **decorative product photos** rendered as part of the banner artwork (no individual price label, no individual tile border, no individual mechanism — they're styled as marketing imagery).
+- A validity / availability blurb for the campaign as a whole.
+
+Rules for these pages:
+1. **Decorative banner photos are NOT promo items.** A product photo embedded in a hero banner without its OWN price label, mechanism, and tile boundary is decoration. Do not emit it as an item, even if you recognize the product. Leave it alone.
+2. A real promo tile always has all three: an isolated tile area + a price label printed inside that tile + (usually) a mechanism or savings badge. If any of those is missing and the visual sits on top of a hero banner, treat it as decoration.
+3. **Never let a `tile_bbox` swallow the hero banner.** A `tile_bbox` describes ONE priced tile. If you find yourself wanting to draw a tile_bbox that spans most of a page column or the full banner area, you've misidentified a banner as a tile — drop it.
+4. The same product depicted in the banner often reappears further down the page as a real priced tile. In that case, only the priced tile is an item; the banner photo is still decoration.
+5. If the entire page is a hero/cover with no priced tiles at all (e.g. a campaign cover, a "next week" teaser, the folder's front cover), return zero items for that page. Do not invent tiles to fill the page.
+
 ### For each promotional item extract:
 
 1. **product_name** — clean Title Case label for the consumer app.
