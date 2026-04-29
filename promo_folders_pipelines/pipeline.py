@@ -277,30 +277,55 @@ class _PromoFolderSchema(PydanticBaseModel):
 
 class _BboxValidationItem(PydanticBaseModel):
     item_index: int = Field(description="0-based index of the item in the input list")
-    tile_bbox: _BboxSchema = Field(description="Corrected or confirmed tile bounding box (0-1000 coords)")
-    bbox: Optional[_BboxSchema] = Field(default=None, description="Corrected or confirmed product-only bbox (0-1000 coords)")
-    status: str = Field(description="'confirmed' if bbox was already correct, 'corrected' if adjusted, 'added' if was previously missing")
+    tile_bbox: Optional[_BboxSchema] = Field(
+        default=None,
+        description="Corrected or confirmed tile bounding box (0-1000 coords). null only when status is 'rejected'.",
+    )
+    bbox: Optional[_BboxSchema] = Field(
+        default=None,
+        description="Corrected or confirmed product-only bbox (0-1000 coords). null only when status is 'rejected'.",
+    )
+    status: Literal["confirmed", "corrected", "added", "rejected"] = Field(
+        description=(
+            "'confirmed' = original bbox was correct. "
+            "'corrected' = bbox(es) adjusted. "
+            "'added' = bbox was null and now located. "
+            "'rejected' = item is decorative / has no actionable price; downstream will drop it."
+        ),
+    )
 
 
 class _BboxValidationResult(PydanticBaseModel):
     items: list[_BboxValidationItem] = Field(description="Validated bounding boxes for each input item")
 
 
-_BBOX_VALIDATION_PROMPT = """You are verifying bounding box accuracy for promo items on a supermarket folder page.
+_BBOX_VALIDATION_PROMPT = """You are verifying bounding box accuracy for promo items on a supermarket folder page (Belgium).
 
-For EACH item listed below, verify that its tile_bbox correctly encompasses the ENTIRE promo tile area
-(product image + price label + brand text + promo badge + background). Also verify the bbox (product-only
-with a 2-3% margin around the physical product).
+## YOUR ATTENTION BUDGET
+Each item is tagged either [CONFIRM ONLY] or [REVIEW] by an upstream Python check. Spend your spatial reasoning on [REVIEW] items.
 
-Rules:
-- Items tagged [CONFIRM ONLY — do not modify] are already validated by a high-confidence extraction. Return them unchanged with status "confirmed". Do NOT relocate, shrink, or expand them.
-- Items tagged [REVIEW — check and correct if wrong] may have errors. Correct only if you are sure the current bbox is wrong.
-- If the bbox is correct, return it unchanged with status "confirmed"
-- If the bbox is wrong (too small, shifted, covers wrong area), correct it with status "corrected"
-- If the bbox is null/missing, locate the item on the page and provide one with status "added"
-- Coordinates are integers 0-1000 (0=left/top, 1000=right/bottom)
-- tile_bbox must encompass the full promo tile; bbox must tightly wrap the physical product only with a small margin
-- Return ALL items, even if confirmed unchanged
+- [CONFIRM ONLY] — structurally clean (bbox sits inside tile_bbox, no page-edge bleed, no high overlap with neighbours, healthy area). Return them with status "confirmed" and the SAME bboxes byte-for-byte. Do NOT relocate, shrink, or expand them.
+- [REVIEW] — failed at least one structural check (containment violated, edge-hugging, tiny/huge area, or overlapping a neighbour). One of these statuses applies:
+  - "confirmed" — after a careful look the original is actually fine; return same bboxes.
+  - "corrected" — return improved `tile_bbox` and/or `bbox`.
+  - "added"     — original `bbox` was null; locate and provide one.
+  - "rejected"  — the item is decorative (lifestyle photo, hero-banner illustration) or has NO actionable price tag printed adjacent to it. Return both `tile_bbox` and `bbox` as null with status "rejected"; the downstream pipeline will drop the item.
+
+## GEOMETRY REMINDERS
+- `bbox` = the physical product only, ~2-3% margin, no price labels/badges/text outside the packaging.
+- `tile_bbox` = the WHOLE promo block: product photo + name + EVERY price line (original / promo / per-unit / savings) + mechanism / badge (corner stickers count) + brand text + the coloured background frame if any.
+- `tile_bbox` MUST fully contain `bbox`. Adjacent tiles may touch or lightly overlap — never shrink inward to dodge a neighbour if doing so would clip a price line.
+- Coordinates are integers 0-1000 (0 = left/top, 1000 = right/bottom). Validation: x_min < x_max, y_min < y_max.
+
+## ACTIVE SPATIAL CHECKLIST (run for every [REVIEW] item before drawing the new tile_bbox)
+1. ANCHOR — locate the product image.
+2. SCAN DOWN — push `y_max` past the lowest price / per-unit / "Bespaar / Économisez" line below the product.
+3. SCAN UP / SIDES — push `y_min`, `x_min`, `x_max` outward to capture floating "-25%" badges, "1+1" stamps, corner stickers.
+4. SCAN BACKGROUND — if a coloured frame encloses the offer, snap `tile_bbox` to the OUTER edges of that block, not the product silhouette.
+5. EXPAND — after the scans, expand outward by ~1-2% so nothing skims the edge. Better too generous than clipping a price line.
+
+## OUTPUT
+Return ALL items in the input list (matching `item_index`), even confirmed ones. Do NOT skip, reorder, or invent items.
 
 Items to verify:
 """
@@ -650,9 +675,64 @@ def _is_suspect_original(bbox: dict | None, confidence: float | None) -> bool:
     return False
 
 
-IOU_REJECT_THRESHOLD = 0.3
-IOU_REJECT_THRESHOLD_SUSPECT = 0.15
-NEIGHBOR_OVERLAP_IOU_LIMIT = 0.2  # tile_bbox expansion is blocked if it overlaps neighbors more than this
+IOU_REJECT_THRESHOLD = 0.6           # [CONFIRM ONLY] items: only accept minor refinements
+IOU_REJECT_THRESHOLD_SUSPECT = 0.15  # [REVIEW] items: allow drastic relocations
+NEIGHBOR_OVERLAP_IOU_LIMIT = 0.2     # tile_bbox expansion is blocked if it overlaps neighbors more than this
+
+# Thresholds used by `_is_item_clean_for_confirm` to decide [CONFIRM ONLY] vs [REVIEW].
+TILE_AREA_MIN_PROMILLE = 20      # tile_bbox area must be >2% of page (20_000 / 1_000_000)
+BBOX_AREA_MIN_PROMILLE = 5       # product bbox area must be >0.5% of page
+EDGE_TOUCH_PIXEL = 2             # within 2/1000 of a page edge counts as "touching"
+CONFIRM_NEIGHBOR_IOU_LIMIT = 0.2 # tile_bbox cannot overlap a neighbour above this to qualify as CONFIRM
+
+
+def _is_item_clean_for_confirm(
+    tile_bbox: Optional[dict],
+    bbox: Optional[dict],
+    other_tiles: list[dict | None],
+) -> bool:
+    """Decide whether a pass-1 item is structurally clean enough to be tagged [CONFIRM ONLY].
+
+    True only if ALL of these hold:
+      1. Both `tile_bbox` and `bbox` exist and are non-degenerate.
+      2. `bbox` sits fully inside `tile_bbox` (containment).
+      3. Neither bbox touches a page edge (no bleed).
+      4. `tile_bbox` covers >2% of the page; `bbox` covers >0.5%.
+      5. `tile_bbox` does not overlap any other item's tile_bbox above CONFIRM_NEIGHBOR_IOU_LIMIT.
+    Otherwise the item is [REVIEW] and the validator should focus its budget here.
+    """
+    if not tile_bbox or not bbox:
+        return False
+
+    # Non-degenerate
+    tw = tile_bbox["x_max"] - tile_bbox["x_min"]
+    th = tile_bbox["y_max"] - tile_bbox["y_min"]
+    bw = bbox["x_max"] - bbox["x_min"]
+    bh = bbox["y_max"] - bbox["y_min"]
+    if tw <= 0 or th <= 0 or bw <= 0 or bh <= 0:
+        return False
+
+    # Containment
+    if not _contains(tile_bbox, bbox):
+        return False
+
+    # Edge bleed
+    eps = EDGE_TOUCH_PIXEL
+    for b in (tile_bbox, bbox):
+        if b["x_min"] <= eps or b["y_min"] <= eps or b["x_max"] >= 1000 - eps or b["y_max"] >= 1000 - eps:
+            return False
+
+    # Area health (areas in 0-1_000_000 space; promille of page → /1000)
+    if (tw * th) < TILE_AREA_MIN_PROMILLE * 1000:
+        return False
+    if (bw * bh) < BBOX_AREA_MIN_PROMILLE * 1000:
+        return False
+
+    # Neighbour overlap
+    if _max_iou_with_others(tile_bbox, other_tiles) > CONFIRM_NEIGHBOR_IOU_LIMIT:
+        return False
+
+    return True
 
 
 def _resolve_tile_overlaps(
@@ -785,17 +865,39 @@ def validate_page_bboxes(
 
     label = f"[{display_name} p{page_number} validate]"
 
-    # Build the item list for the validation prompt. Every item goes through review.
+    # Pre-tag every item as [CONFIRM ONLY] or [REVIEW] using a structural Python check.
+    # The prompt instructs the model to spend its attention budget on [REVIEW] items only.
+    is_review_by_idx: dict[int, bool] = {}
+    for i, item in enumerate(items_on_page):
+        others = [items_on_page[j].get("tile_bbox") for j in range(len(items_on_page)) if j != i]
+        is_clean = _is_item_clean_for_confirm(item.get("tile_bbox"), item.get("bbox"), others)
+        is_review_by_idx[i] = not is_clean
+
+    confirm_count = sum(1 for v in is_review_by_idx.values() if not v)
+    review_count = len(items_on_page) - confirm_count
+    logger.info(
+        f"{label} Pre-tagged: {confirm_count} [CONFIRM ONLY], {review_count} [REVIEW]"
+    )
+
     item_descriptions = []
     for i, item in enumerate(items_on_page):
         name = item.get("display_name") or item.get("product_name", "Unknown")
         tile_bbox = item.get("tile_bbox")
         bbox = item.get("bbox")
 
-        tile_str = f"[{tile_bbox['x_min']}, {tile_bbox['y_min']}, {tile_bbox['x_max']}, {tile_bbox['y_max']}]" if tile_bbox else "null (LOCATE THIS ITEM)"
-        bbox_str = f"[{bbox['x_min']}, {bbox['y_min']}, {bbox['x_max']}, {bbox['y_max']}]" if bbox else "null"
+        tile_str = (
+            f"[{tile_bbox['x_min']}, {tile_bbox['y_min']}, {tile_bbox['x_max']}, {tile_bbox['y_max']}]"
+            if tile_bbox else "null (LOCATE THIS ITEM)"
+        )
+        bbox_str = (
+            f"[{bbox['x_min']}, {bbox['y_min']}, {bbox['x_max']}, {bbox['y_max']}]"
+            if bbox else "null"
+        )
 
-        item_descriptions.append(f"{i}. [REVIEW — check and correct if wrong] \"{name}\" — tile_bbox: {tile_str}, bbox: {bbox_str}")
+        tag = "[REVIEW]" if is_review_by_idx[i] else "[CONFIRM ONLY]"
+        item_descriptions.append(
+            f"{i}. {tag} \"{name}\" — tile_bbox: {tile_str}, bbox: {bbox_str}"
+        )
 
     items_text = "\n".join(item_descriptions)
     full_prompt = _BBOX_VALIDATION_PROMPT + items_text
@@ -817,7 +919,7 @@ def validate_page_bboxes(
                     system_instruction=full_prompt,
                     max_output_tokens=MAX_OUTPUT_TOKENS,
                     temperature=0.0,
-                    thinking_config=types.ThinkingConfig(thinking_level="medium"),
+                    thinking_config=types.ThinkingConfig(thinking_level="high"),
                     response_mime_type="application/json",
                     response_schema=_BboxValidationResult,
                     media_resolution=types.MediaResolution.MEDIA_RESOLUTION_HIGH,
@@ -853,7 +955,7 @@ def validate_page_bboxes(
 
         # Apply validated bboxes back to items
         validated_items = data.get("items", [])
-        confirmed = corrected = added = 0
+        confirmed = corrected = added = rejected = 0
 
         for vi in validated_items:
             idx = vi.get("item_index")
@@ -867,31 +969,36 @@ def validate_page_bboxes(
                 corrected += 1
             elif status == "added":
                 added += 1
+            elif status == "rejected":
+                rejected += 1
+                # Validator says this isn't a real promo tile — mark for downstream drop.
+                items_on_page[idx]["_validator_rejected"] = True
+                items_on_page[idx]["bbox"] = None
+                items_on_page[idx]["tile_bbox"] = None
+                logger.info(
+                    f"{label} Validator rejected item {idx} "
+                    f"('{items_on_page[idx].get('display_name', '?')}') as decorative / non-actionable"
+                )
+                continue  # skip the IoU + containment guards for rejected items
 
             orig_tile = items_on_page[idx].get("tile_bbox")
             orig_bbox = items_on_page[idx].get("bbox")
 
-            # Asymmetric IoU threshold: looser bar when the original bbox looks geometrically suspect.
-            tile_threshold = (
-                IOU_REJECT_THRESHOLD_SUSPECT
-                if _is_suspect_original(orig_tile, None)
-                else IOU_REJECT_THRESHOLD
-            )
-            bbox_threshold = (
-                IOU_REJECT_THRESHOLD_SUSPECT
-                if _is_suspect_original(orig_bbox, None)
-                else IOU_REJECT_THRESHOLD
-            )
+            # Asymmetric IoU threshold per Python pre-tag:
+            #   [CONFIRM ONLY]  → strict (0.6) — only accept minor refinements
+            #   [REVIEW]        → loose (0.15) — allow drastic relocations
+            is_review = is_review_by_idx.get(idx, True)
+            iou_threshold = IOU_REJECT_THRESHOLD_SUSPECT if is_review else IOU_REJECT_THRESHOLD
 
             # tile_bbox: reject drastic corrections, keep original on null regression
             new_tile = vi.get("tile_bbox")
             if new_tile and isinstance(new_tile, dict):
                 if orig_tile:
                     iou = _iou(orig_tile, new_tile)
-                    if iou < tile_threshold:
+                    if iou < iou_threshold:
                         logger.warning(
-                            f"{label} Rejecting tile_bbox correction for item {idx}: IoU={iou:.2f} "
-                            f"below threshold {tile_threshold}"
+                            f"{label} Rejecting tile_bbox correction for item {idx} "
+                            f"({'REVIEW' if is_review else 'CONFIRM'}): IoU={iou:.2f} below {iou_threshold}"
                         )
                     else:
                         items_on_page[idx]["tile_bbox"] = new_tile
@@ -904,10 +1011,10 @@ def validate_page_bboxes(
             if new_bbox and isinstance(new_bbox, dict):
                 if orig_bbox:
                     iou = _iou(orig_bbox, new_bbox)
-                    if iou < bbox_threshold:
+                    if iou < iou_threshold:
                         logger.warning(
-                            f"{label} Rejecting bbox correction for item {idx}: IoU={iou:.2f} "
-                            f"below threshold {bbox_threshold}"
+                            f"{label} Rejecting bbox correction for item {idx} "
+                            f"({'REVIEW' if is_review else 'CONFIRM'}): IoU={iou:.2f} below {iou_threshold}"
                         )
                     else:
                         items_on_page[idx]["bbox"] = new_bbox
@@ -954,7 +1061,8 @@ def validate_page_bboxes(
                         items_on_page[idx]["bbox"] = dict(final_tile)
 
         logger.info(
-            f"{label} Validation: {confirmed} confirmed, {corrected} corrected, {added} added"
+            f"{label} Validation: {confirmed} confirmed, {corrected} corrected, "
+            f"{added} added, {rejected} rejected"
         )
         return items_on_page
 
@@ -1006,9 +1114,9 @@ def extract_promos_from_images(
         elapsed = time.time() - start_time
         logger.info(f"All batches complete in {elapsed:.1f}s — {len(all_items)} total items")
 
-        # Optional second-pass bbox validation. Disabled by default; opt in per
-        # store via `validate_bboxes: true` in the YAML config.
-        if config.get("validate_bboxes", False) and all_items:
+        # Second-pass bbox validation. Enabled by default; per store, set
+        # `validate_bboxes: false` in the YAML config to skip it.
+        if config.get("validate_bboxes", True) and all_items:
             logger.info("Starting bbox validation pass...")
             validation_start = time.time()
 
@@ -1032,10 +1140,23 @@ def extract_promos_from_images(
 
                 page_items = [item for _, item in indexed_items]
                 validated = validate_page_bboxes(client, page_img, pn, page_items, display_name)
-                _resolve_tile_overlaps(validated, f"[{display_name} p{pn} resolve]")
+
+                # Cluster-resolve only the items the validator kept; rejected items
+                # have null tile_bboxes and shouldn't be in the overlap calculation.
+                kept = [it for it in validated if not it.get("_validator_rejected")]
+                _resolve_tile_overlaps(kept, f"[{display_name} p{pn} resolve]")
 
                 for (orig_idx, _), new_item in zip(indexed_items, validated):
                     all_items[orig_idx] = new_item
+
+            # Drop validator-rejected items (decorative / non-actionable tiles).
+            rejected_count = sum(1 for it in all_items if it.get("_validator_rejected"))
+            if rejected_count:
+                all_items[:] = [it for it in all_items if not it.get("_validator_rejected")]
+                logger.info(
+                    f"Validator dropped {rejected_count} item(s) flagged as "
+                    f"decorative / non-actionable — {len(all_items)} items remain"
+                )
 
             validation_elapsed = time.time() - validation_start
             logger.info(f"Bbox validation complete in {validation_elapsed:.1f}s")
