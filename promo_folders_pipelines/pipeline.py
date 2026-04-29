@@ -57,6 +57,7 @@ PdfData = bytes
 GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "")
 
 GEMINI_MODEL = "gemini-3.1-flash-lite-preview"
+GEMINI_VALIDATION_MODEL = "gemini-3-pro-preview"  # second-pass bbox validator (stronger reasoning)
 MAX_OUTPUT_TOKENS = 65536
 PAGES_PER_BATCH = 1  # Single page per Gemini call for maximum bbox accuracy
 MAX_BATCH_BYTES = 1_500_000  # 1.5 MB — split oversized batches into single pages
@@ -406,7 +407,7 @@ def extract_batch(
             config_kwargs: Dict[str, Any] = dict(
                 max_output_tokens=MAX_OUTPUT_TOKENS,
                 temperature=0.2,
-                thinking_config=types.ThinkingConfig(thinking_level="high"),
+                thinking_config=types.ThinkingConfig(thinking_level="medium"),
                 response_mime_type="application/json",
                 response_schema=_PromoFolderSchema,
                 media_resolution=types.MediaResolution.MEDIA_RESOLUTION_HIGH,
@@ -507,7 +508,7 @@ def extract_batch_images(
             config_kwargs: Dict[str, Any] = dict(
                 max_output_tokens=MAX_OUTPUT_TOKENS,
                 temperature=temp,
-                thinking_config=types.ThinkingConfig(thinking_level="high"),
+                thinking_config=types.ThinkingConfig(thinking_level="medium"),
                 response_mime_type="application/json",
                 response_schema=_PromoFolderSchema,
                 media_resolution=types.MediaResolution.MEDIA_RESOLUTION_HIGH,
@@ -910,7 +911,7 @@ def validate_page_bboxes(
 
         try:
             response = client.models.generate_content(
-                model=GEMINI_MODEL,
+                model=GEMINI_VALIDATION_MODEL,
                 contents=[
                     types.Part.from_bytes(data=page_image, mime_type="image/webp"),
                     types.Part.from_text(text="Verify and correct the bounding boxes for the items listed in the system prompt."),
@@ -919,7 +920,7 @@ def validate_page_bboxes(
                     system_instruction=full_prompt,
                     max_output_tokens=MAX_OUTPUT_TOKENS,
                     temperature=0.0,
-                    thinking_config=types.ThinkingConfig(thinking_level="high"),
+                    thinking_config=types.ThinkingConfig(thinking_level="medium"),
                     response_mime_type="application/json",
                     response_schema=_BboxValidationResult,
                     media_resolution=types.MediaResolution.MEDIA_RESOLUTION_HIGH,
