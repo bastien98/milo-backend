@@ -15,7 +15,7 @@ class BrandCashbackDealResponse(BaseModel):
     product_name: str
     description: str
     cashback_amount: float        # euros (cents / 100)
-    image_system_name: str        # SF Symbol name
+    image_url: Optional[str] = None  # presigned S3 URL, regenerated per response
     valid_from: datetime
     valid_until: datetime
     eligible_stores: List[str]
@@ -63,7 +63,6 @@ class AdminCampaignCreate(BaseModel):
     product_name: str
     description: str = ""
     cashback_amount_cents: int    # integer cents, e.g. 50 = €0.50
-    image_system_name: str = "tag.fill"
     valid_from: datetime
     valid_until: datetime
     eligible_stores: List[str] = []
@@ -75,7 +74,6 @@ class AdminCampaignUpdate(BaseModel):
     product_name: Optional[str] = None
     description: Optional[str] = None
     cashback_amount_cents: Optional[int] = None
-    image_system_name: Optional[str] = None
     valid_from: Optional[datetime] = None
     valid_until: Optional[datetime] = None
     eligible_stores: Optional[List[str]] = None
@@ -89,7 +87,7 @@ class AdminCampaignResponse(BaseModel):
     product_name: str
     description: str
     cashback_amount_cents: int
-    image_system_name: str
+    image_url: Optional[str] = None
     valid_from: datetime
     valid_until: datetime
     eligible_stores: List[str]

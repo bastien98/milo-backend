@@ -9,10 +9,20 @@ from app.db.repositories.brand_cashback_repo import BrandCashbackRepository
 from app.db.repositories.cashback_repo import CashbackRepository
 from app.models.brand_cashback import BrandCashbackCampaign, UserBrandCashbackClaim
 from app.schemas.brand_cashback import BrandCashbackDealResponse
+from app.services.storage_service import StorageService
 
 logger = logging.getLogger(__name__)
 
 FUZZY_THRESHOLD = 0.85
+
+storage = StorageService()
+
+
+def image_url_for_key(key: Optional[str]) -> Optional[str]:
+    """Generate a fresh presigned URL for a campaign image S3 key, or None."""
+    if not key:
+        return None
+    return storage.generate_presigned_url(key)
 
 
 def _is_line_item_match(receipt_item: str, known_item: str) -> bool:
@@ -33,7 +43,7 @@ def _campaign_to_deal_response(
         product_name=campaign.product_name,
         description=campaign.description,
         cashback_amount=campaign.cashback_amount_cents / 100,
-        image_system_name=campaign.image_system_name,
+        image_url=image_url_for_key(campaign.image_s3_key),
         valid_from=campaign.valid_from,
         valid_until=campaign.valid_until,
         eligible_stores=campaign.eligible_stores or [],

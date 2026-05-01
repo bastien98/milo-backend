@@ -22,6 +22,7 @@ class StorageService:
     """Thin wrapper around boto3 S3 client for receipt image storage."""
 
     KEY_PREFIX = "milo/receipts"
+    CAMPAIGN_KEY_PREFIX = "milo/campaigns"
 
     def __init__(self):
         self.enabled = bool(settings.AWS_S3_BUCKET_NAME)
@@ -73,6 +74,36 @@ class StorageService:
             return key
         except ClientError as e:
             logger.error(f"Failed to upload to storage: {key}, error={e}")
+            raise
+
+    def upload_campaign_image(
+        self, campaign_id: str, content: bytes, ext: str
+    ) -> Optional[str]:
+        """Upload a brand cashback campaign image to S3.
+
+        Returns the storage key on success, None if storage is disabled.
+        """
+        if not self.enabled:
+            return None
+
+        key = f"{self.CAMPAIGN_KEY_PREFIX}/{campaign_id}.{ext}"
+        content_type_map = {
+            "jpg": "image/jpeg",
+            "jpeg": "image/jpeg",
+            "png": "image/png",
+        }
+
+        try:
+            self.client.put_object(
+                Bucket=settings.AWS_S3_BUCKET_NAME,
+                Key=key,
+                Body=content,
+                ContentType=content_type_map.get(ext, "application/octet-stream"),
+            )
+            logger.info(f"Uploaded campaign image: {key} ({len(content)} bytes)")
+            return key
+        except ClientError as e:
+            logger.error(f"Failed to upload campaign image: {key}, error={e}")
             raise
 
     def generate_presigned_url(self, key: str, expires: int = 3600) -> Optional[str]:

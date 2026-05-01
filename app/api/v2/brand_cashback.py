@@ -1,6 +1,6 @@
 from datetime import datetime, timezone
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, File, HTTPException, UploadFile, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_db, get_current_db_user
@@ -17,9 +17,16 @@ from app.schemas.brand_cashback import (
     BrandCashbackClaimResponse,
     BrandCashbackDealResponse,
 )
-from app.services.brand_cashback_service import BrandCashbackService
+from app.services.brand_cashback_service import (
+    BrandCashbackService,
+    image_url_for_key,
+    storage,
+)
 
 router = APIRouter()
+
+ALLOWED_IMAGE_CONTENT_TYPES = {"image/jpeg", "image/png"}
+MAX_IMAGE_BYTES = 2 * 1024 * 1024  # 2 MB
 
 
 def _require_admin(current_user: User) -> None:
@@ -105,7 +112,7 @@ async def get_my_claims(
                     product_name=campaign.product_name,
                     description=campaign.description,
                     cashback_amount=campaign.cashback_amount_cents / 100,
-                    image_system_name=campaign.image_system_name,
+                    image_url=image_url_for_key(campaign.image_s3_key),
                     valid_from=campaign.valid_from,
                     valid_until=campaign.valid_until,
                     eligible_stores=campaign.eligible_stores or [],
@@ -122,7 +129,7 @@ async def get_my_claims(
                     product_name=campaign.product_name,
                     description=campaign.description,
                     cashback_amount=campaign.cashback_amount_cents / 100,
-                    image_system_name=campaign.image_system_name,
+                    image_url=image_url_for_key(campaign.image_s3_key),
                     valid_from=campaign.valid_from,
                     valid_until=campaign.valid_until,
                     eligible_stores=campaign.eligible_stores or [],
@@ -157,7 +164,7 @@ async def admin_list_campaigns(
                 product_name=c.product_name,
                 description=c.description,
                 cashback_amount_cents=c.cashback_amount_cents,
-                image_system_name=c.image_system_name,
+                image_url=image_url_for_key(c.image_s3_key),
                 valid_from=c.valid_from,
                 valid_until=c.valid_until,
                 eligible_stores=c.eligible_stores or [],
@@ -187,7 +194,7 @@ async def admin_create_campaign(
         product_name=campaign.product_name,
         description=campaign.description,
         cashback_amount_cents=campaign.cashback_amount_cents,
-        image_system_name=campaign.image_system_name,
+        image_url=image_url_for_key(campaign.image_s3_key),
         valid_from=campaign.valid_from,
         valid_until=campaign.valid_until,
         eligible_stores=campaign.eligible_stores or [],
@@ -220,7 +227,7 @@ async def admin_update_campaign(
         product_name=campaign.product_name,
         description=campaign.description,
         cashback_amount_cents=campaign.cashback_amount_cents,
-        image_system_name=campaign.image_system_name,
+        image_url=image_url_for_key(campaign.image_s3_key),
         valid_from=campaign.valid_from,
         valid_until=campaign.valid_until,
         eligible_stores=campaign.eligible_stores or [],
@@ -246,6 +253,60 @@ async def admin_delete_campaign(
         raise HTTPException(status_code=404, detail="Campaign not found")
     # Soft-delete: deactivate instead of hard-delete to preserve earned claim history.
     await repo.update_campaign(campaign_id, {"is_active": False})
+
+
+@router.post("/admin/campaigns/{campaign_id}/image", response_model=AdminCampaignResponse)
+async def admin_upload_campaign_image(
+    campaign_id: str,
+    file: UploadFile = File(...),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_db_user),
+):
+    _require_admin(current_user)
+    repo = BrandCashbackRepository(db)
+    campaign = await repo.get_campaign_by_id(campaign_id)
+    if not campaign:
+        raise HTTPException(status_code=404, detail="Campaign not found")
+
+    content_type = file.content_type or "application/octet-stream"
+    if content_type not in ALLOWED_IMAGE_CONTENT_TYPES:
+        raise HTTPException(
+            status_code=status.HTTP_415_UNSUPPORTED_MEDIA_TYPE,
+            detail=f"Only JPEG and PNG images are supported, got: {content_type}",
+        )
+
+    content = await file.read()
+    if len(content) > MAX_IMAGE_BYTES:
+        raise HTTPException(
+            status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+            detail=f"Image exceeds {MAX_IMAGE_BYTES // (1024 * 1024)}MB limit",
+        )
+
+    if campaign.image_s3_key:
+        storage.delete(campaign.image_s3_key)
+
+    ext = "png" if content_type == "image/png" else "jpg"
+    new_key = storage.upload_campaign_image(campaign_id, content, ext)
+    campaign = await repo.update_campaign(campaign_id, {"image_s3_key": new_key})
+    claims_count, earned_count = await repo.get_campaign_claim_counts(campaign_id)
+
+    return AdminCampaignResponse(
+        id=campaign.id,
+        brand_name=campaign.brand_name,
+        product_name=campaign.product_name,
+        description=campaign.description,
+        cashback_amount_cents=campaign.cashback_amount_cents,
+        image_url=image_url_for_key(campaign.image_s3_key),
+        valid_from=campaign.valid_from,
+        valid_until=campaign.valid_until,
+        eligible_stores=campaign.eligible_stores or [],
+        requires_store=campaign.requires_store,
+        is_active=campaign.is_active,
+        created_at=campaign.created_at,
+        updated_at=campaign.updated_at,
+        claims_count=claims_count,
+        earned_count=earned_count,
+    )
 
 
 @router.post(

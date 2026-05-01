@@ -140,20 +140,11 @@
         </div>
 
         <div>
-          <label class="block text-xs font-semibold uppercase tracking-wider text-zinc-400 mb-1.5">SF Symbol</label>
-          <select id="c-symbol"
-            class="w-full bg-zinc-900 border border-zinc-800 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-green-500">
-            <option value="tag.fill">🏷️ tag.fill (default)</option>
-            <option value="leaf.fill">🌿 leaf.fill (plant-based)</option>
-            <option value="cup.and.saucer.fill">☕ cup.and.saucer.fill (coffee/tea)</option>
-            <option value="fork.knife">🍴 fork.knife (meals)</option>
-            <option value="birthday.cake.fill">🎂 birthday.cake.fill (sweets/baked)</option>
-            <option value="waterbottle.fill">💧 waterbottle.fill (drinks)</option>
-            <option value="carrot.fill">🥕 carrot.fill (vegetables)</option>
-            <option value="fish.fill">🐟 fish.fill (seafood)</option>
-            <option value="takeoutbag.and.cup.and.straw.fill">🥤 takeout (snacks)</option>
-            <option value="wineglass.fill">🍷 wineglass.fill (alcohol)</option>
-          </select>
+          <label class="block text-xs font-semibold uppercase tracking-wider text-zinc-400 mb-1.5">Product Image</label>
+          <input id="c-image" type="file" accept="image/jpeg,image/png"
+            class="w-full text-sm text-zinc-300 file:mr-3 file:py-2 file:px-3 file:rounded-md file:border-0 file:text-xs file:font-semibold file:bg-zinc-800 file:text-zinc-200 hover:file:bg-zinc-700 cursor-pointer">
+          <img id="c-image-preview" class="hidden mt-3 max-h-32 rounded-md border border-zinc-800" alt="Preview">
+          <p class="text-xs text-zinc-500 mt-1.5">JPEG or PNG, max 2 MB. Optional.</p>
         </div>
 
         <div class="grid grid-cols-2 gap-3">
@@ -286,14 +277,13 @@
       const user = auth.currentUser;
       if (!user) throw new Error("Not authenticated");
       const token = await user.getIdToken();
-      const res = await fetch(`${API_BASE}${path}`, {
-        ...options,
-        headers: {
-          "Authorization": `Bearer ${token}`,
-          "Content-Type": "application/json",
-          ...(options.headers || {})
-        }
-      });
+      const isFormData = options.body instanceof FormData;
+      const headers = {
+        "Authorization": `Bearer ${token}`,
+        ...(isFormData ? {} : { "Content-Type": "application/json" }),
+        ...(options.headers || {})
+      };
+      const res = await fetch(`${API_BASE}${path}`, { ...options, headers });
       if (!res.ok) {
         const text = await res.text();
         let msg;
@@ -397,7 +387,12 @@
         ? c.eligible_stores.join(" · ")
         : "All stores";
 
+      const thumb = c.image_url
+        ? `<img src="${c.image_url}" alt="" class="w-14 h-14 rounded-lg object-cover border border-zinc-800 flex-shrink-0">`
+        : `<div class="w-14 h-14 rounded-lg bg-zinc-900 border border-zinc-800 flex-shrink-0"></div>`;
+
       wrapper.innerHTML = `
+        ${thumb}
         <div class="flex-1 min-w-0">
           <div class="flex items-center gap-2 mb-1">
             ${activeDot}
@@ -476,6 +471,18 @@
 
     document.getElementById("new-campaign-btn").addEventListener("click", openCampaignModal);
 
+    document.getElementById("c-image").addEventListener("change", (e) => {
+      const file = e.target.files[0];
+      const preview = document.getElementById("c-image-preview");
+      if (!file) {
+        preview.classList.add("hidden");
+        preview.removeAttribute("src");
+        return;
+      }
+      preview.src = URL.createObjectURL(file);
+      preview.classList.remove("hidden");
+    });
+
     document.querySelectorAll(".modal-close").forEach(btn => {
       btn.addEventListener("click", (e) => {
         e.target.closest(".fixed").classList.add("hidden");
@@ -498,7 +505,6 @@
         product_name: document.getElementById("c-product").value.trim(),
         description: document.getElementById("c-description").value.trim(),
         cashback_amount_cents: Math.round(parseFloat(document.getElementById("c-cashback").value) * 100),
-        image_system_name: document.getElementById("c-symbol").value,
         valid_from: new Date(document.getElementById("c-from").value).toISOString(),
         valid_until: new Date(document.getElementById("c-until").value).toISOString(),
         eligible_stores: selectedStores,
@@ -513,11 +519,22 @@
         return;
       }
 
+      const imageFile = document.getElementById("c-image").files[0];
+
       try {
-        await apiFetch("/brand-cashback/admin/campaigns", {
+        const created = await apiFetch("/brand-cashback/admin/campaigns", {
           method: "POST",
           body: JSON.stringify(payload)
         });
+        if (imageFile) {
+          submitBtn.textContent = "Uploading image...";
+          const fd = new FormData();
+          fd.append("file", imageFile);
+          await apiFetch(`/brand-cashback/admin/campaigns/${created.id}/image`, {
+            method: "POST",
+            body: fd,
+          });
+        }
         hide("campaign-modal");
         await loadCampaigns();
       } catch (err) {
