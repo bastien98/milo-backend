@@ -1,6 +1,8 @@
+import io
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, File, HTTPException, UploadFile, status
+from PIL import Image, ImageOps, UnidentifiedImageError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_db, get_current_db_user
@@ -25,8 +27,28 @@ from app.services.brand_cashback_service import (
 
 router = APIRouter()
 
-ALLOWED_IMAGE_CONTENT_TYPES = {"image/jpeg", "image/png"}
-MAX_IMAGE_BYTES = 2 * 1024 * 1024  # 2 MB
+ALLOWED_IMAGE_CONTENT_TYPES = {"image/jpeg", "image/png", "image/webp"}
+MAX_IMAGE_BYTES = 10 * 1024 * 1024  # 10 MB raw input
+MAX_IMAGE_DIMENSION = 800
+JPEG_QUALITY = 85
+
+
+def _optimize_campaign_image(content: bytes) -> bytes:
+    """Decode, EXIF-rotate, downscale to ≤800px, re-encode as JPEG q85."""
+    try:
+        img = Image.open(io.BytesIO(content))
+        img = ImageOps.exif_transpose(img)
+        if img.mode != "RGB":
+            img = img.convert("RGB")
+        img.thumbnail((MAX_IMAGE_DIMENSION, MAX_IMAGE_DIMENSION), Image.LANCZOS)
+        buf = io.BytesIO()
+        img.save(buf, format="JPEG", quality=JPEG_QUALITY, optimize=True)
+        return buf.getvalue()
+    except (UnidentifiedImageError, OSError) as e:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Could not decode image: {e}",
+        )
 
 
 def _require_admin(current_user: User) -> None:
@@ -272,7 +294,7 @@ async def admin_upload_campaign_image(
     if content_type not in ALLOWED_IMAGE_CONTENT_TYPES:
         raise HTTPException(
             status_code=status.HTTP_415_UNSUPPORTED_MEDIA_TYPE,
-            detail=f"Only JPEG and PNG images are supported, got: {content_type}",
+            detail=f"Only JPEG, PNG, and WebP images are supported, got: {content_type}",
         )
 
     content = await file.read()
@@ -282,11 +304,12 @@ async def admin_upload_campaign_image(
             detail=f"Image exceeds {MAX_IMAGE_BYTES // (1024 * 1024)}MB limit",
         )
 
+    optimized = _optimize_campaign_image(content)
+
     if campaign.image_s3_key:
         storage.delete(campaign.image_s3_key)
 
-    ext = "png" if content_type == "image/png" else "jpg"
-    new_key = storage.upload_campaign_image(campaign_id, content, ext)
+    new_key = storage.upload_campaign_image(campaign_id, optimized, "jpg")
     campaign = await repo.update_campaign(campaign_id, {"image_s3_key": new_key})
     claims_count, earned_count = await repo.get_campaign_claim_counts(campaign_id)
 
