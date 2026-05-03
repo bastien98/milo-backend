@@ -32,26 +32,50 @@ router = APIRouter()
 
 ALLOWED_IMAGE_CONTENT_TYPES = {"image/jpeg", "image/png", "image/webp"}
 MAX_IMAGE_BYTES = 10 * 1024 * 1024  # 10 MB raw input
-MAX_IMAGE_DIMENSION = 800
+HERO_MAX_DIMENSION = 1200
+THUMB_DIMENSION = 400  # 400x400 square crop
 JPEG_QUALITY = 85
 
 
-def _optimize_campaign_image(content: bytes) -> bytes:
-    """Decode, EXIF-rotate, downscale to ≤800px, re-encode as JPEG q85."""
+def _decode_image(content: bytes) -> Image.Image:
     try:
         img = Image.open(io.BytesIO(content))
         img = ImageOps.exif_transpose(img)
         if img.mode != "RGB":
             img = img.convert("RGB")
-        img.thumbnail((MAX_IMAGE_DIMENSION, MAX_IMAGE_DIMENSION), Image.LANCZOS)
-        buf = io.BytesIO()
-        img.save(buf, format="JPEG", quality=JPEG_QUALITY, optimize=True)
-        return buf.getvalue()
+        return img
     except (UnidentifiedImageError, OSError) as e:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=f"Could not decode image: {e}",
         )
+
+
+def _encode_jpeg(img: Image.Image) -> bytes:
+    buf = io.BytesIO()
+    img.save(buf, format="JPEG", quality=JPEG_QUALITY, optimize=True)
+    return buf.getvalue()
+
+
+def _make_hero(img: Image.Image) -> bytes:
+    """Hero variant: preserves original aspect, max 1200px on the long edge."""
+    out = img.copy()
+    out.thumbnail((HERO_MAX_DIMENSION, HERO_MAX_DIMENSION), Image.LANCZOS)
+    return _encode_jpeg(out)
+
+
+def _make_thumb(img: Image.Image) -> bytes:
+    """Thumbnail variant: 400x400 center-cropped square — drives the grid card.
+
+    Pillow's ImageOps.fit picks the largest centered square crop and resizes it.
+    """
+    cropped = ImageOps.fit(
+        img,
+        (THUMB_DIMENSION, THUMB_DIMENSION),
+        method=Image.LANCZOS,
+        centering=(0.5, 0.5),
+    )
+    return _encode_jpeg(cropped)
 
 
 def _require_admin(current_user: User) -> None:
@@ -75,6 +99,7 @@ async def _build_admin_response(
         description=campaign.description,
         cashback_amount_cents=campaign.cashback_amount_cents,
         image_url=image_url_for_key(campaign.image_s3_key),
+        image_thumb_url=image_url_for_key(campaign.image_thumb_s3_key),
         valid_from=campaign.valid_from,
         valid_until=campaign.valid_until,
         eligible_stores=campaign.eligible_stores or [],
@@ -300,14 +325,17 @@ async def admin_delete_campaign(
 
     if campaign.image_s3_key:
         storage.delete(campaign.image_s3_key)
+    if campaign.image_thumb_s3_key:
+        storage.delete(campaign.image_thumb_s3_key)
 
     if earned_count == 0:
         # Hard-delete; cascade="all, delete-orphan" on the model removes line items + claims.
         await repo.delete_campaign(campaign_id)
     else:
-        # Preserve earned history; clear the S3 key so future reads don't try to fetch a deleted object.
+        # Preserve earned history; clear S3 keys so future reads don't try to fetch deleted objects.
         await repo.update_campaign(
-            campaign_id, {"is_active": False, "image_s3_key": None}
+            campaign_id,
+            {"is_active": False, "image_s3_key": None, "image_thumb_s3_key": None},
         )
 
 
@@ -338,13 +366,22 @@ async def admin_upload_campaign_image(
             detail=f"Image exceeds {MAX_IMAGE_BYTES // (1024 * 1024)}MB limit",
         )
 
-    optimized = _optimize_campaign_image(content)
+    decoded = _decode_image(content)
+    hero_bytes = _make_hero(decoded)
+    thumb_bytes = _make_thumb(decoded)
 
+    # Replace any existing variants under the campaign id.
     if campaign.image_s3_key:
         storage.delete(campaign.image_s3_key)
+    if campaign.image_thumb_s3_key:
+        storage.delete(campaign.image_thumb_s3_key)
 
-    new_key = storage.upload_campaign_image(campaign_id, optimized, "jpg")
-    campaign = await repo.update_campaign(campaign_id, {"image_s3_key": new_key})
+    hero_key = storage.upload_campaign_image(campaign_id, hero_bytes, "jpg", variant="hero")
+    thumb_key = storage.upload_campaign_image(campaign_id, thumb_bytes, "jpg", variant="thumb")
+    campaign = await repo.update_campaign(
+        campaign_id,
+        {"image_s3_key": hero_key, "image_thumb_s3_key": thumb_key},
+    )
     return await _build_admin_response(campaign, repo)
 
 

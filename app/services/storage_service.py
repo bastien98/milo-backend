@@ -77,16 +77,25 @@ class StorageService:
             raise
 
     def upload_campaign_image(
-        self, campaign_id: str, content: bytes, ext: str
+        self,
+        campaign_id: str,
+        content: bytes,
+        ext: str,
+        variant: str = "hero",
     ) -> Optional[str]:
-        """Upload a brand cashback campaign image to S3.
+        """Upload a brand cashback campaign image variant to S3.
+
+        Variants:
+            - "hero": stored at milo/campaigns/{id}.{ext} (used in detail sheet)
+            - "thumb": stored at milo/campaigns/{id}_thumb.{ext} (used in grid card)
 
         Returns the storage key on success, None if storage is disabled.
         """
         if not self.enabled:
             return None
 
-        key = f"{self.CAMPAIGN_KEY_PREFIX}/{campaign_id}.{ext}"
+        suffix = "_thumb" if variant == "thumb" else ""
+        key = f"{self.CAMPAIGN_KEY_PREFIX}/{campaign_id}{suffix}.{ext}"
         content_type_map = {
             "jpg": "image/jpeg",
             "jpeg": "image/jpeg",
@@ -100,7 +109,9 @@ class StorageService:
                 Body=content,
                 ContentType=content_type_map.get(ext, "application/octet-stream"),
             )
-            logger.info(f"Uploaded campaign image: {key} ({len(content)} bytes)")
+            logger.info(
+                f"Uploaded campaign image ({variant}): {key} ({len(content)} bytes)"
+            )
             return key
         except ClientError as e:
             logger.error(f"Failed to upload campaign image: {key}, error={e}")

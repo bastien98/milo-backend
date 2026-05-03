@@ -25,6 +25,7 @@ class BrandCashbackCampaign(Base):
     description: Mapped[str] = mapped_column(String, nullable=False, default="")
     cashback_amount_cents: Mapped[int] = mapped_column(Integer, nullable=False)
     image_s3_key: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+    image_thumb_s3_key: Mapped[Optional[str]] = mapped_column(String, nullable=True)
     valid_from: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     valid_until: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     eligible_stores: Mapped[list] = mapped_column(JSONB, nullable=False, default=list)

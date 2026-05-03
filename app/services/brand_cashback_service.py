@@ -49,6 +49,7 @@ def campaign_to_deal_response(
         description=campaign.description,
         cashback_amount=campaign.cashback_amount_cents / 100,
         image_url=image_url_for_key(campaign.image_s3_key),
+        image_thumb_url=image_url_for_key(campaign.image_thumb_s3_key),
         valid_from=campaign.valid_from,
         valid_until=campaign.valid_until,
         eligible_stores=campaign.eligible_stores or [],
