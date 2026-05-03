@@ -1,7 +1,7 @@
 from datetime import datetime
 from typing import Optional, List
 
-from pydantic import BaseModel, computed_field
+from pydantic import BaseModel
 
 
 # ---------------------------------------------------------------------------
@@ -22,6 +22,18 @@ class BrandCashbackDealResponse(BaseModel):
     requires_store: bool
     user_status: str              # "available" | "claimed" | "earned" | "expired"
     earned_at: Optional[datetime] = None  # set when user_status == "earned"
+    # Coupon-grade fields
+    terms: Optional[str] = None
+    how_it_works: List[str] = []
+    claim_window_days: int = 14
+    max_redemptions_per_user: int = 1
+    total_redemption_cap: Optional[int] = None
+    category: Optional[str] = None
+    featured: bool = False
+    # Derived
+    current_redemptions: int = 0
+    eligible_skus: List[str] = []
+    claim_expires_at: Optional[datetime] = None  # set when user_status == "claimed"
 
     class Config:
         from_attributes = True
@@ -67,6 +79,13 @@ class AdminCampaignCreate(BaseModel):
     valid_until: datetime
     eligible_stores: List[str] = []
     requires_store: bool = False
+    terms: Optional[str] = None
+    how_it_works: List[str] = []
+    claim_window_days: int = 14
+    max_redemptions_per_user: int = 1
+    total_redemption_cap: Optional[int] = None
+    category: Optional[str] = None
+    featured: bool = False
 
 
 class AdminCampaignUpdate(BaseModel):
@@ -79,6 +98,13 @@ class AdminCampaignUpdate(BaseModel):
     eligible_stores: Optional[List[str]] = None
     requires_store: Optional[bool] = None
     is_active: Optional[bool] = None
+    terms: Optional[str] = None
+    how_it_works: Optional[List[str]] = None
+    claim_window_days: Optional[int] = None
+    max_redemptions_per_user: Optional[int] = None
+    total_redemption_cap: Optional[int] = None
+    category: Optional[str] = None
+    featured: Optional[bool] = None
 
 
 class AdminCampaignResponse(BaseModel):
@@ -97,9 +123,25 @@ class AdminCampaignResponse(BaseModel):
     updated_at: Optional[datetime]
     claims_count: int = 0
     earned_count: int = 0
+    # Coupon-grade fields
+    terms: Optional[str] = None
+    how_it_works: List[str] = []
+    claim_window_days: int = 14
+    max_redemptions_per_user: int = 1
+    total_redemption_cap: Optional[int] = None
+    category: Optional[str] = None
+    featured: bool = False
+    # Derived
+    current_redemptions: int = 0
+    eligible_skus: List[str] = []
 
     class Config:
         from_attributes = True
+
+
+class AdminCampaignDeletePreview(BaseModel):
+    earned_count: int
+    would_hard_delete: bool
 
 
 class AdminStatsResponse(BaseModel):

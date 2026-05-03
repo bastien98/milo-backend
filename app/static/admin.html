@@ -72,10 +72,16 @@
     <main class="max-w-5xl mx-auto px-6 py-8">
       <div class="flex items-center justify-between mb-6">
         <h2 class="text-xl font-bold">Campaigns</h2>
-        <button id="new-campaign-btn" class="cashback-green-bg text-black font-semibold text-sm px-4 py-2 rounded-lg hover:opacity-90 transition flex items-center gap-2">
-          <span class="text-lg leading-none">+</span>
-          <span>New Campaign</span>
-        </button>
+        <div class="flex items-center gap-3">
+          <label class="flex items-center gap-2 text-xs text-zinc-400 cursor-pointer">
+            <input id="show-inactive-toggle" type="checkbox" class="accent-green-500">
+            <span>Show deleted</span>
+          </label>
+          <button id="new-campaign-btn" class="cashback-green-bg text-black font-semibold text-sm px-4 py-2 rounded-lg hover:opacity-90 transition flex items-center gap-2">
+            <span class="text-lg leading-none">+</span>
+            <span>New Campaign</span>
+          </button>
+        </div>
       </div>
 
       <!-- Loading state -->
@@ -137,6 +143,57 @@
           <label class="block text-xs font-semibold uppercase tracking-wider text-zinc-400 mb-1.5">Description</label>
           <textarea id="c-description" rows="2" placeholder="Short marketing copy shown on the deal card"
             class="w-full bg-zinc-900 border border-zinc-800 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-green-500 resize-none"></textarea>
+        </div>
+
+        <div>
+          <label class="block text-xs font-semibold uppercase tracking-wider text-zinc-400 mb-1.5">Terms &amp; Conditions</label>
+          <textarea id="c-terms" rows="3" placeholder="Per-campaign legal copy. Leave blank for the iOS default boilerplate."
+            class="w-full bg-zinc-900 border border-zinc-800 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-green-500 resize-none"></textarea>
+        </div>
+
+        <div>
+          <label class="block text-xs font-semibold uppercase tracking-wider text-zinc-400 mb-1.5">How It Works</label>
+          <textarea id="c-how-it-works" rows="3" placeholder="One step per line. Leave blank for the iOS default 3-step copy."
+            class="w-full bg-zinc-900 border border-zinc-800 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-green-500 resize-none"></textarea>
+        </div>
+
+        <div class="grid grid-cols-3 gap-3">
+          <div>
+            <label class="block text-xs font-semibold uppercase tracking-wider text-zinc-400 mb-1.5">Claim Window (days)</label>
+            <input id="c-claim-window" type="number" min="1" value="14"
+              class="w-full bg-zinc-900 border border-zinc-800 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-green-500">
+          </div>
+          <div>
+            <label class="block text-xs font-semibold uppercase tracking-wider text-zinc-400 mb-1.5">Max / User</label>
+            <input id="c-max-per-user" type="number" min="1" value="1"
+              class="w-full bg-zinc-900 border border-zinc-800 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-green-500">
+          </div>
+          <div>
+            <label class="block text-xs font-semibold uppercase tracking-wider text-zinc-400 mb-1.5">Total Cap</label>
+            <input id="c-total-cap" type="number" min="1" placeholder="∞"
+              class="w-full bg-zinc-900 border border-zinc-800 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-green-500">
+          </div>
+        </div>
+
+        <div class="grid grid-cols-2 gap-3 items-end">
+          <div>
+            <label class="block text-xs font-semibold uppercase tracking-wider text-zinc-400 mb-1.5">Category</label>
+            <select id="c-category"
+              class="w-full bg-zinc-900 border border-zinc-800 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-green-500">
+              <option value="">(none)</option>
+              <option value="food">Food</option>
+              <option value="drinks">Drinks</option>
+              <option value="household">Household</option>
+              <option value="personal_care">Personal Care</option>
+              <option value="baby">Baby</option>
+              <option value="pet">Pet</option>
+              <option value="other">Other</option>
+            </select>
+          </div>
+          <label class="flex items-center gap-2 text-sm text-zinc-300 pb-2">
+            <input id="c-featured" type="checkbox" class="accent-green-500">
+            <span>Feature this campaign</span>
+          </label>
         </div>
 
         <div>
@@ -343,6 +400,9 @@
     });
 
     // ---- Campaigns list ------------------------------------------------
+    let showInactive = false;
+    let editingCampaign = null;
+
     async function loadCampaigns() {
       show("campaigns-loading");
       hide("campaigns-empty");
@@ -350,7 +410,8 @@
       document.getElementById("campaigns-list").innerHTML = "";
 
       try {
-        const campaigns = await apiFetch("/brand-cashback/admin/campaigns");
+        const qs = showInactive ? "?include_inactive=true" : "";
+        const campaigns = await apiFetch(`/brand-cashback/admin/campaigns${qs}`);
         hide("campaigns-loading");
 
         if (!campaigns.length) {
@@ -412,6 +473,9 @@
             <button data-action="lineitems" class="text-xs text-zinc-300 border border-zinc-700 rounded-md px-2.5 py-1 hover:bg-zinc-800 transition">
               Line items
             </button>
+            <button data-action="edit" class="text-xs text-zinc-300 border border-zinc-700 rounded-md px-2.5 py-1 hover:bg-zinc-800 transition">
+              Edit
+            </button>
             <button data-action="delete" class="text-xs text-red-400 border border-red-900/60 rounded-md px-2.5 py-1 hover:bg-red-950/50 transition">
               Delete
             </button>
@@ -420,6 +484,7 @@
       `;
 
       wrapper.querySelector('[data-action="lineitems"]').addEventListener("click", () => openLineItemsModal(c));
+      wrapper.querySelector('[data-action="edit"]').addEventListener("click", () => openCampaignModal(c));
       wrapper.querySelector('[data-action="delete"]').addEventListener("click", () => deleteCampaign(c));
       return wrapper;
     }
@@ -431,7 +496,20 @@
     }
 
     async function deleteCampaign(c) {
-      if (!confirm(`Delete "${c.brand_name} · ${c.product_name}"?\n\nThis cannot be undone.`)) return;
+      let preview;
+      try {
+        preview = await apiFetch(`/brand-cashback/admin/campaigns/${c.id}/delete-preview`);
+      } catch (err) {
+        alert(`Could not check deletion: ${err.message}`);
+        return;
+      }
+
+      const label = `${c.brand_name} · ${c.product_name}`;
+      const msg = preview.would_hard_delete
+        ? `Delete "${label}"?\n\nNo users have earned this — the campaign, its line items, and its image will be permanently removed.`
+        : `Soft-delete "${label}"?\n\n${preview.earned_count} user(s) have earned this campaign. Their history will be preserved, but the campaign won't appear in any new listings and its image will be removed from storage.`;
+
+      if (!confirm(msg)) return;
       try {
         await apiFetch(`/brand-cashback/admin/campaigns/${c.id}`, { method: "DELETE" });
         await loadCampaigns();
@@ -440,13 +518,21 @@
       }
     }
 
-    // ---- Campaign create modal -----------------------------------------
-    function openCampaignModal() {
-      // Render store checkboxes
+    document.getElementById("show-inactive-toggle").addEventListener("change", (e) => {
+      showInactive = e.target.checked;
+      loadCampaigns();
+    });
+
+    // ---- Campaign create / edit modal ---------------------------------
+    function openCampaignModal(existing = null) {
+      editingCampaign = existing;
+
+      // Render store checkboxes (with pre-selection for edit)
+      const preselected = new Set(existing?.eligible_stores ?? []);
       const storesEl = document.getElementById("c-stores");
       storesEl.innerHTML = BELGIAN_STORES.map(name => `
         <label class="flex items-center gap-2 text-zinc-300">
-          <input type="checkbox" value="${name}" class="accent-green-500 c-store-check">
+          <input type="checkbox" value="${name}" class="accent-green-500 c-store-check"${preselected.has(name) ? " checked" : ""}>
           <span class="text-xs">${name}</span>
         </label>
       `).join("");
@@ -454,12 +540,43 @@
       // Reset form
       document.getElementById("campaign-form").reset();
       hide("campaign-error");
+      const preview = document.getElementById("c-image-preview");
+      preview.classList.add("hidden");
+      preview.removeAttribute("src");
 
-      // Sensible default dates: now → +30 days
-      const now = new Date();
-      const later = new Date(now.getTime() + 30 * 24 * 60 * 60 * 1000);
-      document.getElementById("c-from").value = toLocalInput(now);
-      document.getElementById("c-until").value = toLocalInput(later);
+      const submitBtn = document.getElementById("campaign-submit");
+      const titleEl = document.querySelector("#campaign-modal h3");
+
+      if (existing) {
+        titleEl.textContent = "Edit Campaign";
+        submitBtn.textContent = "Save Changes";
+        document.getElementById("c-brand").value = existing.brand_name;
+        document.getElementById("c-product").value = existing.product_name;
+        document.getElementById("c-description").value = existing.description ?? "";
+        document.getElementById("c-cashback").value = (existing.cashback_amount_cents / 100).toFixed(2);
+        document.getElementById("c-from").value = toLocalInput(new Date(existing.valid_from));
+        document.getElementById("c-until").value = toLocalInput(new Date(existing.valid_until));
+        document.getElementById("c-requires-store").checked = !!existing.requires_store;
+        document.getElementById("c-terms").value = existing.terms ?? "";
+        document.getElementById("c-how-it-works").value = (existing.how_it_works ?? []).join("\n");
+        document.getElementById("c-claim-window").value = existing.claim_window_days ?? 14;
+        document.getElementById("c-max-per-user").value = existing.max_redemptions_per_user ?? 1;
+        document.getElementById("c-total-cap").value = existing.total_redemption_cap ?? "";
+        document.getElementById("c-category").value = existing.category ?? "";
+        document.getElementById("c-featured").checked = !!existing.featured;
+        if (existing.image_url) {
+          preview.src = existing.image_url;
+          preview.classList.remove("hidden");
+        }
+      } else {
+        titleEl.textContent = "New Campaign";
+        submitBtn.textContent = "Create Campaign";
+        // Sensible default dates: now → +30 days
+        const now = new Date();
+        const later = new Date(now.getTime() + 30 * 24 * 60 * 60 * 1000);
+        document.getElementById("c-from").value = toLocalInput(now);
+        document.getElementById("c-until").value = toLocalInput(later);
+      }
 
       show("campaign-modal");
     }
@@ -469,7 +586,7 @@
       return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
     }
 
-    document.getElementById("new-campaign-btn").addEventListener("click", openCampaignModal);
+    document.getElementById("new-campaign-btn").addEventListener("click", () => openCampaignModal());
 
     document.getElementById("c-image").addEventListener("change", (e) => {
       const file = e.target.files[0];
@@ -495,10 +612,16 @@
       const errEl = document.getElementById("campaign-error");
       hide("campaign-error");
       submitBtn.disabled = true;
-      submitBtn.textContent = "Creating...";
+      const isEdit = editingCampaign !== null;
+      submitBtn.textContent = isEdit ? "Saving..." : "Creating...";
 
       const selectedStores = Array.from(document.querySelectorAll(".c-store-check:checked")).map(c => c.value);
       const requiresStore = document.getElementById("c-requires-store").checked;
+
+      const howItWorks = document.getElementById("c-how-it-works").value
+        .split("\n").map(s => s.trim()).filter(Boolean);
+      const totalCapRaw = document.getElementById("c-total-cap").value.trim();
+      const categoryRaw = document.getElementById("c-category").value;
 
       const payload = {
         brand_name: document.getElementById("c-brand").value.trim(),
@@ -509,40 +632,51 @@
         valid_until: new Date(document.getElementById("c-until").value).toISOString(),
         eligible_stores: selectedStores,
         requires_store: requiresStore,
+        terms: document.getElementById("c-terms").value.trim() || null,
+        how_it_works: howItWorks,
+        claim_window_days: parseInt(document.getElementById("c-claim-window").value, 10) || 14,
+        max_redemptions_per_user: parseInt(document.getElementById("c-max-per-user").value, 10) || 1,
+        total_redemption_cap: totalCapRaw ? parseInt(totalCapRaw, 10) : null,
+        category: categoryRaw || null,
+        featured: document.getElementById("c-featured").checked,
       };
 
       if (requiresStore && !selectedStores.length) {
         errEl.textContent = "Select at least one store or uncheck 'Restrict to selected stores'";
         show("campaign-error");
         submitBtn.disabled = false;
-        submitBtn.textContent = "Create Campaign";
+        submitBtn.textContent = isEdit ? "Save Changes" : "Create Campaign";
         return;
       }
 
       const imageFile = document.getElementById("c-image").files[0];
 
       try {
-        const created = await apiFetch("/brand-cashback/admin/campaigns", {
-          method: "POST",
+        const url = isEdit
+          ? `/brand-cashback/admin/campaigns/${editingCampaign.id}`
+          : "/brand-cashback/admin/campaigns";
+        const saved = await apiFetch(url, {
+          method: isEdit ? "PATCH" : "POST",
           body: JSON.stringify(payload)
         });
         if (imageFile) {
           submitBtn.textContent = "Uploading image...";
           const fd = new FormData();
           fd.append("file", imageFile);
-          await apiFetch(`/brand-cashback/admin/campaigns/${created.id}/image`, {
+          await apiFetch(`/brand-cashback/admin/campaigns/${saved.id}/image`, {
             method: "POST",
             body: fd,
           });
         }
         hide("campaign-modal");
+        editingCampaign = null;
         await loadCampaigns();
       } catch (err) {
         errEl.textContent = err.message;
         show("campaign-error");
       } finally {
         submitBtn.disabled = false;
-        submitBtn.textContent = "Create Campaign";
+        submitBtn.textContent = isEdit ? "Save Changes" : "Create Campaign";
       }
     });
 

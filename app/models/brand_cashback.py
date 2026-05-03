@@ -2,7 +2,7 @@ import uuid
 from datetime import datetime
 from typing import TYPE_CHECKING, Optional
 
-from sqlalchemy import String, DateTime, Integer, Boolean, ForeignKey, UniqueConstraint
+from sqlalchemy import String, DateTime, Integer, Boolean, ForeignKey, Text, UniqueConstraint
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from sqlalchemy.sql import func
@@ -30,6 +30,13 @@ class BrandCashbackCampaign(Base):
     eligible_stores: Mapped[list] = mapped_column(JSONB, nullable=False, default=list)
     requires_store: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True, server_default="true")
+    terms: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    how_it_works: Mapped[list] = mapped_column(JSONB, nullable=False, default=list, server_default="'[]'::jsonb")
+    claim_window_days: Mapped[int] = mapped_column(Integer, nullable=False, default=14, server_default="14")
+    max_redemptions_per_user: Mapped[int] = mapped_column(Integer, nullable=False, default=1, server_default="1")
+    total_redemption_cap: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    category: Mapped[Optional[str]] = mapped_column(String(32), nullable=True)
+    featured: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default="false")
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
     )

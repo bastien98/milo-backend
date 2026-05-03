@@ -1,5 +1,5 @@
 import logging
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from difflib import SequenceMatcher
 from typing import Optional
 
@@ -33,9 +33,14 @@ def _is_line_item_match(receipt_item: str, known_item: str) -> bool:
     return SequenceMatcher(None, a, b).ratio() >= FUZZY_THRESHOLD
 
 
-def _campaign_to_deal_response(
+def campaign_to_deal_response(
     campaign: BrandCashbackCampaign,
     user_status: str,
+    *,
+    current_redemptions: int = 0,
+    eligible_skus: Optional[list[str]] = None,
+    claim_expires_at: Optional[datetime] = None,
+    earned_at: Optional[datetime] = None,
 ) -> BrandCashbackDealResponse:
     return BrandCashbackDealResponse(
         id=campaign.id,
@@ -49,6 +54,17 @@ def _campaign_to_deal_response(
         eligible_stores=campaign.eligible_stores or [],
         requires_store=campaign.requires_store,
         user_status=user_status,
+        earned_at=earned_at,
+        terms=campaign.terms,
+        how_it_works=campaign.how_it_works or [],
+        claim_window_days=campaign.claim_window_days,
+        max_redemptions_per_user=campaign.max_redemptions_per_user,
+        total_redemption_cap=campaign.total_redemption_cap,
+        category=campaign.category,
+        featured=campaign.featured,
+        current_redemptions=current_redemptions,
+        eligible_skus=eligible_skus or [],
+        claim_expires_at=claim_expires_at,
     )
 
 
@@ -81,7 +97,23 @@ class BrandCashbackService:
             if user_status == "earned":
                 continue
 
-            result.append(_campaign_to_deal_response(campaign, user_status))
+            _, earned_count = await self.repo.get_campaign_claim_counts(campaign.id)
+            eligible_skus = await self.repo.get_distinct_exact_line_items(campaign.id)
+            claim_expires_at = None
+            if claim and claim.status == "claimed":
+                claim_expires_at = claim.claimed_at + timedelta(
+                    days=campaign.claim_window_days
+                )
+
+            result.append(
+                campaign_to_deal_response(
+                    campaign,
+                    user_status,
+                    current_redemptions=earned_count,
+                    eligible_skus=eligible_skus,
+                    claim_expires_at=claim_expires_at,
+                )
+            )
         return result
 
     async def claim_deal(self, user_id: str, campaign_id: str) -> Optional[UserBrandCashbackClaim]:

@@ -34,11 +34,16 @@ class BrandCashbackRepository:
         )
         return list(result.scalars().all())
 
-    async def get_all_campaigns(self) -> list[BrandCashbackCampaign]:
-        """All campaigns (admin)."""
-        result = await self.db.execute(
-            select(BrandCashbackCampaign).order_by(BrandCashbackCampaign.created_at.desc())
+    async def get_all_campaigns(
+        self, include_inactive: bool = False
+    ) -> list[BrandCashbackCampaign]:
+        """All campaigns (admin). Hides soft-deleted (`is_active=false`) by default."""
+        stmt = select(BrandCashbackCampaign).order_by(
+            BrandCashbackCampaign.created_at.desc()
         )
+        if not include_inactive:
+            stmt = stmt.where(BrandCashbackCampaign.is_active == True)
+        result = await self.db.execute(stmt)
         return list(result.scalars().all())
 
     async def get_campaign_by_id(self, campaign_id: str) -> Optional[BrandCashbackCampaign]:
@@ -71,6 +76,16 @@ class BrandCashbackRepository:
     # ------------------------------------------------------------------
     # Line Items
     # ------------------------------------------------------------------
+
+    async def get_distinct_exact_line_items(self, campaign_id: str) -> list[str]:
+        """Distinct `exact_line_item` strings across the campaign — surfaced to iOS as eligible SKUs."""
+        result = await self.db.execute(
+            select(BrandCashbackStoreLineItem.exact_line_item)
+            .where(BrandCashbackStoreLineItem.campaign_id == campaign_id)
+            .distinct()
+            .order_by(BrandCashbackStoreLineItem.exact_line_item)
+        )
+        return [row for row in result.scalars().all()]
 
     async def get_line_items_for_campaign(
         self, campaign_id: str
