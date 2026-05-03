@@ -2,7 +2,7 @@ import uuid
 from datetime import datetime
 from typing import TYPE_CHECKING, Optional
 
-from sqlalchemy import String, DateTime, Integer, Boolean, ForeignKey, Text, UniqueConstraint
+from sqlalchemy import String, DateTime, Integer, Boolean, ForeignKey, Text
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from sqlalchemy.sql import func
@@ -77,9 +77,6 @@ class BrandCashbackStoreLineItem(Base):
 
 class UserBrandCashbackClaim(Base):
     __tablename__ = "user_brand_cashback_claims"
-    __table_args__ = (
-        UniqueConstraint("user_id", "campaign_id", name="uq_user_campaign_claim"),
-    )
 
     id: Mapped[str] = mapped_column(
         String, primary_key=True, default=lambda: str(uuid.uuid4())

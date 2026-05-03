@@ -470,23 +470,38 @@
         <div class="flex flex-col items-end gap-2 flex-shrink-0">
           <div class="text-2xl font-bold cashback-green">${fmtEuros(c.cashback_amount_cents)}</div>
           <div class="flex gap-2">
-            <button data-action="lineitems" class="text-xs text-zinc-300 border border-zinc-700 rounded-md px-2.5 py-1 hover:bg-zinc-800 transition">
-              Line items
-            </button>
-            <button data-action="edit" class="text-xs text-zinc-300 border border-zinc-700 rounded-md px-2.5 py-1 hover:bg-zinc-800 transition">
-              Edit
-            </button>
-            <button data-action="delete" class="text-xs text-red-400 border border-red-900/60 rounded-md px-2.5 py-1 hover:bg-red-950/50 transition">
-              Delete
-            </button>
+            ${c.is_active ? `
+              <button data-action="lineitems" class="text-xs text-zinc-300 border border-zinc-700 rounded-md px-2.5 py-1 hover:bg-zinc-800 transition">Line items</button>
+              <button data-action="edit" class="text-xs text-zinc-300 border border-zinc-700 rounded-md px-2.5 py-1 hover:bg-zinc-800 transition">Edit</button>
+              <button data-action="delete" class="text-xs text-red-400 border border-red-900/60 rounded-md px-2.5 py-1 hover:bg-red-950/50 transition">Delete</button>
+            ` : `
+              <button data-action="restore" class="text-xs text-green-400 border border-green-900/60 rounded-md px-2.5 py-1 hover:bg-green-950/50 transition">Restore</button>
+              <button data-action="delete" class="text-xs text-red-400 border border-red-900/60 rounded-md px-2.5 py-1 hover:bg-red-950/50 transition">Delete</button>
+            `}
           </div>
         </div>
       `;
 
-      wrapper.querySelector('[data-action="lineitems"]').addEventListener("click", () => openLineItemsModal(c));
-      wrapper.querySelector('[data-action="edit"]').addEventListener("click", () => openCampaignModal(c));
+      const lineItemsBtn = wrapper.querySelector('[data-action="lineitems"]');
+      if (lineItemsBtn) lineItemsBtn.addEventListener("click", () => openLineItemsModal(c));
+      const editBtn = wrapper.querySelector('[data-action="edit"]');
+      if (editBtn) editBtn.addEventListener("click", () => openCampaignModal(c));
+      const restoreBtn = wrapper.querySelector('[data-action="restore"]');
+      if (restoreBtn) restoreBtn.addEventListener("click", () => restoreCampaign(c));
       wrapper.querySelector('[data-action="delete"]').addEventListener("click", () => deleteCampaign(c));
       return wrapper;
+    }
+
+    async function restoreCampaign(c) {
+      try {
+        await apiFetch(`/brand-cashback/admin/campaigns/${c.id}`, {
+          method: "PATCH",
+          body: JSON.stringify({ is_active: true }),
+        });
+        await loadCampaigns();
+      } catch (err) {
+        alert(`Restore failed: ${err.message}`);
+      }
     }
 
     function escapeHtml(s) {

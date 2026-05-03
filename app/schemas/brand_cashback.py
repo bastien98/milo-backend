@@ -1,7 +1,7 @@
 from datetime import datetime
 from typing import Optional, List
 
-from pydantic import BaseModel
+from pydantic import BaseModel, model_validator
 
 
 # ---------------------------------------------------------------------------
@@ -86,6 +86,12 @@ class AdminCampaignCreate(BaseModel):
     total_redemption_cap: Optional[int] = None
     category: Optional[str] = None
     featured: bool = False
+
+    @model_validator(mode="after")
+    def _check_dates(self):
+        if self.valid_until <= self.valid_from:
+            raise ValueError("valid_until must be after valid_from")
+        return self
 
 
 class AdminCampaignUpdate(BaseModel):

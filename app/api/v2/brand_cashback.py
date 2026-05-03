@@ -119,9 +119,19 @@ async def claim_deal(
 ):
     """Claim a cashback deal before uploading a receipt."""
     svc = BrandCashbackService(db)
-    claim = await svc.claim_deal(current_user.id, campaign_id)
-    if claim is None:
+    claim, error = await svc.claim_deal(current_user.id, campaign_id)
+    if error == "not_found":
         raise HTTPException(status_code=404, detail="Campaign not found or inactive")
+    if error == "user_limit_reached":
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="You have reached the per-user redemption limit for this campaign",
+        )
+    if error == "campaign_full":
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="This campaign has reached its total redemption cap",
+        )
     return BrandCashbackClaimResponse(
         campaign_id=claim.campaign_id,
         status=claim.status,
@@ -228,10 +238,22 @@ async def admin_update_campaign(
 ):
     _require_admin(current_user)
     repo = BrandCashbackRepository(db)
-    updates = payload.model_dump(exclude_unset=True)
-    campaign = await repo.update_campaign(campaign_id, updates)
-    if not campaign:
+    existing = await repo.get_campaign_by_id(campaign_id)
+    if not existing:
         raise HTTPException(status_code=404, detail="Campaign not found")
+
+    updates = payload.model_dump(exclude_unset=True)
+
+    # Validate date order against the merged state (touched values + untouched existing).
+    new_from = updates.get("valid_from", existing.valid_from)
+    new_until = updates.get("valid_until", existing.valid_until)
+    if new_until <= new_from:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="valid_until must be after valid_from",
+        )
+
+    campaign = await repo.update_campaign(campaign_id, updates)
     return await _build_admin_response(campaign, repo)
 
 

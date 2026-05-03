@@ -22,12 +22,13 @@ class BrandCashbackRepository:
     # ------------------------------------------------------------------
 
     async def get_active_campaigns(self) -> list[BrandCashbackCampaign]:
-        """Campaigns that are active and not expired."""
+        """Active campaigns currently within their valid window (not scheduled, not expired)."""
         now = datetime.now(timezone.utc)
         result = await self.db.execute(
             select(BrandCashbackCampaign)
             .where(
                 BrandCashbackCampaign.is_active == True,
+                BrandCashbackCampaign.valid_from <= now,
                 BrandCashbackCampaign.valid_until > now,
             )
             .order_by(BrandCashbackCampaign.created_at.desc())
@@ -144,11 +145,51 @@ class BrandCashbackRepository:
     # ------------------------------------------------------------------
 
     async def get_user_claims(self, user_id: str) -> dict[str, UserBrandCashbackClaim]:
-        """Returns dict keyed by campaign_id for quick lookup."""
+        """For each campaign, the user's most actionable claim — pending beats earned,
+        most-recent earned wins ties. With max_redemptions_per_user > 1 a user can have
+        multiple rows per campaign; this collapses to one for /deals lookups."""
         result = await self.db.execute(
-            select(UserBrandCashbackClaim).where(UserBrandCashbackClaim.user_id == user_id)
+            select(UserBrandCashbackClaim)
+            .where(UserBrandCashbackClaim.user_id == user_id)
+            .order_by(UserBrandCashbackClaim.claimed_at.desc())
         )
-        return {c.campaign_id: c for c in result.scalars().all()}
+        out: dict[str, UserBrandCashbackClaim] = {}
+        for c in result.scalars().all():
+            existing = out.get(c.campaign_id)
+            if existing is None:
+                out[c.campaign_id] = c
+            elif existing.status != "claimed" and c.status == "claimed":
+                # Pending claim trumps an earned one for actionable status.
+                out[c.campaign_id] = c
+        return out
+
+    async def count_user_claims_for_campaign(
+        self, user_id: str, campaign_id: str
+    ) -> int:
+        """Total claims (any status) a user has for a single campaign."""
+        result = await self.db.execute(
+            select(func.count()).where(
+                UserBrandCashbackClaim.user_id == user_id,
+                UserBrandCashbackClaim.campaign_id == campaign_id,
+            )
+        )
+        return result.scalar() or 0
+
+    async def get_active_claim(
+        self, user_id: str, campaign_id: str
+    ) -> Optional[UserBrandCashbackClaim]:
+        """Returns the user's still-pending ('claimed') claim for the campaign, if any."""
+        result = await self.db.execute(
+            select(UserBrandCashbackClaim)
+            .where(
+                UserBrandCashbackClaim.user_id == user_id,
+                UserBrandCashbackClaim.campaign_id == campaign_id,
+                UserBrandCashbackClaim.status == "claimed",
+            )
+            .order_by(UserBrandCashbackClaim.claimed_at.desc())
+            .limit(1)
+        )
+        return result.scalar_one_or_none()
 
     async def get_claim(self, user_id: str, campaign_id: str) -> Optional[UserBrandCashbackClaim]:
         result = await self.db.execute(
@@ -183,9 +224,9 @@ class BrandCashbackRepository:
         return claim
 
     async def delete_claim(self, user_id: str, campaign_id: str) -> bool:
-        """Only deletes if status is 'claimed'. Returns True if deleted."""
-        claim = await self.get_claim(user_id, campaign_id)
-        if claim is None or claim.status != "claimed":
+        """Removes the user's pending ('claimed') claim for the campaign. Returns True if deleted."""
+        claim = await self.get_active_claim(user_id, campaign_id)
+        if claim is None:
             return False
         await self.db.delete(claim)
         await self.db.flush()

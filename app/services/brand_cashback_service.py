@@ -116,17 +116,35 @@ class BrandCashbackService:
             )
         return result
 
-    async def claim_deal(self, user_id: str, campaign_id: str) -> Optional[UserBrandCashbackClaim]:
-        """Idempotent claim. Returns None if campaign not found or already earned."""
+    async def claim_deal(
+        self, user_id: str, campaign_id: str
+    ) -> tuple[Optional[UserBrandCashbackClaim], Optional[str]]:
+        """Idempotent claim with cap enforcement.
+
+        Returns (claim, error). On success, error is None. On failure, claim is None
+        and error is one of: "not_found", "user_limit_reached", "campaign_full".
+        """
         campaign = await self.repo.get_campaign_by_id(campaign_id)
         if not campaign or not campaign.is_active:
-            return None
+            return None, "not_found"
 
-        existing = await self.repo.get_claim(user_id, campaign_id)
+        # Idempotent: already a pending claim → return it untouched.
+        existing = await self.repo.get_active_claim(user_id, campaign_id)
         if existing:
-            return existing  # idempotent
+            return existing, None
 
-        return await self.repo.create_claim(user_id, campaign_id)
+        # Per-user cap (counts both pending and earned rows).
+        user_count = await self.repo.count_user_claims_for_campaign(user_id, campaign_id)
+        if user_count >= campaign.max_redemptions_per_user:
+            return None, "user_limit_reached"
+
+        # Total redemption cap (counts only earned, since unredeemed claims don't lock supply).
+        if campaign.total_redemption_cap is not None:
+            _, earned = await self.repo.get_campaign_claim_counts(campaign_id)
+            if earned >= campaign.total_redemption_cap:
+                return None, "campaign_full"
+
+        return await self.repo.create_claim(user_id, campaign_id), None
 
     async def unclaim_deal(self, user_id: str, campaign_id: str) -> bool:
         """Remove a claim only if still in 'claimed' status."""
@@ -156,10 +174,33 @@ class BrandCashbackService:
 
         cashback_repo = CashbackRepository(self.db)
 
+        now = datetime.now(timezone.utc)
+
         for claim in pending_claims:
             campaign = claim.campaign
             if not campaign or not campaign.is_active:
                 continue
+
+            # Enforce claim window: receipt upload must be within
+            # claim_window_days of the original claim.
+            window_end = claim.claimed_at + timedelta(days=campaign.claim_window_days)
+            if now > window_end:
+                logger.info(
+                    f"Brand cashback: claim {claim.id} expired "
+                    f"(claimed_at={claim.claimed_at} window={campaign.claim_window_days}d) — skipping"
+                )
+                continue
+
+            # Enforce total_redemption_cap (race-condition guard:
+            # cap was enforced at claim time, but earned count may have grown since).
+            if campaign.total_redemption_cap is not None:
+                _, earned_so_far = await self.repo.get_campaign_claim_counts(campaign.id)
+                if earned_so_far >= campaign.total_redemption_cap:
+                    logger.info(
+                        f"Brand cashback: campaign {campaign.id} full "
+                        f"({earned_so_far}/{campaign.total_redemption_cap}) — skipping match"
+                    )
+                    continue
 
             # Check store eligibility
             if campaign.requires_store:
