@@ -15,7 +15,13 @@ from app.models.promo_item import PromoItem
 from app.models.promo_item_bbox_override import PromoItemBboxOverride
 from app.models.promo_interaction_event import PromoInteractionEvent
 from app.models.enums import LoyaltyStatus, PromoInteractionEventType
-from app.models.brand_cashback import BrandCashbackCampaign, BrandCashbackStoreLineItem, UserBrandCashbackClaim
+from app.models.brand_cashback import (
+    BrandCashbackCampaign,
+    BrandCashbackStoreLineItem,
+    BrandCashbackClaim,
+    BrandCashbackEarning,
+    BrandCashbackPendingMatch,
+)
 from app.models.charity_donation import CharityDonation
 from app.models.enums import CharityDonationStatus
 
@@ -46,7 +52,9 @@ __all__ = [
     "LoyaltyStatus",
     "BrandCashbackCampaign",
     "BrandCashbackStoreLineItem",
-    "UserBrandCashbackClaim",
+    "BrandCashbackClaim",
+    "BrandCashbackEarning",
+    "BrandCashbackPendingMatch",
     "CharityDonation",
     "CharityDonationStatus",
 ]

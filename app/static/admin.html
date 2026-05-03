@@ -68,45 +68,146 @@
       </div>
     </header>
 
+    <!-- Tab nav -->
+    <nav class="border-b border-zinc-900 px-6 sticky top-[65px] bg-zinc-950/90 backdrop-blur z-10">
+      <div class="max-w-5xl mx-auto flex gap-1">
+        <button id="tab-campaigns" class="tab-btn px-4 py-3 text-sm font-semibold border-b-2 border-green-500 text-white">
+          Campaigns
+        </button>
+        <button id="tab-reviews" class="tab-btn px-4 py-3 text-sm font-semibold border-b-2 border-transparent text-zinc-400 hover:text-white flex items-center gap-2">
+          Reviews
+          <span id="reviews-pending-badge" class="hidden text-[10px] font-bold px-1.5 py-0.5 rounded-full bg-amber-500 text-black">0</span>
+        </button>
+      </div>
+    </nav>
+
     <!-- Main content -->
     <main class="max-w-5xl mx-auto px-6 py-8">
-      <div class="flex items-center justify-between mb-6">
-        <h2 class="text-xl font-bold">Campaigns</h2>
-        <div class="flex items-center gap-3">
-          <label class="flex items-center gap-2 text-xs text-zinc-400 cursor-pointer">
-            <input id="show-inactive-toggle" type="checkbox" class="accent-green-500">
-            <span>Show deleted</span>
-          </label>
-          <button id="new-campaign-btn" class="cashback-green-bg text-black font-semibold text-sm px-4 py-2 rounded-lg hover:opacity-90 transition flex items-center gap-2">
-            <span class="text-lg leading-none">+</span>
-            <span>New Campaign</span>
-          </button>
+
+      <!-- ==================== CAMPAIGNS SECTION ==================== -->
+      <section id="section-campaigns">
+        <div class="flex items-center justify-between mb-6">
+          <h2 class="text-xl font-bold">Campaigns</h2>
+          <div class="flex items-center gap-3">
+            <label class="flex items-center gap-2 text-xs text-zinc-400 cursor-pointer">
+              <input id="show-inactive-toggle" type="checkbox" class="accent-green-500">
+              <span>Show deleted</span>
+            </label>
+            <button id="new-campaign-btn" class="cashback-green-bg text-black font-semibold text-sm px-4 py-2 rounded-lg hover:opacity-90 transition flex items-center gap-2">
+              <span class="text-lg leading-none">+</span>
+              <span>New Campaign</span>
+            </button>
+          </div>
         </div>
-      </div>
 
-      <!-- Loading state -->
-      <div id="campaigns-loading" class="text-center py-12 text-zinc-500 text-sm">
-        Loading campaigns...
-      </div>
+        <!-- Loading state -->
+        <div id="campaigns-loading" class="text-center py-12 text-zinc-500 text-sm">
+          Loading campaigns...
+        </div>
 
-      <!-- Empty state -->
-      <div id="campaigns-empty" class="hidden text-center py-16">
-        <div class="text-5xl mb-4 opacity-30">📋</div>
-        <p class="text-zinc-400 text-sm">No campaigns yet</p>
-        <p class="text-zinc-600 text-xs mt-1">Tap "New Campaign" to create your first one</p>
-      </div>
+        <!-- Empty state -->
+        <div id="campaigns-empty" class="hidden text-center py-16">
+          <div class="text-5xl mb-4 opacity-30">📋</div>
+          <p class="text-zinc-400 text-sm">No campaigns yet</p>
+          <p class="text-zinc-600 text-xs mt-1">Tap "New Campaign" to create your first one</p>
+        </div>
 
-      <!-- Campaigns list -->
-      <div id="campaigns-list" class="space-y-3"></div>
+        <!-- Campaigns list -->
+        <div id="campaigns-list" class="space-y-3"></div>
 
-      <!-- Auth error -->
-      <div id="auth-error" class="hidden text-center py-16">
-        <div class="text-5xl mb-4 opacity-30">🔒</div>
-        <p class="text-red-400 text-sm font-semibold">Not authorized</p>
-        <p class="text-zinc-600 text-xs mt-1">Your Firebase UID is not in the admin allowlist.</p>
-        <p id="auth-error-uid" class="text-zinc-700 text-xs mt-4 font-mono break-all max-w-md mx-auto"></p>
-      </div>
+        <!-- Auth error -->
+        <div id="auth-error" class="hidden text-center py-16">
+          <div class="text-5xl mb-4 opacity-30">🔒</div>
+          <p class="text-red-400 text-sm font-semibold">Not authorized</p>
+          <p class="text-zinc-600 text-xs mt-1">Your Firebase UID is not in the admin allowlist.</p>
+          <p id="auth-error-uid" class="text-zinc-700 text-xs mt-4 font-mono break-all max-w-md mx-auto"></p>
+        </div>
+      </section>
+
+      <!-- ==================== REVIEWS SECTION ==================== -->
+      <section id="section-reviews" class="hidden">
+        <div class="flex items-center justify-between mb-6">
+          <h2 class="text-xl font-bold">Pending reviews</h2>
+          <div id="reviews-filter" class="flex gap-1 text-xs">
+            <button data-status="pending" class="reviews-filter-btn px-3 py-1.5 rounded-md bg-zinc-800 text-white">Pending</button>
+            <button data-status="approved" class="reviews-filter-btn px-3 py-1.5 rounded-md bg-zinc-900 text-zinc-400 hover:text-white">Approved</button>
+            <button data-status="denied" class="reviews-filter-btn px-3 py-1.5 rounded-md bg-zinc-900 text-zinc-400 hover:text-white">Denied</button>
+            <button data-status="all" class="reviews-filter-btn px-3 py-1.5 rounded-md bg-zinc-900 text-zinc-400 hover:text-white">All</button>
+          </div>
+        </div>
+
+        <div id="reviews-loading" class="text-center py-12 text-zinc-500 text-sm">
+          Loading reviews...
+        </div>
+
+        <div id="reviews-empty" class="hidden text-center py-16">
+          <div class="text-5xl mb-4 opacity-30">✓</div>
+          <p class="text-zinc-400 text-sm">No reviews in this state</p>
+          <p class="text-zinc-600 text-xs mt-1">Near-misses on claimed campaigns appear here for approval</p>
+        </div>
+
+        <div id="reviews-list" class="space-y-3"></div>
+      </section>
     </main>
+  </div>
+
+  <!-- ============================================================= -->
+  <!-- APPROVE / DENY DIALOGS                                         -->
+  <!-- ============================================================= -->
+  <div id="approve-modal" class="hidden fixed inset-0 z-50 flex items-center justify-center px-4 modal-backdrop">
+    <div class="glass rounded-2xl p-6 w-full max-w-md">
+      <h3 class="text-lg font-bold mb-4">Approve cashback?</h3>
+      <p class="text-sm text-zinc-300 mb-4">
+        This will credit the user with <span id="approve-amount" class="cashback-green font-semibold"></span>
+        and unblock further matches on the same string.
+      </p>
+      <div class="bg-zinc-900 border border-zinc-800 rounded-lg p-3 mb-4 text-xs">
+        <div class="text-zinc-500 uppercase tracking-wider mb-1">Receipt line</div>
+        <div id="approve-candidate" class="font-mono text-white"></div>
+      </div>
+      <label class="flex items-start gap-2 cursor-pointer mb-5">
+        <input id="approve-add-alts" type="checkbox" class="accent-green-500 mt-0.5" checked>
+        <div class="text-xs">
+          <div class="text-white">Add this string to the campaign's <span class="font-mono">alt_line_items</span></div>
+          <div class="text-zinc-500 mt-0.5">Future receipts with the same string will award instantly without review.</div>
+        </div>
+      </label>
+      <div id="approve-error" class="hidden text-sm text-red-400 mb-3"></div>
+      <div class="flex gap-2">
+        <button id="approve-cancel" class="flex-1 text-zinc-400 hover:text-white text-sm py-2.5 rounded-lg border border-zinc-800">
+          Cancel
+        </button>
+        <button id="approve-confirm" class="cashback-green-bg flex-1 text-black font-bold text-sm py-2.5 rounded-lg hover:opacity-90">
+          Approve
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <div id="deny-modal" class="hidden fixed inset-0 z-50 flex items-center justify-center px-4 modal-backdrop">
+    <div class="glass rounded-2xl p-6 w-full max-w-md">
+      <h3 class="text-lg font-bold mb-4">Deny cashback</h3>
+      <p class="text-sm text-zinc-300 mb-4">The user will see this reason for the next 7 days.</p>
+      <label class="block text-xs font-semibold uppercase tracking-wider text-zinc-400 mb-1.5">Reason</label>
+      <select id="deny-reason-select" class="w-full bg-zinc-900 border border-zinc-800 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-red-500 mb-3">
+        <option value="Wrong product on this receipt">Wrong product on this receipt</option>
+        <option value="Wrong size or variant">Wrong size or variant</option>
+        <option value="Promotional bundle, not eligible">Promotional bundle, not eligible</option>
+        <option value="Cannot verify the item from the receipt">Cannot verify the item from the receipt</option>
+        <option value="__custom__">Other (write your own)</option>
+      </select>
+      <textarea id="deny-reason-text" rows="2" placeholder="Optional override / details"
+        class="w-full bg-zinc-900 border border-zinc-800 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-red-500 resize-none mb-4"></textarea>
+      <div id="deny-error" class="hidden text-sm text-red-400 mb-3"></div>
+      <div class="flex gap-2">
+        <button id="deny-cancel" class="flex-1 text-zinc-400 hover:text-white text-sm py-2.5 rounded-lg border border-zinc-800">
+          Cancel
+        </button>
+        <button id="deny-confirm" class="flex-1 bg-red-500 text-white font-bold text-sm py-2.5 rounded-lg hover:opacity-90">
+          Deny
+        </button>
+      </div>
+    </div>
   </div>
 
   <!-- ============================================================= -->
@@ -157,12 +258,7 @@
             class="w-full bg-zinc-900 border border-zinc-800 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-green-500 resize-none"></textarea>
         </div>
 
-        <div class="grid grid-cols-3 gap-3">
-          <div>
-            <label class="block text-xs font-semibold uppercase tracking-wider text-zinc-400 mb-1.5">Claim Window (days)</label>
-            <input id="c-claim-window" type="number" min="1" value="14"
-              class="w-full bg-zinc-900 border border-zinc-800 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-green-500">
-          </div>
+        <div class="grid grid-cols-2 gap-3">
           <div>
             <label class="block text-xs font-semibold uppercase tracking-wider text-zinc-400 mb-1.5">Max / User</label>
             <input id="c-max-per-user" type="number" min="1" value="1"
@@ -574,7 +670,6 @@
         document.getElementById("c-requires-store").checked = !!existing.requires_store;
         document.getElementById("c-terms").value = existing.terms ?? "";
         document.getElementById("c-how-it-works").value = (existing.how_it_works ?? []).join("\n");
-        document.getElementById("c-claim-window").value = existing.claim_window_days ?? 14;
         document.getElementById("c-max-per-user").value = existing.max_redemptions_per_user ?? 1;
         document.getElementById("c-total-cap").value = existing.total_redemption_cap ?? "";
         document.getElementById("c-category").value = existing.category ?? "";
@@ -649,7 +744,6 @@
         requires_store: requiresStore,
         terms: document.getElementById("c-terms").value.trim() || null,
         how_it_works: howItWorks,
-        claim_window_days: parseInt(document.getElementById("c-claim-window").value, 10) || 14,
         max_redemptions_per_user: parseInt(document.getElementById("c-max-per-user").value, 10) || 1,
         total_redemption_cap: totalCapRaw ? parseInt(totalCapRaw, 10) : null,
         category: categoryRaw || null,
@@ -796,10 +890,276 @@
     });
 
     // Close modal on backdrop click
-    ["campaign-modal", "lineitems-modal"].forEach(id => {
+    ["campaign-modal", "lineitems-modal", "approve-modal", "deny-modal"].forEach(id => {
       document.getElementById(id).addEventListener("click", (e) => {
         if (e.target.id === id) document.getElementById(id).classList.add("hidden");
       });
+    });
+
+    // ====================================================================
+    // REVIEWS TAB
+    // ====================================================================
+    let reviewsCurrentStatus = "pending";
+    let pendingApproval = null;  // the review row currently in the approve dialog
+    let pendingDenial = null;    // ditto for deny
+
+    function setActiveTab(tab) {
+      const isCampaigns = tab === "campaigns";
+      document.getElementById("section-campaigns").classList.toggle("hidden", !isCampaigns);
+      document.getElementById("section-reviews").classList.toggle("hidden", isCampaigns);
+      document.getElementById("tab-campaigns").classList.toggle("border-green-500", isCampaigns);
+      document.getElementById("tab-campaigns").classList.toggle("text-white", isCampaigns);
+      document.getElementById("tab-campaigns").classList.toggle("text-zinc-400", !isCampaigns);
+      document.getElementById("tab-campaigns").classList.toggle("border-transparent", !isCampaigns);
+      document.getElementById("tab-reviews").classList.toggle("border-green-500", !isCampaigns);
+      document.getElementById("tab-reviews").classList.toggle("text-white", !isCampaigns);
+      document.getElementById("tab-reviews").classList.toggle("text-zinc-400", isCampaigns);
+      document.getElementById("tab-reviews").classList.toggle("border-transparent", isCampaigns);
+      if (!isCampaigns) loadReviews();
+    }
+
+    document.getElementById("tab-campaigns").addEventListener("click", () => setActiveTab("campaigns"));
+    document.getElementById("tab-reviews").addEventListener("click", () => setActiveTab("reviews"));
+
+    document.querySelectorAll(".reviews-filter-btn").forEach(btn => {
+      btn.addEventListener("click", () => {
+        reviewsCurrentStatus = btn.dataset.status;
+        document.querySelectorAll(".reviews-filter-btn").forEach(b => {
+          const active = b.dataset.status === reviewsCurrentStatus;
+          b.classList.toggle("bg-zinc-800", active);
+          b.classList.toggle("text-white", active);
+          b.classList.toggle("bg-zinc-900", !active);
+          b.classList.toggle("text-zinc-400", !active);
+        });
+        loadReviews();
+      });
+    });
+
+    async function refreshPendingBadge() {
+      try {
+        const stats = await apiFetch("/brand-cashback/admin/stats");
+        const badge = document.getElementById("reviews-pending-badge");
+        if (stats.pending_reviews > 0) {
+          badge.textContent = stats.pending_reviews;
+          badge.classList.remove("hidden");
+        } else {
+          badge.classList.add("hidden");
+        }
+      } catch { /* badge is best-effort */ }
+    }
+
+    // Character-level diff: returns HTML with <span class="diff"> wrapping
+    // characters present in `b` that don't line up with `a` (and vice versa).
+    function highlightDiff(a, b) {
+      // Cheap LCS-ish: highlight positions where the strings disagree, padding
+      // the shorter one. Good enough for catching FR/NL one-letter swaps and
+      // promo-prefix differences side-by-side; not a real diff algorithm.
+      const A = (a || "").toUpperCase();
+      const B = (b || "").toUpperCase();
+      const maxLen = Math.max(A.length, B.length);
+      let html = "";
+      for (let i = 0; i < maxLen; i++) {
+        const ch = (b || "")[i] ?? "";
+        const same = i < A.length && i < B.length && A[i] === B[i];
+        if (!ch) continue;
+        html += same
+          ? escapeHtml(ch)
+          : `<span class="bg-amber-500/30 text-amber-200 rounded-sm">${escapeHtml(ch)}</span>`;
+      }
+      return html || "<span class='text-zinc-600'>(empty)</span>";
+    }
+
+    async function loadReviews() {
+      show("reviews-loading");
+      hide("reviews-empty");
+      document.getElementById("reviews-list").innerHTML = "";
+
+      let rows;
+      try {
+        rows = await apiFetch(`/brand-cashback/admin/pending-matches?status=${reviewsCurrentStatus}`);
+      } catch (err) {
+        hide("reviews-loading");
+        document.getElementById("reviews-list").innerHTML =
+          `<div class="text-red-400 text-sm py-8 text-center">${escapeHtml(err.message)}</div>`;
+        return;
+      }
+
+      hide("reviews-loading");
+      if (!rows.length) {
+        show("reviews-empty");
+        return;
+      }
+
+      const html = rows.map(renderReviewCard).join("");
+      document.getElementById("reviews-list").innerHTML = html;
+      attachReviewHandlers(rows);
+    }
+
+    function renderReviewCard(r) {
+      const isPending = r.status === "pending";
+      const altsHtml = (r.canonical_alts || []).length
+        ? `<div class="text-zinc-500 text-[10px] uppercase tracking-wider mt-3 mb-1">Existing alts</div>
+           <div class="text-zinc-400 text-xs font-mono">${(r.canonical_alts || []).map(escapeHtml).join(" · ")}</div>`
+        : "";
+
+      const statusBadge = isPending
+        ? `<span class="text-[10px] uppercase tracking-wider px-2 py-1 rounded bg-amber-500/20 text-amber-300">Pending</span>`
+        : r.status === "approved"
+          ? `<span class="text-[10px] uppercase tracking-wider px-2 py-1 rounded bg-green-500/20 text-green-300">Approved</span>`
+          : `<span class="text-[10px] uppercase tracking-wider px-2 py-1 rounded bg-red-500/20 text-red-300">Denied</span>`;
+
+      const reviewedFooter = r.reviewed_at
+        ? `<div class="text-[11px] text-zinc-600 mt-3">
+             ${r.status === "denied" ? `<span class="text-red-400">Reason:</span> ${escapeHtml(r.denial_reason || "")} · ` : ""}
+             Reviewed ${fmtDate(r.reviewed_at)}
+           </div>` : "";
+
+      const receiptLink = r.receipt_image_url
+        ? `<a href="${escapeHtml(r.receipt_image_url)}" target="_blank" class="text-xs text-blue-400 hover:underline">View receipt →</a>`
+        : "";
+
+      const actions = isPending
+        ? `<div class="flex gap-2 mt-4">
+             <button data-id="${escapeHtml(r.id)}" class="review-deny-btn text-xs px-3 py-2 rounded-lg border border-red-700 text-red-400 hover:bg-red-500/10">Deny</button>
+             <button data-id="${escapeHtml(r.id)}" class="review-approve-btn cashback-green-bg text-xs text-black font-bold px-3 py-2 rounded-lg hover:opacity-90">Approve</button>
+           </div>`
+        : "";
+
+      return `
+        <div class="glass rounded-xl p-4">
+          <div class="flex items-start justify-between gap-4 mb-3">
+            <div>
+              <div class="text-xs uppercase tracking-wider cashback-gold font-bold">${escapeHtml(r.brand_name || "")}</div>
+              <div class="font-semibold text-white text-sm">${escapeHtml(r.product_name || "")}</div>
+              <div class="text-xs text-zinc-500 mt-1">
+                ${r.cashback_amount_cents != null ? fmtEuros(r.cashback_amount_cents) : ""}
+                · ${escapeHtml(r.store_name || "store unknown")}
+                · ${fmtDate(r.created_at)}
+              </div>
+            </div>
+            <div class="flex flex-col items-end gap-1">
+              ${statusBadge}
+              <span class="text-[10px] text-zinc-500">${r.match_score.toFixed(2)} match</span>
+              ${receiptLink}
+            </div>
+          </div>
+
+          <div class="grid grid-cols-2 gap-3">
+            <div class="bg-zinc-900 border border-zinc-800 rounded-lg p-3">
+              <div class="text-zinc-500 text-[10px] uppercase tracking-wider mb-1">Receipt line</div>
+              <div class="text-xs font-mono text-white break-all">${highlightDiff(r.canonical_line_item || "", r.candidate_string)}</div>
+            </div>
+            <div class="bg-zinc-900 border border-zinc-800 rounded-lg p-3">
+              <div class="text-zinc-500 text-[10px] uppercase tracking-wider mb-1">Campaign canonical</div>
+              <div class="text-xs font-mono text-white break-all">${escapeHtml(r.canonical_line_item || "(missing)")}</div>
+              ${altsHtml}
+            </div>
+          </div>
+
+          ${reviewedFooter}
+          ${actions}
+        </div>`;
+    }
+
+    function attachReviewHandlers(rows) {
+      const byId = Object.fromEntries(rows.map(r => [r.id, r]));
+      document.querySelectorAll(".review-approve-btn").forEach(btn => {
+        btn.addEventListener("click", () => openApproveDialog(byId[btn.dataset.id]));
+      });
+      document.querySelectorAll(".review-deny-btn").forEach(btn => {
+        btn.addEventListener("click", () => openDenyDialog(byId[btn.dataset.id]));
+      });
+    }
+
+    function openApproveDialog(row) {
+      pendingApproval = row;
+      document.getElementById("approve-amount").textContent =
+        row.cashback_amount_cents != null ? fmtEuros(row.cashback_amount_cents) : "";
+      document.getElementById("approve-candidate").textContent = row.candidate_string;
+      document.getElementById("approve-add-alts").checked = true;
+      hide("approve-error");
+      show("approve-modal");
+    }
+
+    function openDenyDialog(row) {
+      pendingDenial = row;
+      document.getElementById("deny-reason-select").value = "Wrong product on this receipt";
+      document.getElementById("deny-reason-text").value = "";
+      hide("deny-error");
+      show("deny-modal");
+    }
+
+    document.getElementById("approve-cancel").addEventListener("click", () => hide("approve-modal"));
+    document.getElementById("deny-cancel").addEventListener("click", () => hide("deny-modal"));
+
+    document.getElementById("approve-confirm").addEventListener("click", async () => {
+      if (!pendingApproval) return;
+      const btn = document.getElementById("approve-confirm");
+      const errEl = document.getElementById("approve-error");
+      hide("approve-error");
+      btn.disabled = true;
+      btn.textContent = "Approving...";
+      try {
+        await apiFetch(`/brand-cashback/admin/pending-matches/${pendingApproval.id}/approve`, {
+          method: "POST",
+          body: JSON.stringify({
+            add_to_alts: document.getElementById("approve-add-alts").checked,
+          }),
+        });
+        hide("approve-modal");
+        pendingApproval = null;
+        await Promise.all([loadReviews(), refreshPendingBadge()]);
+      } catch (err) {
+        errEl.textContent = err.message;
+        show("approve-error");
+      } finally {
+        btn.disabled = false;
+        btn.textContent = "Approve";
+      }
+    });
+
+    document.getElementById("deny-confirm").addEventListener("click", async () => {
+      if (!pendingDenial) return;
+      const btn = document.getElementById("deny-confirm");
+      const errEl = document.getElementById("deny-error");
+      hide("deny-error");
+
+      const selectVal = document.getElementById("deny-reason-select").value;
+      const textVal = document.getElementById("deny-reason-text").value.trim();
+      let reason;
+      if (selectVal === "__custom__") {
+        reason = textVal;
+      } else {
+        reason = textVal ? `${selectVal} — ${textVal}` : selectVal;
+      }
+      if (!reason) {
+        errEl.textContent = "Reason is required";
+        show("deny-error");
+        return;
+      }
+
+      btn.disabled = true;
+      btn.textContent = "Denying...";
+      try {
+        await apiFetch(`/brand-cashback/admin/pending-matches/${pendingDenial.id}/deny`, {
+          method: "POST",
+          body: JSON.stringify({ reason }),
+        });
+        hide("deny-modal");
+        pendingDenial = null;
+        await Promise.all([loadReviews(), refreshPendingBadge()]);
+      } catch (err) {
+        errEl.textContent = err.message;
+        show("deny-error");
+      } finally {
+        btn.disabled = false;
+        btn.textContent = "Deny";
+      }
+    });
+
+    // Refresh the pending badge whenever the admin loads the page or returns to it.
+    onAuthStateChanged(auth, (user) => {
+      if (user) refreshPendingBadge();
     });
   </script>
 </body>

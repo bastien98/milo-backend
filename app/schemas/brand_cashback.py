@@ -1,7 +1,27 @@
 from datetime import datetime
 from typing import Optional, List
 
-from pydantic import BaseModel, model_validator
+from pydantic import BaseModel, Field, model_validator
+
+
+# ---------------------------------------------------------------------------
+# Pending-review summaries (embedded in deal/claim responses)
+# ---------------------------------------------------------------------------
+
+class PendingReviewSummary(BaseModel):
+    """Embedded on a deal when the user has a pending-review row for it."""
+    id: str
+    receipt_id: str
+    candidate_string: str
+    created_at: datetime
+
+
+class RecentDenialSummary(BaseModel):
+    """Embedded on a deal when the user has a denied review in the last 7 days."""
+    id: str
+    receipt_id: str
+    denied_at: datetime
+    reason: str
 
 
 # ---------------------------------------------------------------------------
@@ -9,7 +29,18 @@ from pydantic import BaseModel, model_validator
 # ---------------------------------------------------------------------------
 
 class BrandCashbackDealResponse(BaseModel):
-    """A single campaign as returned to iOS clients, including per-user status."""
+    """A single campaign as returned to iOS clients, including per-user status.
+
+    user_status semantics:
+      - "available": user has no claim for this campaign yet.
+      - "claimed":   user has a claim and can still earn (earnings < max).
+      - "earned":    user has reached max_redemptions_per_user.
+    Expired campaigns and campaigns with the global cap exhausted are filtered
+    out server-side and never returned with one of these statuses. The
+    `pending_review` field is set when there is an open admin review for this
+    user+campaign — the iOS layer renders it as a separate "Pending review"
+    status without changing the underlying claim model.
+    """
     id: str
     brand_name: str
     product_name: str
@@ -21,20 +52,24 @@ class BrandCashbackDealResponse(BaseModel):
     valid_until: datetime
     eligible_stores: List[str]
     requires_store: bool
-    user_status: str              # "available" | "claimed" | "earned" | "expired"
-    earned_at: Optional[datetime] = None  # set when user_status == "earned"
+    user_status: str
+    earned_at: Optional[datetime] = None  # most recent earning, if any
     # Coupon-grade fields
     terms: Optional[str] = None
     how_it_works: List[str] = []
-    claim_window_days: int = 14
     max_redemptions_per_user: int = 1
     total_redemption_cap: Optional[int] = None
     category: Optional[str] = None
     featured: bool = False
     # Derived
-    current_redemptions: int = 0
+    current_redemptions: int = 0          # earnings across all users (campaign cap progress)
     eligible_skus: List[str] = []
-    claim_expires_at: Optional[datetime] = None  # set when user_status == "claimed"
+    # Per-user progress for max_redemptions_per_user
+    earnings_count: int = 0               # how many times THIS user has earned
+    claimed_at: Optional[datetime] = None  # set when user has a claim
+    # Manual-review queue surface
+    pending_review: Optional[PendingReviewSummary] = None
+    recent_denial: Optional[RecentDenialSummary] = None
 
     class Config:
         from_attributes = True
@@ -42,8 +77,43 @@ class BrandCashbackDealResponse(BaseModel):
 
 class BrandCashbackClaimResponse(BaseModel):
     campaign_id: str
-    status: str
     claimed_at: datetime
+
+
+class BrandCashbackPendingMatchResponse(BaseModel):
+    """Full pending-match record for /my-pending-reviews and admin views."""
+    id: str
+    user_id: str
+    campaign_id: str
+    receipt_id: str
+    candidate_string: str
+    matched_line_item_id: Optional[str]
+    match_score: float
+    store_name: Optional[str]
+    status: str
+    created_at: datetime
+    reviewed_at: Optional[datetime] = None
+    reviewed_by: Optional[str] = None
+    denial_reason: Optional[str] = None
+    earning_id: Optional[str] = None
+    # Admin context (populated when surfaced via admin endpoints)
+    brand_name: Optional[str] = None
+    product_name: Optional[str] = None
+    cashback_amount_cents: Optional[int] = None
+    canonical_line_item: Optional[str] = None
+    canonical_alts: List[str] = []
+    receipt_image_url: Optional[str] = None
+
+    class Config:
+        from_attributes = True
+
+
+class AdminApprovePendingRequest(BaseModel):
+    add_to_alts: bool = True
+
+
+class AdminDenyPendingRequest(BaseModel):
+    reason: str = Field(..., min_length=1, max_length=500)
 
 
 # ---------------------------------------------------------------------------
@@ -82,7 +152,6 @@ class AdminCampaignCreate(BaseModel):
     requires_store: bool = False
     terms: Optional[str] = None
     how_it_works: List[str] = []
-    claim_window_days: int = 14
     max_redemptions_per_user: int = 1
     total_redemption_cap: Optional[int] = None
     category: Optional[str] = None
@@ -107,7 +176,6 @@ class AdminCampaignUpdate(BaseModel):
     is_active: Optional[bool] = None
     terms: Optional[str] = None
     how_it_works: Optional[List[str]] = None
-    claim_window_days: Optional[int] = None
     max_redemptions_per_user: Optional[int] = None
     total_redemption_cap: Optional[int] = None
     category: Optional[str] = None
@@ -129,12 +197,11 @@ class AdminCampaignResponse(BaseModel):
     is_active: bool
     created_at: datetime
     updated_at: Optional[datetime]
-    claims_count: int = 0
-    earned_count: int = 0
+    claims_count: int = 0     # distinct users who have claimed
+    earned_count: int = 0     # total earning events
     # Coupon-grade fields
     terms: Optional[str] = None
     how_it_works: List[str] = []
-    claim_window_days: int = 14
     max_redemptions_per_user: int = 1
     total_redemption_cap: Optional[int] = None
     category: Optional[str] = None
@@ -158,3 +225,4 @@ class AdminStatsResponse(BaseModel):
     total_earned_claims: int
     total_earned_euros: float
     avg_cashback_euros: float
+    pending_reviews: int = 0

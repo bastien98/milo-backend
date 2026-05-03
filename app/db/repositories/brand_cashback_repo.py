@@ -3,13 +3,16 @@ from datetime import datetime, timezone
 from typing import Optional
 
 from sqlalchemy import select, func, update, delete
+from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from app.models.brand_cashback import (
     BrandCashbackCampaign,
+    BrandCashbackClaim,
+    BrandCashbackEarning,
+    BrandCashbackPendingMatch,
     BrandCashbackStoreLineItem,
-    UserBrandCashbackClaim,
 )
 
 
@@ -140,114 +143,298 @@ class BrandCashbackRepository:
         )
         await self.db.flush()
 
-    # ------------------------------------------------------------------
-    # User Claims
-    # ------------------------------------------------------------------
+    async def add_alt_line_item(self, line_item_id: str, alt_string: str) -> None:
+        """Append `alt_string` to a line item's alt_line_items JSONB array.
 
-    async def get_user_claims(self, user_id: str) -> dict[str, UserBrandCashbackClaim]:
-        """For each campaign, the user's most actionable claim — pending beats earned,
-        most-recent earned wins ties. With max_redemptions_per_user > 1 a user can have
-        multiple rows per campaign; this collapses to one for /deals lookups."""
-        result = await self.db.execute(
-            select(UserBrandCashbackClaim)
-            .where(UserBrandCashbackClaim.user_id == user_id)
-            .order_by(UserBrandCashbackClaim.claimed_at.desc())
+        No-op if the string (after .strip().upper() normalization) is already
+        present as either the exact_line_item or any existing alt. Idempotent.
+        """
+        item = await self.get_line_item_by_id(line_item_id)
+        if item is None:
+            return
+        norm = alt_string.strip().upper()
+        existing_norm = {item.exact_line_item.strip().upper()} | {
+            (a or "").strip().upper() for a in (item.alt_line_items or [])
+        }
+        if norm in existing_norm:
+            return
+        new_alts = list(item.alt_line_items or []) + [alt_string]
+        await self.db.execute(
+            update(BrandCashbackStoreLineItem)
+            .where(BrandCashbackStoreLineItem.id == line_item_id)
+            .values(alt_line_items=new_alts)
         )
-        out: dict[str, UserBrandCashbackClaim] = {}
-        for c in result.scalars().all():
-            existing = out.get(c.campaign_id)
-            if existing is None:
-                out[c.campaign_id] = c
-            elif existing.status != "claimed" and c.status == "claimed":
-                # Pending claim trumps an earned one for actionable status.
-                out[c.campaign_id] = c
-        return out
+        await self.db.flush()
 
-    async def count_user_claims_for_campaign(
+    # ------------------------------------------------------------------
+    # Claims (persistent intent)
+    # ------------------------------------------------------------------
+
+    async def get_user_claim(
+        self, user_id: str, campaign_id: str
+    ) -> Optional[BrandCashbackClaim]:
+        result = await self.db.execute(
+            select(BrandCashbackClaim).where(
+                BrandCashbackClaim.user_id == user_id,
+                BrandCashbackClaim.campaign_id == campaign_id,
+            )
+        )
+        return result.scalar_one_or_none()
+
+    async def get_user_claims_by_campaign(
+        self, user_id: str
+    ) -> dict[str, BrandCashbackClaim]:
+        """Map of campaign_id -> claim for the user. UNIQUE(user_id, campaign_id)
+        guarantees at most one row per pair."""
+        result = await self.db.execute(
+            select(BrandCashbackClaim).where(BrandCashbackClaim.user_id == user_id)
+        )
+        return {c.campaign_id: c for c in result.scalars().all()}
+
+    async def get_user_claims_with_campaigns(
+        self, user_id: str
+    ) -> list[BrandCashbackClaim]:
+        """All claims for a user, with the campaign eagerly loaded — used by the
+        receipt matcher to iterate (claim, campaign) pairs without N+1 reads."""
+        result = await self.db.execute(
+            select(BrandCashbackClaim)
+            .options(selectinload(BrandCashbackClaim.campaign))
+            .where(BrandCashbackClaim.user_id == user_id)
+        )
+        return list(result.scalars().all())
+
+    async def upsert_claim(
+        self, user_id: str, campaign_id: str
+    ) -> BrandCashbackClaim:
+        """Idempotent claim insert. Returns the existing or newly-created row."""
+        stmt = (
+            pg_insert(BrandCashbackClaim)
+            .values(
+                id=str(uuid.uuid4()),
+                user_id=user_id,
+                campaign_id=campaign_id,
+            )
+            .on_conflict_do_nothing(
+                constraint="uq_brand_cashback_claims_user_campaign"
+            )
+        )
+        await self.db.execute(stmt)
+        await self.db.flush()
+        # Re-read to return the canonical row (whether just inserted or pre-existing).
+        existing = await self.get_user_claim(user_id, campaign_id)
+        assert existing is not None
+        return existing
+
+    async def delete_claim(self, user_id: str, campaign_id: str) -> bool:
+        """Delete the user's claim. Returns True if a row was removed."""
+        result = await self.db.execute(
+            delete(BrandCashbackClaim).where(
+                BrandCashbackClaim.user_id == user_id,
+                BrandCashbackClaim.campaign_id == campaign_id,
+            )
+        )
+        await self.db.flush()
+        return (result.rowcount or 0) > 0
+
+    # ------------------------------------------------------------------
+    # Earnings (match events)
+    # ------------------------------------------------------------------
+
+    async def count_user_earnings_for_campaign(
         self, user_id: str, campaign_id: str
     ) -> int:
-        """Total claims (any status) a user has for a single campaign."""
         result = await self.db.execute(
             select(func.count()).where(
-                UserBrandCashbackClaim.user_id == user_id,
-                UserBrandCashbackClaim.campaign_id == campaign_id,
+                BrandCashbackEarning.user_id == user_id,
+                BrandCashbackEarning.campaign_id == campaign_id,
             )
         )
         return result.scalar() or 0
 
-    async def get_active_claim(
-        self, user_id: str, campaign_id: str
-    ) -> Optional[UserBrandCashbackClaim]:
-        """Returns the user's still-pending ('claimed') claim for the campaign, if any."""
+    async def count_earnings_for_campaign(self, campaign_id: str) -> int:
         result = await self.db.execute(
-            select(UserBrandCashbackClaim)
-            .where(
-                UserBrandCashbackClaim.user_id == user_id,
-                UserBrandCashbackClaim.campaign_id == campaign_id,
-                UserBrandCashbackClaim.status == "claimed",
-            )
-            .order_by(UserBrandCashbackClaim.claimed_at.desc())
-            .limit(1)
-        )
-        return result.scalar_one_or_none()
-
-    async def get_claim(self, user_id: str, campaign_id: str) -> Optional[UserBrandCashbackClaim]:
-        result = await self.db.execute(
-            select(UserBrandCashbackClaim).where(
-                UserBrandCashbackClaim.user_id == user_id,
-                UserBrandCashbackClaim.campaign_id == campaign_id,
+            select(func.count()).where(
+                BrandCashbackEarning.campaign_id == campaign_id,
             )
         )
-        return result.scalar_one_or_none()
+        return result.scalar() or 0
 
-    async def get_user_claimed_claims(self, user_id: str) -> list[UserBrandCashbackClaim]:
-        """All claims still in 'claimed' status (awaiting receipt match)."""
+    async def get_user_earnings_by_campaign(
+        self, user_id: str
+    ) -> dict[str, list[BrandCashbackEarning]]:
+        """Group all of a user's earnings by campaign_id (newest first within each)."""
         result = await self.db.execute(
-            select(UserBrandCashbackClaim)
-            .options(selectinload(UserBrandCashbackClaim.campaign))
-            .where(
-                UserBrandCashbackClaim.user_id == user_id,
-                UserBrandCashbackClaim.status == "claimed",
-            )
+            select(BrandCashbackEarning)
+            .where(BrandCashbackEarning.user_id == user_id)
+            .order_by(BrandCashbackEarning.earned_at.desc())
         )
-        return list(result.scalars().all())
+        out: dict[str, list[BrandCashbackEarning]] = {}
+        for e in result.scalars().all():
+            out.setdefault(e.campaign_id, []).append(e)
+        return out
 
-    async def create_claim(self, user_id: str, campaign_id: str) -> UserBrandCashbackClaim:
-        claim = UserBrandCashbackClaim(
-            id=str(uuid.uuid4()),
-            user_id=user_id,
-            campaign_id=campaign_id,
-            status="claimed",
-        )
-        self.db.add(claim)
-        await self.db.flush()
-        return claim
-
-    async def delete_claim(self, user_id: str, campaign_id: str) -> bool:
-        """Removes the user's pending ('claimed') claim for the campaign. Returns True if deleted."""
-        claim = await self.get_active_claim(user_id, campaign_id)
-        if claim is None:
-            return False
-        await self.db.delete(claim)
-        await self.db.flush()
-        return True
-
-    async def mark_claim_earned(
+    async def create_earning(
         self,
-        claim_id: str,
+        user_id: str,
+        campaign_id: str,
         receipt_id: str,
         matched_line_item_id: str,
         cashback_earned_cents: int,
+    ) -> BrandCashbackEarning:
+        earning = BrandCashbackEarning(
+            id=str(uuid.uuid4()),
+            user_id=user_id,
+            campaign_id=campaign_id,
+            receipt_id=receipt_id,
+            matched_line_item_id=matched_line_item_id,
+            cashback_earned_cents=cashback_earned_cents,
+            earned_at=datetime.now(timezone.utc),
+        )
+        self.db.add(earning)
+        await self.db.flush()
+        return earning
+
+    # ------------------------------------------------------------------
+    # Pending matches (manual review queue)
+    # ------------------------------------------------------------------
+
+    async def create_pending_match(
+        self,
+        *,
+        user_id: str,
+        campaign_id: str,
+        receipt_id: str,
+        candidate_string: str,
+        matched_line_item_id: Optional[str],
+        match_score: float,
+        store_name: Optional[str],
+    ) -> Optional[BrandCashbackPendingMatch]:
+        """Idempotent insert; returns existing row if (user, campaign, receipt) collides."""
+        stmt = (
+            pg_insert(BrandCashbackPendingMatch)
+            .values(
+                id=str(uuid.uuid4()),
+                user_id=user_id,
+                campaign_id=campaign_id,
+                receipt_id=receipt_id,
+                candidate_string=candidate_string,
+                matched_line_item_id=matched_line_item_id,
+                match_score=match_score,
+                store_name=store_name,
+            )
+            .on_conflict_do_nothing(
+                constraint="uq_brand_cashback_pending_user_campaign_receipt"
+            )
+        )
+        await self.db.execute(stmt)
+        await self.db.flush()
+        # Re-read so the caller gets the canonical row whether we inserted or hit the conflict.
+        result = await self.db.execute(
+            select(BrandCashbackPendingMatch).where(
+                BrandCashbackPendingMatch.user_id == user_id,
+                BrandCashbackPendingMatch.campaign_id == campaign_id,
+                BrandCashbackPendingMatch.receipt_id == receipt_id,
+            )
+        )
+        return result.scalar_one_or_none()
+
+    async def get_pending_match(self, pending_id: str) -> Optional[BrandCashbackPendingMatch]:
+        """Single fetch with campaign + matched line item eagerly loaded for review/approval."""
+        result = await self.db.execute(
+            select(BrandCashbackPendingMatch)
+            .options(
+                selectinload(BrandCashbackPendingMatch.campaign),
+                selectinload(BrandCashbackPendingMatch.matched_line_item),
+            )
+            .where(BrandCashbackPendingMatch.id == pending_id)
+        )
+        return result.scalar_one_or_none()
+
+    async def get_pending_matches_for_user(
+        self, user_id: str, status: str = "pending"
+    ) -> list[BrandCashbackPendingMatch]:
+        result = await self.db.execute(
+            select(BrandCashbackPendingMatch)
+            .where(
+                BrandCashbackPendingMatch.user_id == user_id,
+                BrandCashbackPendingMatch.status == status,
+            )
+            .order_by(BrandCashbackPendingMatch.created_at.desc())
+        )
+        return list(result.scalars().all())
+
+    async def get_recent_denials_for_user(
+        self, user_id: str, since: datetime
+    ) -> list[BrandCashbackPendingMatch]:
+        """Denied reviews newer than `since`, used for the 7-day in-app banner."""
+        result = await self.db.execute(
+            select(BrandCashbackPendingMatch)
+            .where(
+                BrandCashbackPendingMatch.user_id == user_id,
+                BrandCashbackPendingMatch.status == "denied",
+                BrandCashbackPendingMatch.reviewed_at >= since,
+            )
+            .order_by(BrandCashbackPendingMatch.reviewed_at.desc())
+        )
+        return list(result.scalars().all())
+
+    async def get_pending_matches_for_admin(
+        self, status: Optional[str]
+    ) -> list[BrandCashbackPendingMatch]:
+        stmt = select(BrandCashbackPendingMatch).options(
+            selectinload(BrandCashbackPendingMatch.campaign),
+            selectinload(BrandCashbackPendingMatch.matched_line_item),
+            selectinload(BrandCashbackPendingMatch.user),
+            selectinload(BrandCashbackPendingMatch.receipt),
+        )
+        if status and status != "all":
+            stmt = stmt.where(BrandCashbackPendingMatch.status == status)
+        stmt = stmt.order_by(BrandCashbackPendingMatch.created_at.desc())
+        result = await self.db.execute(stmt)
+        return list(result.scalars().all())
+
+    async def count_pending(self) -> int:
+        result = await self.db.execute(
+            select(func.count()).where(BrandCashbackPendingMatch.status == "pending")
+        )
+        return result.scalar() or 0
+
+    async def lock_pending_match(self, pending_id: str) -> Optional[BrandCashbackPendingMatch]:
+        """SELECT … FOR UPDATE to serialise concurrent admin clicks on the same row."""
+        result = await self.db.execute(
+            select(BrandCashbackPendingMatch)
+            .options(selectinload(BrandCashbackPendingMatch.campaign))
+            .where(BrandCashbackPendingMatch.id == pending_id)
+            .with_for_update()
+        )
+        return result.scalar_one_or_none()
+
+    async def mark_pending_approved(
+        self, pending_id: str, reviewer_id: str, earning_id: str
     ) -> None:
         await self.db.execute(
-            update(UserBrandCashbackClaim)
-            .where(UserBrandCashbackClaim.id == claim_id)
+            update(BrandCashbackPendingMatch)
+            .where(BrandCashbackPendingMatch.id == pending_id)
             .values(
-                status="earned",
-                receipt_id=receipt_id,
-                matched_line_item_id=matched_line_item_id,
-                cashback_earned_cents=cashback_earned_cents,
-                earned_at=datetime.now(timezone.utc),
+                status="approved",
+                reviewed_at=datetime.now(timezone.utc),
+                reviewed_by=reviewer_id,
+                earning_id=earning_id,
+            )
+        )
+        await self.db.flush()
+
+    async def mark_pending_denied(
+        self, pending_id: str, reviewer_id: str, reason: str
+    ) -> None:
+        await self.db.execute(
+            update(BrandCashbackPendingMatch)
+            .where(BrandCashbackPendingMatch.id == pending_id)
+            .values(
+                status="denied",
+                reviewed_at=datetime.now(timezone.utc),
+                reviewed_by=reviewer_id,
+                denial_reason=reason,
             )
         )
         await self.db.flush()
@@ -257,17 +444,14 @@ class BrandCashbackRepository:
     # ------------------------------------------------------------------
 
     async def get_campaign_claim_counts(self, campaign_id: str) -> tuple[int, int]:
-        """Returns (total_claims, earned_claims)."""
-        total_result = await self.db.execute(
-            select(func.count()).where(UserBrandCashbackClaim.campaign_id == campaign_id)
+        """Returns (claims_count, earnings_count) for the campaign."""
+        claims_result = await self.db.execute(
+            select(func.count()).where(BrandCashbackClaim.campaign_id == campaign_id)
         )
-        earned_result = await self.db.execute(
-            select(func.count()).where(
-                UserBrandCashbackClaim.campaign_id == campaign_id,
-                UserBrandCashbackClaim.status == "earned",
-            )
+        earnings_result = await self.db.execute(
+            select(func.count()).where(BrandCashbackEarning.campaign_id == campaign_id)
         )
-        return (total_result.scalar() or 0, earned_result.scalar() or 0)
+        return (claims_result.scalar() or 0, earnings_result.scalar() or 0)
 
     async def get_global_stats(self) -> dict:
         now = datetime.now(timezone.utc)
@@ -278,14 +462,16 @@ class BrandCashbackRepository:
                 BrandCashbackCampaign.valid_until > now,
             )
         )
-        total_claims_result = await self.db.execute(select(func.count(UserBrandCashbackClaim.id)))
-        earned_result = await self.db.execute(
-            select(
-                func.count(UserBrandCashbackClaim.id),
-                func.coalesce(func.sum(UserBrandCashbackClaim.cashback_earned_cents), 0),
-            ).where(UserBrandCashbackClaim.status == "earned")
+        total_claims_result = await self.db.execute(
+            select(func.count(BrandCashbackClaim.id))
         )
-        earned_row = earned_result.one()
+        earnings_result = await self.db.execute(
+            select(
+                func.count(BrandCashbackEarning.id),
+                func.coalesce(func.sum(BrandCashbackEarning.cashback_earned_cents), 0),
+            )
+        )
+        earnings_row = earnings_result.one()
 
         avg_result = await self.db.execute(
             select(func.avg(BrandCashbackCampaign.cashback_amount_cents)).where(
@@ -296,7 +482,7 @@ class BrandCashbackRepository:
         return {
             "total_active_campaigns": active_count_result.scalar() or 0,
             "total_claims": total_claims_result.scalar() or 0,
-            "total_earned_claims": earned_row[0] or 0,
-            "total_earned_euros": (earned_row[1] or 0) / 100,
+            "total_earned_claims": earnings_row[0] or 0,
+            "total_earned_euros": (earnings_row[1] or 0) / 100,
             "avg_cashback_euros": (avg_result.scalar() or 0) / 100,
         }

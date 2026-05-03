@@ -9,7 +9,7 @@ from datetime import datetime, timezone
 from sqlalchemy import select, func, or_, and_
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models.brand_cashback import UserBrandCashbackClaim
+from app.models.brand_cashback import BrandCashbackEarning
 from app.models.referral import Referral
 from app.models.user import User
 from app.models.user_profile import UserProfile
@@ -241,11 +241,10 @@ class ReferralService:
         if not referral:
             return False
 
-        # Verify the referee has at least one earned brand cashback claim
+        # Verify the referee has at least one earned brand cashback
         result = await self.db.execute(
-            select(func.count()).select_from(UserBrandCashbackClaim).where(
-                UserBrandCashbackClaim.user_id == user_id,
-                UserBrandCashbackClaim.status == "earned",
+            select(func.count()).select_from(BrandCashbackEarning).where(
+                BrandCashbackEarning.user_id == user_id,
             )
         )
         earned_count = result.scalar() or 0

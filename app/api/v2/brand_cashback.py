@@ -1,5 +1,5 @@
 import io
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile, status
 from PIL import Image, ImageOps, UnidentifiedImageError
@@ -8,21 +8,31 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.api.deps import get_db, get_current_db_user
 from app.config import get_settings
 from app.db.repositories.brand_cashback_repo import BrandCashbackRepository
-from app.models.brand_cashback import BrandCashbackCampaign
+from app.models.brand_cashback import BrandCashbackCampaign, BrandCashbackPendingMatch
 from app.models.user import User
 from app.schemas.brand_cashback import (
+    AdminApprovePendingRequest,
     AdminCampaignCreate,
     AdminCampaignDeletePreview,
     AdminCampaignResponse,
     AdminCampaignUpdate,
+    AdminDenyPendingRequest,
     AdminLineItemCreate,
     AdminLineItemResponse,
     AdminStatsResponse,
     BrandCashbackClaimResponse,
     BrandCashbackDealResponse,
+    BrandCashbackPendingMatchResponse,
 )
 from app.services.brand_cashback_service import (
+    APPROVE_ALREADY_REVIEWED,
+    APPROVE_CAMPAIGN_FULL,
+    APPROVE_NOT_FOUND,
+    APPROVE_USER_LIMIT,
     BrandCashbackService,
+    DENIAL_BANNER_TTL,
+    _to_denial_summary,
+    _to_pending_summary,
     campaign_to_deal_response,
     image_url_for_key,
     storage,
@@ -111,7 +121,6 @@ async def _build_admin_response(
         earned_count=earned_count,
         terms=campaign.terms,
         how_it_works=campaign.how_it_works or [],
-        claim_window_days=campaign.claim_window_days,
         max_redemptions_per_user=campaign.max_redemptions_per_user,
         total_redemption_cap=campaign.total_redemption_cap,
         category=campaign.category,
@@ -142,11 +151,13 @@ async def claim_deal(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_db_user),
 ):
-    """Claim a cashback deal before uploading a receipt."""
+    """Claim a cashback deal. Idempotent: claiming twice returns the same record."""
     svc = BrandCashbackService(db)
     claim, error = await svc.claim_deal(current_user.id, campaign_id)
     if error == "not_found":
         raise HTTPException(status_code=404, detail="Campaign not found or inactive")
+    if error == "expired":
+        raise HTTPException(status_code=status.HTTP_410_GONE, detail="Campaign has expired")
     if error == "user_limit_reached":
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
@@ -159,7 +170,6 @@ async def claim_deal(
         )
     return BrandCashbackClaimResponse(
         campaign_id=claim.campaign_id,
-        status=claim.status,
         claimed_at=claim.claimed_at,
     )
 
@@ -170,11 +180,11 @@ async def unclaim_deal(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_db_user),
 ):
-    """Remove a claimed deal (only if not yet matched)."""
+    """Remove the user's claim for a deal. Earnings already credited are preserved."""
     svc = BrandCashbackService(db)
     deleted = await svc.unclaim_deal(current_user.id, campaign_id)
     if not deleted:
-        raise HTTPException(status_code=404, detail="Claim not found or already earned")
+        raise HTTPException(status_code=404, detail="Claim not found")
 
 
 @router.get("/my-claims", response_model=list[BrandCashbackDealResponse])
@@ -182,47 +192,112 @@ async def get_my_claims(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_db_user),
 ):
-    """
-    Deals the user has claimed or earned.
-    - 'earned' claims: returned for ALL campaigns (including inactive/deleted-soft ones)
-      so that earned history is never lost.
-    - 'claimed' claims: only returned for still-active, non-expired campaigns.
+    """Deals the user has claimed and/or earned.
+
+    Includes campaigns the user has any relationship with (a claim, earnings, or
+    both), even if the campaign is inactive or expired — earned history is never
+    hidden. The `user_status` is "earned" once earnings reach
+    max_redemptions_per_user, otherwise "claimed".
     """
     repo = BrandCashbackRepository(db)
 
     all_campaigns = await repo.get_all_campaigns(include_inactive=True)
-    claims = await repo.get_user_claims(current_user.id)
-    now = datetime.now(timezone.utc)
+    claims = await repo.get_user_claims_by_campaign(current_user.id)
+    earnings = await repo.get_user_earnings_by_campaign(current_user.id)
+    pendings = {
+        p.campaign_id: p
+        for p in await repo.get_pending_matches_for_user(current_user.id, status="pending")
+    }
+    denials = {
+        d.campaign_id: d
+        for d in await repo.get_recent_denials_for_user(
+            current_user.id, datetime.now(timezone.utc) - DENIAL_BANNER_TTL
+        )
+    }
 
     result = []
     for campaign in all_campaigns:
+        user_earnings = earnings.get(campaign.id, [])
         claim = claims.get(campaign.id)
-        if not claim:
-            continue
-        is_earned = claim.status == "earned"
-        is_active_claim = (
-            claim.status == "claimed" and campaign.is_active and campaign.valid_until > now
-        )
-        if not (is_earned or is_active_claim):
+        pending = pendings.get(campaign.id)
+        denial = denials.get(campaign.id)
+        if not user_earnings and not claim and not pending and not denial:
             continue
 
-        _, earned_count = await repo.get_campaign_claim_counts(campaign.id)
+        _, campaign_earnings = await repo.get_campaign_claim_counts(campaign.id)
         eligible_skus = await repo.get_distinct_exact_line_items(campaign.id)
-        claim_expires_at = None
-        if is_active_claim:
-            claim_expires_at = claim.claimed_at + timedelta(days=campaign.claim_window_days)
+
+        earnings_count = len(user_earnings)
+        if earnings_count >= campaign.max_redemptions_per_user:
+            user_status = "earned"
+        else:
+            user_status = "claimed"
 
         result.append(
             campaign_to_deal_response(
                 campaign,
-                "earned" if is_earned else "claimed",
-                current_redemptions=earned_count,
+                user_status,
+                current_redemptions=campaign_earnings,
                 eligible_skus=eligible_skus,
-                claim_expires_at=claim_expires_at,
-                earned_at=claim.earned_at if is_earned else None,
+                earnings_count=earnings_count,
+                claimed_at=claim.claimed_at if claim else None,
+                earned_at=user_earnings[0].earned_at if user_earnings else None,
+                pending_review=_to_pending_summary(pending) if pending else None,
+                recent_denial=_to_denial_summary(denial) if denial else None,
             )
         )
     return result
+
+
+def _pending_to_response(
+    p: BrandCashbackPendingMatch,
+    *,
+    include_admin_context: bool = False,
+) -> BrandCashbackPendingMatchResponse:
+    """Map a pending row → API response. With include_admin_context, attach the
+    campaign metadata, canonical line-item strings and a presigned receipt URL
+    so the admin page can render the diff + image without extra round trips."""
+    response = BrandCashbackPendingMatchResponse(
+        id=p.id,
+        user_id=p.user_id,
+        campaign_id=p.campaign_id,
+        receipt_id=p.receipt_id,
+        candidate_string=p.candidate_string,
+        matched_line_item_id=p.matched_line_item_id,
+        match_score=p.match_score,
+        store_name=p.store_name,
+        status=p.status,
+        created_at=p.created_at,
+        reviewed_at=p.reviewed_at,
+        reviewed_by=p.reviewed_by,
+        denial_reason=p.denial_reason,
+        earning_id=p.earning_id,
+    )
+    if include_admin_context:
+        if p.campaign:
+            response.brand_name = p.campaign.brand_name
+            response.product_name = p.campaign.product_name
+            response.cashback_amount_cents = p.campaign.cashback_amount_cents
+        if p.matched_line_item:
+            response.canonical_line_item = p.matched_line_item.exact_line_item
+            response.canonical_alts = list(p.matched_line_item.alt_line_items or [])
+        if p.receipt and getattr(p.receipt, "storage_key", None):
+            response.receipt_image_url = image_url_for_key(p.receipt.storage_key)
+    return response
+
+
+@router.get(
+    "/my-pending-reviews",
+    response_model=list[BrandCashbackPendingMatchResponse],
+)
+async def get_my_pending_reviews(
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_db_user),
+):
+    """Pending admin reviews for receipts the user uploaded. Read-only."""
+    repo = BrandCashbackRepository(db)
+    rows = await repo.get_pending_matches_for_user(current_user.id, status="pending")
+    return [_pending_to_response(p) for p in rows]
 
 
 # ---------------------------------------------------------------------------
@@ -490,4 +565,93 @@ async def admin_get_stats(
     _require_admin(current_user)
     repo = BrandCashbackRepository(db)
     stats = await repo.get_global_stats()
+    stats["pending_reviews"] = await repo.count_pending()
     return AdminStatsResponse(**stats)
+
+
+# ---------------------------------------------------------------------------
+# Admin: pending-review queue
+# ---------------------------------------------------------------------------
+
+
+@router.get(
+    "/admin/pending-matches",
+    response_model=list[BrandCashbackPendingMatchResponse],
+)
+async def admin_list_pending_matches(
+    status: str = Query("pending", pattern="^(pending|approved|denied|all)$"),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_db_user),
+):
+    """Lists pending review rows. `status=all` returns every row regardless of state."""
+    _require_admin(current_user)
+    repo = BrandCashbackRepository(db)
+    rows = await repo.get_pending_matches_for_admin(status)
+    return [_pending_to_response(p, include_admin_context=True) for p in rows]
+
+
+@router.post(
+    "/admin/pending-matches/{pending_id}/approve",
+    response_model=BrandCashbackPendingMatchResponse,
+)
+async def admin_approve_pending_match(
+    pending_id: str,
+    payload: AdminApprovePendingRequest,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_db_user),
+):
+    """Approve → create earning, credit points, optionally extend alt_line_items."""
+    _require_admin(current_user)
+    svc = BrandCashbackService(db)
+    earning, error = await svc.approve_pending_match(
+        pending_id, current_user.id, payload.add_to_alts
+    )
+    if error == APPROVE_NOT_FOUND:
+        raise HTTPException(status_code=404, detail="Pending review not found")
+    if error == APPROVE_ALREADY_REVIEWED:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="This review has already been processed",
+        )
+    if error == APPROVE_CAMPAIGN_FULL:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="Campaign cap reached during review — auto-denied",
+        )
+    if error == APPROVE_USER_LIMIT:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="User per-campaign limit reached during review — auto-denied",
+        )
+    if error:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=error
+        )
+
+    # Re-fetch with admin context for consistent response shape.
+    repo = BrandCashbackRepository(db)
+    refreshed = await repo.get_pending_match(pending_id)
+    return _pending_to_response(refreshed, include_admin_context=True)
+
+
+@router.post(
+    "/admin/pending-matches/{pending_id}/deny",
+    status_code=status.HTTP_204_NO_CONTENT,
+)
+async def admin_deny_pending_match(
+    pending_id: str,
+    payload: AdminDenyPendingRequest,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_db_user),
+):
+    """Deny → marks as denied, surfaces reason to user for 7 days."""
+    _require_admin(current_user)
+    svc = BrandCashbackService(db)
+    error = await svc.deny_pending_match(pending_id, current_user.id, payload.reason)
+    if error == APPROVE_NOT_FOUND:
+        raise HTTPException(status_code=404, detail="Pending review not found")
+    if error == APPROVE_ALREADY_REVIEWED:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="This review has already been processed",
+        )
