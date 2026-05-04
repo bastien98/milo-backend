@@ -549,35 +549,33 @@ class BrandCashbackService:
             {"user_id": pending.user_id},
         )
 
+        async def _auto_deny(reason: str) -> tuple[None, str]:
+            """Mark the pending row denied AND commit before returning, so the
+            FastAPI HTTPException downstream doesn't roll back the auto-deny.
+            Without this commit, get_db's `except: rollback` reverts the deny
+            because raising HTTPException counts as an exception in that scope.
+            """
+            await self.repo.mark_pending_denied(pending_id, reviewer_id, reason)
+            await self.db.commit()
+            return None, reason
+
         # Re-check campaign validity — the pending row may have aged. Admin
         # could have deactivated, expired, or shifted the window since queue.
         if not campaign.is_active:
-            await self.repo.mark_pending_denied(
-                pending_id, reviewer_id, APPROVE_CAMPAIGN_INACTIVE
-            )
-            return None, APPROVE_CAMPAIGN_INACTIVE
+            return await _auto_deny(APPROVE_CAMPAIGN_INACTIVE)
         if campaign.valid_until <= now:
-            await self.repo.mark_pending_denied(
-                pending_id, reviewer_id, APPROVE_CAMPAIGN_EXPIRED
-            )
-            return None, APPROVE_CAMPAIGN_EXPIRED
+            return await _auto_deny(APPROVE_CAMPAIGN_EXPIRED)
         if pending.receipt and pending.receipt.receipt_date:
             rd = pending.receipt.receipt_date
             if not (campaign.valid_from.date() <= rd <= campaign.valid_until.date()):
-                await self.repo.mark_pending_denied(
-                    pending_id, reviewer_id, APPROVE_RECEIPT_OUTSIDE
-                )
-                return None, APPROVE_RECEIPT_OUTSIDE
+                return await _auto_deny(APPROVE_RECEIPT_OUTSIDE)
 
         # Re-check caps; state may have shifted between queue and review.
         user_earnings = await self.repo.count_user_earnings_for_campaign(
             pending.user_id, pending.campaign_id
         )
         if user_earnings >= campaign.max_redemptions_per_user:
-            await self.repo.mark_pending_denied(
-                pending_id, reviewer_id, APPROVE_USER_LIMIT
-            )
-            return None, APPROVE_USER_LIMIT
+            return await _auto_deny(APPROVE_USER_LIMIT)
 
         if campaign.total_redemption_cap is not None:
             await self.repo.lock_campaign_for_cap_check(campaign.id)
@@ -585,18 +583,12 @@ class BrandCashbackService:
                 pending.campaign_id
             )
             if campaign_earnings >= campaign.total_redemption_cap:
-                await self.repo.mark_pending_denied(
-                    pending_id, reviewer_id, APPROVE_CAMPAIGN_FULL
-                )
-                return None, APPROVE_CAMPAIGN_FULL
+                return await _auto_deny(APPROVE_CAMPAIGN_FULL)
 
         if not pending.matched_line_item_id:
             # Should not happen — pending rows are created with a matched line item —
             # but guard against orphans (e.g. line item deleted after queueing).
-            await self.repo.mark_pending_denied(
-                pending_id, reviewer_id, "matched_line_item_missing"
-            )
-            return None, "matched_line_item_missing"
+            return await _auto_deny("matched_line_item_missing")
 
         earning = await self.repo.create_earning(
             user_id=pending.user_id,

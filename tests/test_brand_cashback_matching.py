@@ -76,8 +76,10 @@ def _service_with_claims(claims: list[_StubClaim]) -> tuple[BrandCashbackService
     db = MagicMock()
     # The matcher now executes raw SQL for the per-user advisory lock and the
     # campaign-cap row lock — make `db.execute` awaitable so those don't blow
-    # up under MagicMock's default sync behaviour.
+    # up under MagicMock's default sync behaviour. Same for `db.commit` —
+    # approve_pending_match's auto-deny commits before returning the error.
     db.execute = AsyncMock()
+    db.commit = AsyncMock()
     svc = BrandCashbackService(db)
 
     repo = MagicMock()
