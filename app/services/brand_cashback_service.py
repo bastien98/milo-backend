@@ -1,6 +1,6 @@
 import logging
 from dataclasses import dataclass
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
 from difflib import SequenceMatcher
 from typing import Optional
 
@@ -271,6 +271,7 @@ class BrandCashbackService:
         user_id: str,
         receipt_line_items: list[ReceiptLineItemForMatching],
         store_name: Optional[str],
+        receipt_date: Optional[date],
     ) -> int:
         """For each campaign the user has claimed, attempt to match a receipt line item.
 
@@ -292,6 +293,9 @@ class BrandCashbackService:
         rows are not counted.
 
         Validity per claim:
+          - receipt_date is non-null (proof-of-purchase day must be present)
+          - receipt_date in [campaign.valid_from, campaign.valid_until], inclusive,
+            day-precision (calendar day on both ends)
           - campaign is_active and not past valid_until
           - per-user earnings count < max_redemptions_per_user
           - campaign-wide earnings < total_redemption_cap (if set)
@@ -299,6 +303,17 @@ class BrandCashbackService:
         """
         claims = await self.repo.get_user_claims_with_campaigns(user_id)
         if not claims:
+            return 0
+
+        # Hard reject: no usable proof-of-purchase date → nothing matches.
+        # Today's prod data shows Gemini extracts dates reliably (0/58 nulls),
+        # but a missing date is a fraud vector against tampered/unreadable
+        # images, so we refuse to credit a wallet without one.
+        if receipt_date is None:
+            logger.info(
+                f"Brand cashback: receipt {receipt_id} has no parseable date — "
+                f"skipping all matching for user={user_id}"
+            )
             return 0
 
         balance_repo = BrandCashbackBalanceRepository(self.db)
@@ -310,6 +325,19 @@ class BrandCashbackService:
             if not campaign or not campaign.is_active:
                 continue
             if campaign.valid_until <= now:
+                continue
+
+            # Receipt must fall inside the campaign window (calendar-day,
+            # inclusive on both ends). Backdated receipts (purchased before
+            # the campaign existed) and forward-dated receipts past the end
+            # are categorically disqualified — silent skip, no review queue
+            # entry, since there's nothing for an admin to approve.
+            if not (campaign.valid_from.date() <= receipt_date <= campaign.valid_until.date()):
+                logger.info(
+                    f"Brand cashback: receipt {receipt_id} date={receipt_date} is outside "
+                    f"campaign {campaign.id} window "
+                    f"[{campaign.valid_from.date()}..{campaign.valid_until.date()}] — skipping"
+                )
                 continue
 
             # Per-user cap.

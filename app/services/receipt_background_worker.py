@@ -252,6 +252,7 @@ async def process_receipt_background(
                     user_id=user_id,
                     receipt_line_items=receipt_items_for_matching,
                     store_name=cleaned_store_name,
+                    receipt_date=extraction_result.receipt_date,
                 )
                 await session.commit()
                 logger.info(f"⏱ bg_brand_cashback: {time.monotonic() - t0:.3f}s")
