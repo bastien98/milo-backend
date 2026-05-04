@@ -201,6 +201,8 @@ class GeminiVisionService:
 ## ITEM FIELD RULES
 
 ### item_name — Receipt Text Cleaning
+Read every character on the line. Do not skip, swap, or substitute letters or digits — even on dense or stylised text. If a character is unclear, prefer reading it twice rather than guessing.
+
 Extract the core product text from the receipt line. You must clean the string to ensure exact-matching in a database. CRITICAL: the brand-cashback matcher does case-insensitive equality on this string against admin-configured line items, so consistency across receipts of the same SKU matters more than aesthetic normalization. Apply ONLY the strip rules below — do not paraphrase, abbreviate, expand, or "clean up" the wording further.
 
 KEEP: brand name, product name, variant, size/packaging info (e.g., "500g", "1,5L PET", "6x33cl").
@@ -390,11 +392,19 @@ Extract all line items from this receipt.'''
                     config=types.GenerateContentConfig(
                         system_instruction=system_prompt,
                         max_output_tokens=self.MAX_TOKENS,
-                        temperature=1.0,
+                        # OCR is a transcription task — exactly one ground-truth
+                        # output exists. Sampling-driven variance produced
+                        # OUDENDIJK ↔ OUENDIJK on the same physical receipt
+                        # across uploads. temperature=0 forces greedy decoding.
+                        temperature=0,
                         thinking_config=types.ThinkingConfig(thinking_level="low"),
                         response_mime_type="application/json",
                         response_schema=_ReceiptSchema,
-                        media_resolution=types.MediaResolution.MEDIA_RESOLUTION_MEDIUM,
+                        # HIGH gives the model more image tokens per page so
+                        # dense, stylised receipt text disambiguates better at
+                        # the character level. ~2× input tokens vs MEDIUM, but
+                        # OCR runs once per upload so the cost is acceptable.
+                        media_resolution=types.MediaResolution.MEDIA_RESOLUTION_HIGH,
                     ),
                 )
             generate_elapsed = time.monotonic() - t1
