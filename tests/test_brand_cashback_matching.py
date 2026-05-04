@@ -76,6 +76,12 @@ def _service_with_claims(claims: list[_StubClaim]) -> tuple[BrandCashbackService
     svc = BrandCashbackService(db)
 
     repo = MagicMock()
+    # Matcher now uses the cap-pre-filtered method. Tests pass the claim list
+    # they want the matcher to see; capped claims are simulated by NOT
+    # including them in `claims`.
+    repo.get_active_claims_for_matching = AsyncMock(return_value=claims)
+    # Legacy method still exists (read-side surfaces use it); keep stubbed
+    # for any test that might check it isn't called by the matcher.
     repo.get_user_claims_with_campaigns = AsyncMock(return_value=claims)
     repo.count_user_earnings_for_campaign = AsyncMock(return_value=0)
     repo.count_earnings_for_campaign = AsyncMock(return_value=0)
@@ -246,3 +252,90 @@ def test_one_campaign_in_window_other_out_skips_only_the_out_one():
     assert n == 0
     # Line-item lookup ran exactly once — for the in-window campaign only.
     assert repo.get_line_items_for_campaign.await_count == 1
+
+
+# ---------------------------------------------------------------------------
+# Cap-pre-filter tests: matcher reads only non-capped claims via repo
+# ---------------------------------------------------------------------------
+
+def test_capped_claim_never_reaches_matcher():
+    """When the user is at cap, the repo returns [] for that user. The matcher
+    short-circuits with no per-claim work and no log noise."""
+    # Repo returns [] — emulating the cap-pre-filter excluding all claims.
+    svc, repo = _service_with_claims([])
+
+    with patch(
+        "app.services.brand_cashback_service.BrandCashbackBalanceRepository"
+    ) as balance_cls:
+        balance_cls.return_value.credit = AsyncMock()
+
+        n = _run(svc.check_receipt_for_brand_cashback(
+            receipt_id="r1",
+            user_id="u1",
+            receipt_line_items=[ReceiptLineItemForMatching(text="X", codes=())],
+            store_name=None,
+            receipt_date=date.today(),
+        ))
+
+    assert n == 0
+    # Critical: the matcher must consult the new pre-filtered method, NOT the
+    # legacy unfiltered one.
+    repo.get_active_claims_for_matching.assert_awaited_once_with("u1")
+    repo.get_user_claims_with_campaigns.assert_not_awaited()
+    repo.count_user_earnings_for_campaign.assert_not_awaited()
+    repo.get_line_items_for_campaign.assert_not_awaited()
+    repo.create_earning.assert_not_awaited()
+    repo.create_pending_match.assert_not_awaited()
+
+
+def test_non_capped_claim_runs_through_matcher_normally():
+    """Claim returned by the pre-filter (non-capped) → date gate + line item
+    lookup execute normally."""
+    c = _campaign(valid_from_offset_days=-1, valid_until_offset_days=30)
+    svc, repo = _service_with_claims([_StubClaim(c)])
+
+    with patch(
+        "app.services.brand_cashback_service.BrandCashbackBalanceRepository"
+    ) as balance_cls:
+        balance_cls.return_value.credit = AsyncMock()
+
+        n = _run(svc.check_receipt_for_brand_cashback(
+            receipt_id="r1",
+            user_id="u1",
+            receipt_line_items=[ReceiptLineItemForMatching(text="X", codes=())],
+            store_name=None,
+            receipt_date=date.today(),
+        ))
+
+    # Date gate passed, line items fetched (empty list returned by stub → no match).
+    assert n == 0
+    repo.get_active_claims_for_matching.assert_awaited_once()
+    repo.get_line_items_for_campaign.assert_awaited_once()
+    # No redundant cap COUNT — pre-filter handled it.
+    repo.count_user_earnings_for_campaign.assert_not_awaited()
+
+
+def test_mixed_only_non_capped_passed_to_matcher():
+    """Repo emulates pre-filter by passing only the non-capped claim. Matcher
+    iterates ONE campaign, the in-window one. The capped one isn't even seen."""
+    in_window = _campaign(valid_from_offset_days=-1, valid_until_offset_days=30)
+    # Note: we don't include the capped claim in the list — that's the contract
+    # of the pre-filtered method.
+    svc, repo = _service_with_claims([_StubClaim(in_window)])
+
+    with patch(
+        "app.services.brand_cashback_service.BrandCashbackBalanceRepository"
+    ) as balance_cls:
+        balance_cls.return_value.credit = AsyncMock()
+
+        n = _run(svc.check_receipt_for_brand_cashback(
+            receipt_id="r1",
+            user_id="u1",
+            receipt_line_items=[ReceiptLineItemForMatching(text="X", codes=())],
+            store_name=None,
+            receipt_date=date.today(),
+        ))
+
+    assert n == 0
+    # Exactly one campaign considered (the non-capped, in-window one).
+    repo.get_line_items_for_campaign.assert_awaited_once()

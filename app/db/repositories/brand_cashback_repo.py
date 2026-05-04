@@ -254,13 +254,59 @@ class BrandCashbackRepository:
     async def get_user_claims_with_campaigns(
         self, user_id: str
     ) -> list[BrandCashbackClaim]:
-        """All claims for a user, with the campaign eagerly loaded — used by the
-        receipt matcher to iterate (claim, campaign) pairs without N+1 reads."""
+        """All claims for a user, with the campaign eagerly loaded.
+
+        Used by read-side surfaces (`/deals`, `/my-claims`, `_resolve_user_status`,
+        `claim_deal`) that need to see capped claims too — to render "earned"
+        cards, reject re-claims with 409, etc. The matcher uses
+        `get_active_claims_for_matching` instead, which filters out capped
+        claims pre-emptively.
+        """
         result = await self.db.execute(
             select(BrandCashbackClaim)
             .options(selectinload(BrandCashbackClaim.campaign))
             .where(BrandCashbackClaim.user_id == user_id)
         )
+        return list(result.scalars().all())
+
+    async def get_active_claims_for_matching(
+        self, user_id: str
+    ) -> list[BrandCashbackClaim]:
+        """Claims the matcher should evaluate on a new receipt.
+
+        Filters out claims where the user has already reached the campaign's
+        per-user cap. The cap is computed via a correlated subquery on
+        `BrandCashbackEarning` so we get one round-trip (no N+1 COUNTs) and
+        the result auto-revives if `max_redemptions_per_user` is later raised
+        — there's no persistent "consumed" flag on the claim row to keep in
+        sync.
+
+        Mirrors `get_user_claims_with_campaigns`'s eager-load of the campaign
+        so the matcher loop can read `claim.campaign.*` without lazy-loading.
+        """
+        earnings_count = (
+            select(func.count(BrandCashbackEarning.id))
+            .where(
+                BrandCashbackEarning.user_id == BrandCashbackClaim.user_id,
+                BrandCashbackEarning.campaign_id == BrandCashbackClaim.campaign_id,
+            )
+            .correlate(BrandCashbackClaim)
+            .scalar_subquery()
+        )
+
+        stmt = (
+            select(BrandCashbackClaim)
+            .options(selectinload(BrandCashbackClaim.campaign))
+            .join(
+                BrandCashbackCampaign,
+                BrandCashbackCampaign.id == BrandCashbackClaim.campaign_id,
+            )
+            .where(
+                BrandCashbackClaim.user_id == user_id,
+                earnings_count < BrandCashbackCampaign.max_redemptions_per_user,
+            )
+        )
+        result = await self.db.execute(stmt)
         return list(result.scalars().all())
 
     async def upsert_claim(

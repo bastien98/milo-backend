@@ -292,16 +292,17 @@ class BrandCashbackService:
         Returns the count of *instant* earnings created on this receipt; queued
         rows are not counted.
 
-        Validity per claim:
-          - receipt_date is non-null (proof-of-purchase day must be present)
-          - receipt_date in [campaign.valid_from, campaign.valid_until], inclusive,
-            day-precision (calendar day on both ends)
-          - campaign is_active and not past valid_until
-          - per-user earnings count < max_redemptions_per_user
-          - campaign-wide earnings < total_redemption_cap (if set)
-          - if requires_store: store_name must be in eligible_stores
+        Gate order (each gate fires its own skip log only when it is THE
+        reason — earlier gates take priority):
+          1. receipt_date is non-null (top-of-function early-out for whole receipt)
+          2. claim list pre-filtered by repo: capped claims excluded entirely
+             (see `get_active_claims_for_matching`)
+          3. campaign is_active and not past valid_until
+          4. campaign-wide earnings < total_redemption_cap (if set)
+          5. receipt_date in [valid_from, valid_until], inclusive, day-precision
+          6. if requires_store: store_name must be in eligible_stores
         """
-        claims = await self.repo.get_user_claims_with_campaigns(user_id)
+        claims = await self.repo.get_active_claims_for_matching(user_id)
         if not claims:
             return 0
 
@@ -327,6 +328,24 @@ class BrandCashbackService:
             if campaign.valid_until <= now:
                 continue
 
+            # Per-user cap is enforced upstream by `get_active_claims_for_matching`
+            # — capped claims are not in this list. No redundant COUNT here.
+
+            # Campaign-wide cap (race-safe re-check). Different scope than the
+            # per-user cap: it CAN flip during a single receipt's processing
+            # if another user wins the race for the last slot, so we still
+            # check it inline.
+            if campaign.total_redemption_cap is not None:
+                campaign_earnings = await self.repo.count_earnings_for_campaign(
+                    campaign.id
+                )
+                if campaign_earnings >= campaign.total_redemption_cap:
+                    logger.info(
+                        f"Brand cashback: campaign {campaign.id} full "
+                        f"({campaign_earnings}/{campaign.total_redemption_cap}) — skipping match"
+                    )
+                    continue
+
             # Receipt must fall inside the campaign window (calendar-day,
             # inclusive on both ends). Backdated receipts (purchased before
             # the campaign existed) and forward-dated receipts past the end
@@ -339,25 +358,6 @@ class BrandCashbackService:
                     f"[{campaign.valid_from.date()}..{campaign.valid_until.date()}] — skipping"
                 )
                 continue
-
-            # Per-user cap.
-            user_earnings = await self.repo.count_user_earnings_for_campaign(
-                user_id, campaign.id
-            )
-            if user_earnings >= campaign.max_redemptions_per_user:
-                continue
-
-            # Campaign-wide cap (race-safe re-check).
-            if campaign.total_redemption_cap is not None:
-                campaign_earnings = await self.repo.count_earnings_for_campaign(
-                    campaign.id
-                )
-                if campaign_earnings >= campaign.total_redemption_cap:
-                    logger.info(
-                        f"Brand cashback: campaign {campaign.id} full "
-                        f"({campaign_earnings}/{campaign.total_redemption_cap}) — skipping match"
-                    )
-                    continue
 
             # Store eligibility.
             if campaign.requires_store:
