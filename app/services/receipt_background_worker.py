@@ -234,13 +234,22 @@ async def process_receipt_background(
             # Step 7: Check brand cashback deals (the only earning path — non-fatal).
             try:
                 t0 = time.monotonic()
-                from app.services.brand_cashback_service import BrandCashbackService
+                from app.services.brand_cashback_service import (
+                    BrandCashbackService,
+                    ReceiptLineItemForMatching,
+                )
                 brand_cb_svc = BrandCashbackService(session)
-                receipt_item_names = [item.item_name for item in extraction_result.line_items]
+                receipt_items_for_matching = [
+                    ReceiptLineItemForMatching(
+                        text=item.item_name,
+                        code=item.dp_article_code,
+                    )
+                    for item in extraction_result.line_items
+                ]
                 await brand_cb_svc.check_receipt_for_brand_cashback(
                     receipt_id=receipt_id,
                     user_id=user_id,
-                    receipt_line_items=receipt_item_names,
+                    receipt_line_items=receipt_items_for_matching,
                     store_name=cleaned_store_name,
                 )
                 await session.commit()

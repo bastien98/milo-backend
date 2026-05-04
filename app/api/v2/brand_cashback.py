@@ -97,6 +97,20 @@ def _require_admin(current_user: User) -> None:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Admin only")
 
 
+def _line_item_to_response(item) -> AdminLineItemResponse:
+    return AdminLineItemResponse(
+        id=item.id,
+        campaign_id=item.campaign_id,
+        store_name=item.store_name,
+        exact_line_item=item.exact_line_item,
+        alt_line_items=item.alt_line_items or [],
+        product_codes=item.product_codes or [],
+        notes=item.notes,
+        verified_at=item.verified_at,
+        created_at=item.created_at,
+    )
+
+
 async def _build_admin_response(
     campaign: BrandCashbackCampaign,
     repo: BrandCashbackRepository,
@@ -498,16 +512,7 @@ async def admin_add_line_item(
     data = payload.model_dump()
     data["campaign_id"] = campaign_id
     item = await repo.create_line_item(data)
-    return AdminLineItemResponse(
-        id=item.id,
-        campaign_id=item.campaign_id,
-        store_name=item.store_name,
-        exact_line_item=item.exact_line_item,
-        alt_line_items=item.alt_line_items or [],
-        notes=item.notes,
-        verified_at=item.verified_at,
-        created_at=item.created_at,
-    )
+    return _line_item_to_response(item)
 
 
 @router.get(
@@ -522,19 +527,7 @@ async def admin_list_line_items(
     _require_admin(current_user)
     repo = BrandCashbackRepository(db)
     items = await repo.get_line_items_for_campaign(campaign_id)
-    return [
-        AdminLineItemResponse(
-            id=i.id,
-            campaign_id=i.campaign_id,
-            store_name=i.store_name,
-            exact_line_item=i.exact_line_item,
-            alt_line_items=i.alt_line_items or [],
-            notes=i.notes,
-            verified_at=i.verified_at,
-            created_at=i.created_at,
-        )
-        for i in items
-    ]
+    return [_line_item_to_response(i) for i in items]
 
 
 @router.patch("/admin/line-items/{line_item_id}", response_model=AdminLineItemResponse)
@@ -549,16 +542,7 @@ async def admin_update_line_item(
     item = await repo.update_line_item(line_item_id, payload.model_dump())
     if not item:
         raise HTTPException(status_code=404, detail="Line item not found")
-    return AdminLineItemResponse(
-        id=item.id,
-        campaign_id=item.campaign_id,
-        store_name=item.store_name,
-        exact_line_item=item.exact_line_item,
-        alt_line_items=item.alt_line_items or [],
-        notes=item.notes,
-        verified_at=item.verified_at,
-        created_at=item.created_at,
-    )
+    return _line_item_to_response(item)
 
 
 @router.delete("/admin/line-items/{line_item_id}", status_code=status.HTTP_204_NO_CONTENT)

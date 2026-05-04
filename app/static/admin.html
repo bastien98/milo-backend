@@ -370,6 +370,12 @@
               class="w-full bg-zinc-900 border border-zinc-800 rounded-lg px-3 py-2 text-sm font-mono focus:outline-none focus:border-green-500 resize-none"></textarea>
           </div>
           <div>
+            <label id="li-codes-label" class="block text-xs text-zinc-500 mb-1">Product Codes (one per line, optional)</label>
+            <textarea id="li-codes" rows="2" placeholder="Optional — leave empty for text matching"
+              class="w-full bg-zinc-900 border border-zinc-800 rounded-lg px-3 py-2 text-sm font-mono focus:outline-none focus:border-green-500 resize-none"></textarea>
+            <p id="li-codes-hint" class="text-[11px] text-zinc-500 mt-1">EAN for Delhaize, artikel nummer for Colruyt. Leave empty for stores that don't print codes (Albert Heijn, Carrefour, Aldi, Lidl).</p>
+          </div>
+          <div>
             <label class="block text-xs text-zinc-500 mb-1">Notes (optional)</label>
             <input id="li-notes" type="text" placeholder="Verified against Colruyt receipt #12345"
               class="w-full bg-zinc-900 border border-zinc-800 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-green-500">
@@ -425,6 +431,31 @@
       "Lidl", "Aldi", "Albert Heijn", "AH To Go",
       "Okay", "OKay Compact", "Spar", "Bio-Planet", "Jumbo"
     ];
+    // Mirrors the server-side CODE_REQUIRED_STORES set — server enforces the contract.
+    const CODE_REQUIRED_STORES = new Set(["colruyt", "delhaize"]);
+    function storeRequiresCode(name) {
+      return CODE_REQUIRED_STORES.has((name || "").trim().toLowerCase());
+    }
+    function applyCodeFieldMode(storeName) {
+      const codes = document.getElementById("li-codes");
+      const label = document.getElementById("li-codes-label");
+      const hint = document.getElementById("li-codes-hint");
+      if (storeRequiresCode(storeName)) {
+        codes.required = true;
+        label.innerHTML = 'Product Codes <span class="text-red-400">*</span> (one per line)';
+        codes.placeholder = storeName.toLowerCase() === "delhaize"
+          ? "e.g. 5410123456789"
+          : "e.g. 123456";
+        hint.textContent = `Required for ${storeName}. Each code: digits only, 4-14 chars.`;
+        hint.className = "text-[11px] text-amber-400 mt-1";
+      } else {
+        codes.required = false;
+        label.textContent = "Product Codes (one per line, optional)";
+        codes.placeholder = "Optional — leave empty for text matching";
+        hint.textContent = "EAN for Delhaize, artikel nummer for Colruyt. Leave empty for stores that don't print codes (Albert Heijn, Carrefour, Aldi, Lidl).";
+        hint.className = "text-[11px] text-zinc-500 mt-1";
+      }
+    }
 
     async function apiFetch(path, options = {}) {
       const user = auth.currentUser;
@@ -799,9 +830,11 @@
       // Populate store dropdown
       const select = document.getElementById("li-store");
       select.innerHTML = BELGIAN_STORES.map(s => `<option value="${s}">${s}</option>`).join("");
+      select.onchange = () => applyCodeFieldMode(select.value);
 
       // Reset form
       document.getElementById("lineitem-form").reset();
+      applyCodeFieldMode(select.value);
       hide("lineitem-error");
 
       // Load existing
@@ -824,11 +857,21 @@
         listEl.innerHTML = `<div class="text-zinc-500 text-xs py-2 italic">No line items yet. Add one below.</div>`;
         return;
       }
-      listEl.innerHTML = items.map(item => `
+      listEl.innerHTML = items.map(item => {
+        const codes = item.product_codes || [];
+        const isCodeMode = codes.length > 0;
+        const modeChip = isCodeMode
+          ? `<span class="text-[10px] font-bold px-1.5 py-0.5 rounded bg-green-500/20 text-green-400 ml-2">code-match</span>`
+          : `<span class="text-[10px] font-bold px-1.5 py-0.5 rounded bg-zinc-700/40 text-zinc-400 ml-2">text-match</span>`;
+        return `
         <div class="bg-zinc-900/50 border border-zinc-800 rounded-lg p-3 flex items-start gap-3">
           <div class="flex-1 min-w-0">
-            <div class="text-xs cashback-gold font-semibold mb-1">${escapeHtml(item.store_name)}</div>
+            <div class="text-xs cashback-gold font-semibold mb-1 flex items-center">${escapeHtml(item.store_name)}${modeChip}</div>
             <div class="text-sm font-mono truncate">${escapeHtml(item.exact_line_item)}</div>
+            ${codes.length ? `
+              <div class="text-xs text-green-400 mt-1 font-mono">
+                ${codes.map(c => `<span class="bg-green-500/10 px-1.5 py-0.5 rounded mr-1">${escapeHtml(c)}</span>`).join("")}
+              </div>` : ""}
             ${item.alt_line_items.length ? `
               <div class="text-xs text-zinc-500 mt-1 font-mono">
                 + ${item.alt_line_items.map(escapeHtml).join(", ")}
@@ -837,7 +880,7 @@
           </div>
           <button data-item-id="${item.id}" class="delete-lineitem text-xs text-red-400 hover:text-red-300 flex-shrink-0">✕</button>
         </div>
-      `).join("");
+      `;}).join("");
 
       listEl.querySelectorAll(".delete-lineitem").forEach(btn => {
         btn.addEventListener("click", async () => {
@@ -862,11 +905,21 @@
 
       const alts = document.getElementById("li-alts").value
         .split("\n").map(s => s.trim()).filter(Boolean);
+      const codes = document.getElementById("li-codes").value
+        .split("\n").map(s => s.trim()).filter(Boolean);
+
+      const storeName = document.getElementById("li-store").value;
+      if (storeRequiresCode(storeName) && codes.length === 0) {
+        errEl.textContent = `Product codes are required for ${storeName}.`;
+        show("lineitem-error");
+        return;
+      }
 
       const payload = {
-        store_name: document.getElementById("li-store").value,
+        store_name: storeName,
         exact_line_item: document.getElementById("li-exact").value.trim(),
         alt_line_items: alts,
+        product_codes: codes,
         notes: document.getElementById("li-notes").value.trim() || null
       };
 

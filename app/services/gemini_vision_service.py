@@ -336,7 +336,7 @@ dp_pack_quantity: multi-pack count → "6X33CL"→6, "4x125g"→4, single→1
 dp_per_item_size: ONE item size, raw number, do NOT multiply by pack qty → "6X33CL"→33, "1,5L"→1.5, "500g"→500
 dp_pack_unit: unit as printed, lowercase: "cl","ml","l","g","kg". Do NOT convert units
 dp_product_variant: flavor/sub-type, lowercase → "zero","bruin","paprika","pils". null if base product
-dp_article_code: article/PLU/EAN from receipt → "ART 123456","PLU 4011". null if not visible
+dp_article_code: article/PLU/EAN from receipt, normalised to digits only — strip "ART"/"PLU"/"EAN" prefixes, drop spaces/dashes/periods, preserve any leading zeros. null if not visible. Examples: "ART 123456"→"123456", "PLU 4011"→"4011", "5410-123-456-789"→"5410123456789"
 dp_is_bio: BIO/BIOLOGISCH/BIOLOGIQUE/ORGANIC in text → true, else false
 
 Extract all line items from this receipt.'''

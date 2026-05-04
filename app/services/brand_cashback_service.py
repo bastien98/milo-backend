@@ -1,4 +1,5 @@
 import logging
+from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from difflib import SequenceMatcher
 from typing import Optional
@@ -15,6 +16,19 @@ from app.models.brand_cashback import (
     BrandCashbackEarning,
     BrandCashbackPendingMatch,
 )
+
+
+@dataclass(frozen=True)
+class ReceiptLineItemForMatching:
+    """Minimal projection of a receipt line item used by the brand-cashback matcher.
+
+    `text` is the cleaned item name (case/whitespace will be normalised at compare).
+    `code` is the per-line product code (EAN/artikel nummer) when the chain prints
+    one — `dp_article_code` from the OCR pipeline. `None` for chains that don't.
+    """
+
+    text: str
+    code: Optional[str]
 from app.schemas.brand_cashback import (
     BrandCashbackDealResponse,
     PendingReviewSummary,
@@ -251,20 +265,27 @@ class BrandCashbackService:
         self,
         receipt_id: str,
         user_id: str,
-        receipt_line_items: list[str],
+        receipt_line_items: list[ReceiptLineItemForMatching],
         store_name: Optional[str],
     ) -> int:
         """For each campaign the user has claimed, attempt to match a receipt line item.
 
-        Pass 1 — strict equality: on hit, create a BrandCashbackEarning row and credit
-                  Milo Points immediately.
-        Pass 2 — fuzzy fallback (only runs when pass 1 missed): if the best fuzzy
-                  score is >= QUEUE_THRESHOLD, queue a BrandCashbackPendingMatch
-                  row for admin review. No earning, no points awarded yet.
+        Per-line-item routing:
+          - Code-mode (line item has product_codes): match by code only — receipt
+            line's `code` must be in line_item.product_codes. No text fallback,
+            no fuzzy fallback. Used by Delhaize/Colruyt where receipts print a
+            unique per-line code.
+          - Text-mode (line item has empty product_codes):
+              Pass 1 strict equality on text → instant earning.
+              Pass 2 fuzzy fallback (>= QUEUE_THRESHOLD) → admin review queue.
+            Used by AH/Carrefour/Aldi/Lidl which don't print per-line codes.
+
+        Code-mode is checked first within a campaign; if any code matches, earn
+        and skip the campaign's text-mode work. At most one earning is created
+        per (claim, receipt) — the existing per-user / campaign cap logic stays.
 
         Returns the count of *instant* earnings created on this receipt; queued
-        rows are not counted (they don't contribute to the brand-cashback referral
-        completion path).
+        rows are not counted.
 
         Validity per claim:
           - campaign is_active and not past valid_until
@@ -326,18 +347,52 @@ class BrandCashbackService:
                 )
                 continue
 
-            # (line_item_id, candidate_string) pairs across exact + alt spellings.
+            code_items = [li for li in line_items if li.product_codes]
+            text_items = [li for li in line_items if not li.product_codes]
+
+            # ---- Code-mode: exact match on product_codes ----
+            matched_line_item_id: Optional[str] = None
+            if code_items:
+                code_index: dict[str, str] = {}
+                for li in code_items:
+                    for code in li.product_codes:
+                        code_index[code] = li.id
+                for receipt_item in receipt_line_items:
+                    if receipt_item.code and receipt_item.code in code_index:
+                        matched_line_item_id = code_index[receipt_item.code]
+                        break
+
+                if matched_line_item_id:
+                    await self.repo.create_earning(
+                        user_id=user_id,
+                        campaign_id=campaign.id,
+                        receipt_id=receipt_id,
+                        matched_line_item_id=matched_line_item_id,
+                        cashback_earned_cents=campaign.cashback_amount_cents,
+                    )
+                    await balance_repo.credit(user_id, campaign.cashback_amount_cents)
+                    new_earnings += 1
+                    logger.info(
+                        f"Brand cashback earned (code match): user={user_id} "
+                        f"campaign={campaign.id} store='{store_name}' "
+                        f"amount_cents={campaign.cashback_amount_cents}"
+                    )
+                    continue
+
+            # ---- Text-mode (only over text-mode line items) ----
+            if not text_items:
+                continue
+
             known_strings: list[tuple[str, str]] = []
-            for li in line_items:
+            for li in text_items:
                 known_strings.append((li.id, li.exact_line_item))
                 for alt in (li.alt_line_items or []):
                     known_strings.append((li.id, alt))
 
-            # ---- Pass 1: strict equality ----
-            matched_line_item_id: Optional[str] = None
+            # Pass 1: strict equality
             for receipt_item in receipt_line_items:
                 for li_id, known in known_strings:
-                    if _is_line_item_match(receipt_item, known):
+                    if _is_line_item_match(receipt_item.text, known):
                         matched_line_item_id = li_id
                         break
                 if matched_line_item_id:
@@ -359,17 +414,17 @@ class BrandCashbackService:
                 )
                 continue
 
-            # ---- Pass 2: fuzzy fallback for the review queue ----
+            # Pass 2: fuzzy fallback for the review queue
             best_score = 0.0
             best_li_id: Optional[str] = None
             best_receipt_str: Optional[str] = None
             for receipt_item in receipt_line_items:
                 for li_id, known in known_strings:
-                    score = _fuzzy_score(receipt_item, known)
+                    score = _fuzzy_score(receipt_item.text, known)
                     if score > best_score:
                         best_score = score
                         best_li_id = li_id
-                        best_receipt_str = receipt_item
+                        best_receipt_str = receipt_item.text
 
             if best_score >= QUEUE_THRESHOLD and best_li_id and best_receipt_str:
                 created = await self.repo.create_pending_match(

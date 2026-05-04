@@ -112,6 +112,29 @@ class BrandCashbackRepository:
         )
         return list(result.scalars().all())
 
+    async def find_line_items_by_code(
+        self,
+        code: str,
+        campaign_id: str,
+        store_name: Optional[str] = None,
+    ) -> list[BrandCashbackStoreLineItem]:
+        """Line items whose product_codes JSONB array contains `code`.
+
+        Uses the GIN index on product_codes via a containment query.
+        When store_name is provided, the result is also store-scoped
+        (case-insensitive) — used for code-required campaigns.
+        """
+        stmt = select(BrandCashbackStoreLineItem).where(
+            BrandCashbackStoreLineItem.campaign_id == campaign_id,
+            BrandCashbackStoreLineItem.product_codes.contains([code]),
+        )
+        if store_name is not None:
+            stmt = stmt.where(
+                func.lower(BrandCashbackStoreLineItem.store_name) == store_name.lower()
+            )
+        result = await self.db.execute(stmt)
+        return list(result.scalars().all())
+
     async def get_line_item_by_id(self, line_item_id: str) -> Optional[BrandCashbackStoreLineItem]:
         result = await self.db.execute(
             select(BrandCashbackStoreLineItem).where(

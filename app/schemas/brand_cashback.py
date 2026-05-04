@@ -1,7 +1,47 @@
+import re
 from datetime import datetime
 from typing import Optional, List
 
 from pydantic import BaseModel, Field, model_validator
+
+
+# Stores whose receipts print a unique per-line product code (EAN, artikel
+# nummer). Line items configured for these stores MUST carry product_codes —
+# the matcher routes them code-only, with no text fallback. Stored canonical
+# lowercase; the validator does a case-insensitive lookup.
+CODE_REQUIRED_STORES: frozenset[str] = frozenset({"colruyt", "delhaize"})
+
+_CODE_PATTERN = re.compile(r"^\d+$")
+_CODE_MIN_LEN = 4
+_CODE_MAX_LEN = 14
+
+
+def _normalise_product_codes(raw: List[str]) -> List[str]:
+    """Strip, validate, and dedupe a list of product codes.
+
+    Each code must be digits only, length 4-14. Order is preserved on first
+    occurrence; duplicates after stripping are dropped.
+    """
+    seen: set[str] = set()
+    out: List[str] = []
+    for raw_code in raw:
+        code = (raw_code or "").strip()
+        if not code:
+            continue
+        if not _CODE_PATTERN.match(code):
+            raise ValueError(
+                f"product_code '{raw_code}' is invalid — digits only (no letters, "
+                f"spaces, or punctuation)"
+            )
+        if not (_CODE_MIN_LEN <= len(code) <= _CODE_MAX_LEN):
+            raise ValueError(
+                f"product_code '{code}' has length {len(code)} — must be "
+                f"{_CODE_MIN_LEN}-{_CODE_MAX_LEN} digits"
+            )
+        if code not in seen:
+            seen.add(code)
+            out.append(code)
+    return out
 
 
 # ---------------------------------------------------------------------------
@@ -124,7 +164,21 @@ class AdminLineItemCreate(BaseModel):
     store_name: str
     exact_line_item: str
     alt_line_items: List[str] = []
+    product_codes: List[str] = []
     notes: Optional[str] = None
+
+    @model_validator(mode="after")
+    def _validate_product_codes(self) -> "AdminLineItemCreate":
+        self.product_codes = _normalise_product_codes(self.product_codes)
+        if (
+            self.store_name.strip().lower() in CODE_REQUIRED_STORES
+            and not self.product_codes
+        ):
+            raise ValueError(
+                f"product_codes is required for {self.store_name} "
+                f"(artikel nummer for Colruyt, EAN for Delhaize)"
+            )
+        return self
 
 
 class AdminLineItemResponse(BaseModel):
@@ -133,6 +187,7 @@ class AdminLineItemResponse(BaseModel):
     store_name: str
     exact_line_item: str
     alt_line_items: List[str]
+    product_codes: List[str]
     notes: Optional[str]
     verified_at: Optional[datetime]
     created_at: datetime

@@ -71,6 +71,9 @@ class BrandCashbackStoreLineItem(Base):
     store_name: Mapped[str] = mapped_column(String, nullable=False)
     exact_line_item: Mapped[str] = mapped_column(String, nullable=False)
     alt_line_items: Mapped[list] = mapped_column(JSONB, nullable=False, default=list)
+    product_codes: Mapped[list] = mapped_column(
+        JSONB, nullable=False, default=list, server_default="[]"
+    )
     notes: Mapped[Optional[str]] = mapped_column(String, nullable=True)
     verified_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
     created_at: Mapped[datetime] = mapped_column(
