@@ -424,12 +424,21 @@ class BrandCashbackRepository:
         return result.scalar_one_or_none()
 
     async def get_pending_match(self, pending_id: str) -> Optional[BrandCashbackPendingMatch]:
-        """Single fetch with campaign + matched line item eagerly loaded for review/approval."""
+        """Single fetch with all relations admin response needs eagerly loaded.
+
+        `_pending_to_response(..., include_admin_context=True)` reads
+        `p.receipt.storage_key` (for the receipt thumbnail URL) — without
+        eager-load that triggers an async lazy-load and crashes the request
+        post-approval, rolling the approve back. Always include `receipt` and
+        `user` so the response serialiser is async-safe.
+        """
         result = await self.db.execute(
             select(BrandCashbackPendingMatch)
             .options(
                 selectinload(BrandCashbackPendingMatch.campaign),
                 selectinload(BrandCashbackPendingMatch.matched_line_item),
+                selectinload(BrandCashbackPendingMatch.receipt),
+                selectinload(BrandCashbackPendingMatch.user),
             )
             .where(BrandCashbackPendingMatch.id == pending_id)
         )
