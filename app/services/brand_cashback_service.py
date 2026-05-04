@@ -5,8 +5,10 @@ from typing import Optional
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.db.repositories.brand_cashback_balance_repo import (
+    BrandCashbackBalanceRepository,
+)
 from app.db.repositories.brand_cashback_repo import BrandCashbackRepository
-from app.db.repositories.cashback_repo import CashbackRepository
 from app.models.brand_cashback import (
     BrandCashbackCampaign,
     BrandCashbackClaim,
@@ -274,7 +276,7 @@ class BrandCashbackService:
         if not claims:
             return 0
 
-        cashback_repo = CashbackRepository(self.db)
+        balance_repo = BrandCashbackBalanceRepository(self.db)
         now = datetime.now(timezone.utc)
         new_earnings = 0
 
@@ -349,9 +351,7 @@ class BrandCashbackService:
                     matched_line_item_id=matched_line_item_id,
                     cashback_earned_cents=campaign.cashback_amount_cents,
                 )
-                # 1 point per cent (POINTS_PER_EURO=1000): 50 cents → 500 points = €0.50
-                points_to_award = campaign.cashback_amount_cents * 10
-                await cashback_repo.upsert_points_increment(user_id, points_to_award)
+                await balance_repo.credit(user_id, campaign.cashback_amount_cents)
                 new_earnings += 1
                 logger.info(
                     f"Brand cashback earned: user={user_id} campaign={campaign.id} "
@@ -414,7 +414,7 @@ class BrandCashbackService:
             return None, APPROVE_ALREADY_REVIEWED
 
         campaign = pending.campaign
-        cashback_repo = CashbackRepository(self.db)
+        balance_repo = BrandCashbackBalanceRepository(self.db)
 
         # Re-check caps; state may have shifted between queue and review.
         user_earnings = await self.repo.count_user_earnings_for_campaign(
@@ -452,8 +452,7 @@ class BrandCashbackService:
             cashback_earned_cents=campaign.cashback_amount_cents,
         )
 
-        points_to_award = campaign.cashback_amount_cents * 10
-        await cashback_repo.upsert_points_increment(pending.user_id, points_to_award)
+        await balance_repo.credit(pending.user_id, campaign.cashback_amount_cents)
 
         if add_to_alts:
             await self.repo.add_alt_line_item(

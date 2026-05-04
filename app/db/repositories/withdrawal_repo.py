@@ -6,14 +6,19 @@ from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
+from app.db.repositories.brand_cashback_balance_repo import (
+    BrandCashbackBalanceRepository,
+    InsufficientBalanceError,
+)
+from app.models.brand_cashback_balance import BrandCashbackBalance
 from app.models.withdrawal import WithdrawalRequest
 from app.models.enums import WithdrawalStatus
-from app.models.cashback import CashbackBalance
 
 
 class WithdrawalRepository:
     def __init__(self, db: AsyncSession):
         self.db = db
+        self._balance_repo = BrandCashbackBalanceRepository(db)
 
     async def create_withdrawal(
         self,
@@ -153,41 +158,51 @@ class WithdrawalRepository:
         return list(result.scalars().all())
 
     async def deduct_balance(self, user_id: str, amount: float) -> bool:
-        """Atomically deduct euro amount from points_balance. Returns False if insufficient."""
-        points_to_deduct = round(amount * 1000)
-        result = await self.db.execute(
-            update(CashbackBalance)
-            .where(
-                CashbackBalance.user_id == user_id,
-                CashbackBalance.points_balance >= points_to_deduct,
-            )
-            .values(points_balance=CashbackBalance.points_balance - points_to_deduct)
-        )
-        await self.db.flush()
-        return result.rowcount > 0
+        """Atomically deduct EUR amount from BrandCashbackBalance.balance_cents.
+
+        Returns False if insufficient — the underlying repo's debit() raises
+        InsufficientBalanceError, which we translate so callers can keep their
+        truthy contract.
+        """
+        cents = round(amount * 100)
+        try:
+            await self._balance_repo.debit(user_id, cents)
+            return True
+        except InsufficientBalanceError:
+            return False
 
     async def refund_balance(self, user_id: str, amount: float) -> None:
-        """Refund euro amount back to points_balance (on rejection)."""
-        points_to_refund = round(amount * 1000)
+        """Refund EUR amount back to balance_cents on rejection.
+
+        Mirrors the debit's accounting: balance goes up, but we also need to
+        unwind the total_withdrawn_cents bump so the audit counters stay
+        consistent.
+        """
+        cents = round(amount * 100)
+        await self._balance_repo.credit(user_id, cents)
         await self.db.execute(
-            update(CashbackBalance)
-            .where(CashbackBalance.user_id == user_id)
-            .values(points_balance=CashbackBalance.points_balance + points_to_refund)
+            update(BrandCashbackBalance)
+            .where(
+                BrandCashbackBalance.user_id == user_id,
+                BrandCashbackBalance.total_withdrawn_cents >= cents,
+                BrandCashbackBalance.total_earned_cents >= cents,
+            )
+            .values(
+                total_withdrawn_cents=BrandCashbackBalance.total_withdrawn_cents - cents,
+                # credit() bumped total_earned_cents — undo that since this is a refund, not an earning.
+                total_earned_cents=BrandCashbackBalance.total_earned_cents - cents,
+            )
         )
         await self.db.flush()
 
     async def mark_paid_out_balance(self, user_id: str, amount: float) -> None:
-        """Increment total_points_paid_out when withdrawal is paid."""
-        points = round(amount * 1000)
-        await self.db.execute(
-            update(CashbackBalance)
-            .where(CashbackBalance.user_id == user_id)
-            .values(
-                total_points_paid_out=CashbackBalance.total_points_paid_out + points,
-                total_paid_out=CashbackBalance.total_paid_out + amount,
-            )
-        )
-        await self.db.flush()
+        """Settled withdrawal: nothing to do on the balance ledger.
+
+        balance_cents was already debited at request time, total_withdrawn_cents
+        was incremented at the same moment. The terminal PAID_OUT status on
+        WithdrawalRequest is what marks the money as gone-for-good.
+        """
+        return None
 
     async def delete_user_withdrawals(self, user_id: str) -> int:
         """Delete all withdrawals for a user (test mode only)."""

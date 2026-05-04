@@ -5,13 +5,16 @@ import re
 from datetime import datetime, timedelta, timezone
 from typing import Optional
 
-from sqlalchemy import select, update, func
+from sqlalchemy import select, func
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.db.repositories.cashback_repo import CashbackRepository
+from app.db.repositories.brand_cashback_balance_repo import (
+    BrandCashbackBalanceRepository,
+)
 from app.db.repositories.withdrawal_repo import WithdrawalRepository
-from app.models.cashback import CashbackTransaction
-from app.models.enums import WithdrawalStatus, CashbackStatus
+from app.models.enums import WithdrawalStatus
+from app.models.receipt import Receipt
+from app.models.enums import ReceiptStatus
 from app.models.user import User
 from app.models.user_profile import UserProfile
 from app.models.withdrawal import WithdrawalRequest
@@ -23,8 +26,7 @@ logger = logging.getLogger(__name__)
 VALID_AMOUNTS = [5.0, 10.0, 15.0, 20.0]
 COOLDOWN_DAYS = 7
 MIN_ACCOUNT_AGE_DAYS = 14
-MIN_CASHBACK_RECEIPTS = 5
-POINTS_PER_EURO = 1000
+MIN_PROCESSED_RECEIPTS = 5
 TEST_MODE = os.getenv("WITHDRAWAL_TEST_MODE", "false").lower() == "true"
 TEST_IBAN = "BE00000000000000"
 
@@ -33,7 +35,7 @@ class WithdrawalService:
     def __init__(self, db: AsyncSession):
         self.db = db
         self.repo = WithdrawalRepository(db)
-        self.cashback_repo = CashbackRepository(db)
+        self.balance_repo = BrandCashbackBalanceRepository(db)
         self.fraud_service = FraudCheckService(db)
         self.wise_service = WiseService()
 
@@ -55,22 +57,23 @@ class WithdrawalService:
                 numeric += str(ord(char) - 55)
         return int(numeric) % 97 == 1
 
-    async def _count_confirmed_cashback(self, user_id: str) -> int:
-        """Count confirmed cashback transactions from real receipt scans (not referral rewards)."""
+    async def _count_processed_receipts(self, user_id: str) -> int:
+        """Receipts that completed OCR — fraud-eligibility signal that replaces the
+        old confirmed-cashback count. Brand cashback earnings aren't required;
+        the user just needs a real scan history."""
         result = await self.db.execute(
             select(func.count()).where(
-                CashbackTransaction.user_id == user_id,
-                CashbackTransaction.status == CashbackStatus.CONFIRMED,
-                CashbackTransaction.is_referral_reward == False,
+                Receipt.user_id == user_id,
+                Receipt.status == ReceiptStatus.COMPLETED,
             )
         )
         return result.scalar() or 0
 
     async def get_withdrawal_info(self, user: User) -> dict:
         """Get withdrawal eligibility info for the user."""
-        balance = await self.cashback_repo.get_or_create_balance(user.id)
-        # Use points_balance (current system) — current_balance is a legacy field no longer updated
-        current_balance = round(balance.points_balance / POINTS_PER_EURO, 2)
+        balance = await self.balance_repo.get_balance(user.id)
+        balance_cents = balance.balance_cents
+        current_balance = round(balance_cents / 100, 2)
 
         max_withdrawable = math.floor(current_balance / 5) * 5.0
         available_amounts = [a for a in VALID_AMOUNTS if a <= max_withdrawable]
@@ -78,7 +81,7 @@ class WithdrawalService:
         pending = await self.repo.get_pending_by_user(user.id)
         has_pending = pending is not None
 
-        confirmed_cashback_count = await self._count_confirmed_cashback(user.id)
+        processed_receipt_count = await self._count_processed_receipts(user.id)
 
         # Get last IBAN from profile
         profile = await self.db.execute(
@@ -127,9 +130,9 @@ class WithdrawalService:
 
             # Check minimum receipt count (skip in test mode)
             if can_withdraw and not TEST_MODE:
-                if confirmed_cashback_count < MIN_CASHBACK_RECEIPTS:
+                if processed_receipt_count < MIN_PROCESSED_RECEIPTS:
                     can_withdraw = False
-                    remaining = MIN_CASHBACK_RECEIPTS - confirmed_cashback_count
+                    remaining = MIN_PROCESSED_RECEIPTS - processed_receipt_count
                     reason = f"Scan {remaining} more receipt{'s' if remaining != 1 else ''} to unlock withdrawals"
 
         # Build active withdrawal response
@@ -148,6 +151,7 @@ class WithdrawalService:
             }
 
         return {
+            "balance_cents": balance_cents,
             "current_balance": current_balance,
             "max_withdrawable": max_withdrawable,
             "available_amounts": available_amounts,
@@ -157,7 +161,7 @@ class WithdrawalService:
             "last_iban_last4": last_iban_last4,
             "can_withdraw": can_withdraw,
             "cannot_withdraw_reason": reason,
-            "confirmed_cashback_count": confirmed_cashback_count,
+            "processed_receipt_count": processed_receipt_count,
         }
 
     async def create_withdrawal(
@@ -176,9 +180,9 @@ class WithdrawalService:
         cleaned_iban = iban.replace(" ", "").upper()
         iban_last4 = cleaned_iban[-4:]
 
-        # Check balance (use points_balance — current_balance is legacy and no longer updated)
-        balance = await self.cashback_repo.get_or_create_balance(user.id)
-        current_balance_euros = round(balance.points_balance / POINTS_PER_EURO, 2)
+        # Check balance
+        balance = await self.balance_repo.get_balance(user.id)
+        current_balance_euros = round(balance.balance_cents / 100, 2)
         max_withdrawable = math.floor(current_balance_euros / 5) * 5.0
         if amount > max_withdrawable:
             raise ValueError("Insufficient balance")
@@ -263,7 +267,7 @@ class WithdrawalService:
                 # Keep as AUTO_APPROVED, admin can retry manually
 
         # Get new balance
-        new_balance = await self.cashback_repo.get_or_create_balance(user.id)
+        new_balance = await self.balance_repo.get_balance(user.id)
 
         return {
             "id": withdrawal.id,
@@ -272,7 +276,8 @@ class WithdrawalService:
             "status": status.value,
             "fraud_check_passed": fraud_passed,
             "fraud_check_details": fraud_details,
-            "new_balance": round(new_balance.points_balance / POINTS_PER_EURO, 2),
+            "new_balance": round(new_balance.balance_cents / 100, 2),
+            "new_balance_cents": new_balance.balance_cents,
         }
 
     async def approve_withdrawal(

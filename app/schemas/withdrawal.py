@@ -27,6 +27,7 @@ class WithdrawalResponse(BaseModel):
 
 
 class WithdrawalInfoResponse(BaseModel):
+    balance_cents: int
     current_balance: float
     max_withdrawable: float
     available_amounts: List[float]
@@ -36,7 +37,7 @@ class WithdrawalInfoResponse(BaseModel):
     last_iban_last4: Optional[str] = None
     can_withdraw: bool
     cannot_withdraw_reason: Optional[str] = None
-    confirmed_cashback_count: int = 0
+    processed_receipt_count: int = 0
 
 
 class WithdrawalCreateResponse(BaseModel):
@@ -47,6 +48,7 @@ class WithdrawalCreateResponse(BaseModel):
     fraud_check_passed: bool
     fraud_check_details: Optional[dict] = None
     new_balance: float
+    new_balance_cents: int
 
 
 class WithdrawalHistoryResponse(BaseModel):

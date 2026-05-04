@@ -5,8 +5,7 @@ from typing import Optional
 from sqlalchemy import select, func
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models.cashback import CashbackTransaction, CashbackBalance
-from app.models.enums import CashbackStatus, WithdrawalStatus
+from app.models.enums import ReceiptStatus, WithdrawalStatus
 from app.models.receipt import Receipt
 from app.models.user import User
 from app.models.withdrawal import WithdrawalRequest
@@ -26,7 +25,9 @@ class FraudCheckService:
     """Automated fraud checks for withdrawal requests.
 
     Checks Belgian grocery spending behavior. All checks must pass
-    for auto-approval; otherwise flags for manual review.
+    for auto-approval; otherwise flags for manual review. Reads
+    directly from the Receipt table (the legacy CashbackTransaction
+    accounting layer was removed when we collapsed to brand cashback only).
     """
 
     def __init__(self, db: AsyncSession):
@@ -40,11 +41,11 @@ class FraudCheckService:
         account_age_ok, account_age_info = await self._check_account_age(user_id)
         details["account_age"] = account_age_info
 
-        # 2. At least 5 verified/confirmed receipts
+        # 2. At least 5 completed receipts
         receipt_count_ok, receipt_count_info = await self._check_receipt_count(user_id)
         details["receipt_count"] = receipt_count_info
 
-        # 3. Balance accumulated over 7+ days
+        # 3. Receipts span 7+ days
         accumulation_ok, accumulation_info = await self._check_accumulation_period(user_id)
         details["accumulation_period"] = accumulation_info
 
@@ -95,32 +96,31 @@ class FraudCheckService:
     async def _check_receipt_count(self, user_id: str) -> tuple[bool, dict]:
         result = await self.db.execute(
             select(func.count()).where(
-                CashbackTransaction.user_id == user_id,
-                CashbackTransaction.status == CashbackStatus.CONFIRMED,
-                CashbackTransaction.is_referral_reward == False,
+                Receipt.user_id == user_id,
+                Receipt.status == ReceiptStatus.COMPLETED,
             )
         )
         count = result.scalar() or 0
         passed = count >= 5
         return passed, {
             "passed": passed,
-            "confirmed_receipts": count,
+            "completed_receipts": count,
             "required": 5,
         }
 
     async def _check_accumulation_period(self, user_id: str) -> tuple[bool, dict]:
         result = await self.db.execute(
             select(
-                func.min(CashbackTransaction.created_at),
-                func.max(CashbackTransaction.created_at),
+                func.min(Receipt.created_at),
+                func.max(Receipt.created_at),
             ).where(
-                CashbackTransaction.user_id == user_id,
-                CashbackTransaction.status == CashbackStatus.CONFIRMED,
+                Receipt.user_id == user_id,
+                Receipt.status == ReceiptStatus.COMPLETED,
             )
         )
         row = result.one_or_none()
         if row is None or row[0] is None:
-            return False, {"passed": False, "reason": "No confirmed transactions"}
+            return False, {"passed": False, "reason": "No completed receipts"}
 
         first_date, last_date = row
         span_days = (last_date - first_date).days
@@ -166,15 +166,16 @@ class FraudCheckService:
     async def _check_receipt_totals(self, user_id: str) -> tuple[bool, dict]:
         """Check receipt totals are in normal range (EUR 5-300, avg > EUR 15)."""
         result = await self.db.execute(
-            select(CashbackTransaction.receipt_total).where(
-                CashbackTransaction.user_id == user_id,
-                CashbackTransaction.status == CashbackStatus.CONFIRMED,
+            select(Receipt.total_amount).where(
+                Receipt.user_id == user_id,
+                Receipt.status == ReceiptStatus.COMPLETED,
+                Receipt.total_amount.isnot(None),
             )
         )
         totals = [row[0] for row in result.all()]
 
         if not totals:
-            return False, {"passed": False, "reason": "No confirmed transactions"}
+            return False, {"passed": False, "reason": "No completed receipts"}
 
         avg_total = sum(totals) / len(totals)
         out_of_range = [t for t in totals if t < 5 or t > 300]

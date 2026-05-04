@@ -15,9 +15,6 @@ if TYPE_CHECKING:
     from app.models.user_enriched_profile import UserEnrichedProfile
     from app.models.budget import Budget
     from app.models.budget_history import BudgetHistory
-    from app.models.cashback import CashbackTransaction, CashbackBalance
-    from app.models.spin import SpinTransaction
-    from app.models.referral import Referral
     from app.models.withdrawal import WithdrawalRequest
     from app.models.promo_interaction_event import PromoInteractionEvent
 
@@ -59,19 +56,6 @@ class User(Base):
     )
     enriched_profile: Mapped[Optional["UserEnrichedProfile"]] = relationship(
         "UserEnrichedProfile", back_populates="user", cascade="all, delete-orphan", uselist=False
-    )
-    cashback_transactions: Mapped[List["CashbackTransaction"]] = relationship(
-        "CashbackTransaction", back_populates="user", cascade="all, delete-orphan"
-    )
-    cashback_balance: Mapped[Optional["CashbackBalance"]] = relationship(
-        "CashbackBalance", back_populates="user", cascade="all, delete-orphan", uselist=False
-    )
-    spin_transactions: Mapped[List["SpinTransaction"]] = relationship(
-        "SpinTransaction", back_populates="user", cascade="all, delete-orphan"
-    )
-    referrals_made: Mapped[List["Referral"]] = relationship(
-        "Referral", foreign_keys="[Referral.referrer_id]",
-        back_populates="referrer", cascade="all, delete-orphan"
     )
     withdrawal_requests: Mapped[List["WithdrawalRequest"]] = relationship(
         "WithdrawalRequest", back_populates="user", cascade="all, delete-orphan"

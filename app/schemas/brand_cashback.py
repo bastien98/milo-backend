@@ -226,3 +226,33 @@ class AdminStatsResponse(BaseModel):
     total_earned_euros: float
     avg_cashback_euros: float
     pending_reviews: int = 0
+
+
+# ---------------------------------------------------------------------------
+# Wallet schemas
+# ---------------------------------------------------------------------------
+
+class BrandCashbackEarningEvent(BaseModel):
+    """One earning event surfaced in the user's wallet feed."""
+    id: str
+    campaign_id: str
+    brand_name: str
+    product_name: str
+    image_thumb_url: Optional[str] = None
+    cashback_earned_cents: int
+    earned_at: datetime
+    receipt_id: Optional[str] = None
+
+    class Config:
+        from_attributes = True
+
+
+class BrandCashbackWalletResponse(BaseModel):
+    """Per-user brand cashback wallet snapshot."""
+    balance_cents: int                         # withdrawable now
+    total_earned_cents: int                    # lifetime credits
+    total_withdrawn_cents: int                 # lifetime debits
+    recent_earnings: List[BrandCashbackEarningEvent] = []  # newest first
+
+    class Config:
+        from_attributes = True

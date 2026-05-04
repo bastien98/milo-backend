@@ -48,59 +48,12 @@ class Language(str, Enum):
     FRENCH = "fr"
 
 
-class CashbackStatus(str, Enum):
-    PENDING = "pending"
-    CONFIRMED = "confirmed"
-    PAID_OUT = "paid_out"
-
-
-class ReferralStatus(str, Enum):
-    PENDING = "pending"
-    COMPLETED = "completed"
-
-
 class WithdrawalStatus(str, Enum):
     PENDING_REVIEW = "pending_review"
     AUTO_APPROVED = "auto_approved"
     APPROVED = "approved"
     REJECTED = "rejected"
     PAID_OUT = "paid_out"
-
-
-class CharityDonationStatus(str, Enum):
-    PENDING_REVIEW = "pending_review"
-    PENDING = "pending"
-    TRANSFERRED = "transferred"
-    REJECTED = "rejected"
-
-
-class StreakRewardStatus(str, Enum):
-    CLAIMABLE = "claimable"
-    CLAIMED = "claimed"
-
-
-class StreakRewardType(str, Enum):
-    SPINS = "spins"
-    CASH = "cash"
-    POINTS = "points"
-
-
-class TierLevel(str, Enum):
-    BRONZE = "bronze"   # < 4 tickets/month
-    SILVER = "silver"   # 4–9 tickets/month
-    GOLD = "gold"       # 10+ tickets/month
-
-
-class SpinType(str, Enum):
-    STANDARD = "standard"   # EV ~100 pts
-    PREMIUM = "premium"     # EV ~200 pts
-
-
-class LotteryDrawingStatus(str, Enum):
-    PENDING = "pending"
-    PARTICIPANTS_LOCKED = "participants_locked"
-    DRAWN = "drawn"
-    PUBLISHED = "published"
 
 
 class LoyaltyStatus(str, Enum):

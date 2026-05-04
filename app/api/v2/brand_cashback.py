@@ -23,6 +23,7 @@ from app.schemas.brand_cashback import (
     BrandCashbackClaimResponse,
     BrandCashbackDealResponse,
     BrandCashbackPendingMatchResponse,
+    BrandCashbackWalletResponse,
 )
 from app.services.brand_cashback_service import (
     APPROVE_ALREADY_REVIEWED,
@@ -37,6 +38,7 @@ from app.services.brand_cashback_service import (
     image_url_for_key,
     storage,
 )
+from app.services.brand_cashback_wallet_service import BrandCashbackWalletService
 
 router = APIRouter()
 
@@ -298,6 +300,22 @@ async def get_my_pending_reviews(
     repo = BrandCashbackRepository(db)
     rows = await repo.get_pending_matches_for_user(current_user.id, status="pending")
     return [_pending_to_response(p) for p in rows]
+
+
+@router.get("/wallet", response_model=BrandCashbackWalletResponse)
+async def get_wallet(
+    earnings_limit: int = Query(50, ge=1, le=200),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_db_user),
+):
+    """Brand cashback wallet snapshot: balance + recent earnings.
+
+    `balance_cents` is what the user can withdraw right now. `total_earned_cents`
+    and `total_withdrawn_cents` are lifetime audit counters. `recent_earnings`
+    is newest-first, capped by `earnings_limit`.
+    """
+    svc = BrandCashbackWalletService(db)
+    return await svc.get_wallet(current_user.id, earnings_limit=earnings_limit)
 
 
 # ---------------------------------------------------------------------------

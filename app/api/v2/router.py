@@ -1,7 +1,10 @@
 from fastapi import APIRouter
 
 # Import v2-specific endpoints (using Gemini)
-from app.api.v2 import auth, chat, receipts, periods, budgets, wallet_pass, categories, promos, cashback, spin, referral, withdrawal, streak, lottery, brand_cashback, charity
+from app.api.v2 import (
+    auth, chat, receipts, periods, budgets, wallet_pass, categories, promos,
+    withdrawal, brand_cashback,
+)
 
 # Reuse v1 endpoints that don't interact with LLMs
 from app.api.v1 import health, transactions, analytics, profile
@@ -46,26 +49,8 @@ api_router.include_router(categories.router, prefix="/categories", tags=["v2 - c
 # Promos - personalized promo recommendations
 api_router.include_router(promos.router, prefix="/promos", tags=["v2 - promos"])
 
-# Cashback - progressive cashback wallet
-api_router.include_router(cashback.router, prefix="/cashback", tags=["v2 - cashback"])
-
-# Spin wheel - prize wheel with server-side outcome determination
-api_router.include_router(spin.router, prefix="/spin", tags=["v2 - spin"])
-
-# Referral - dual-sided referral program
-api_router.include_router(referral.router, prefix="/referral", tags=["v2 - referral"])
-
-# Withdrawal - cash withdrawal to bank account
+# Withdrawal - cash withdrawal to bank account (debits BrandCashbackBalance)
 api_router.include_router(withdrawal.router, prefix="/withdrawal", tags=["v2 - withdrawal"])
 
-# Streak - weekly streak rewards
-api_router.include_router(streak.router, prefix="/streak", tags=["v2 - streak"])
-
-# Lottery - monthly lottery drawing
-api_router.include_router(lottery.router, prefix="/lottery", tags=["v2 - lottery"])
-
-# Brand cashback - FMCG deal campaigns with receipt line-item matching
+# Brand cashback - FMCG deal campaigns + per-user wallet
 api_router.include_router(brand_cashback.router, prefix="/brand-cashback", tags=["v2 - brand-cashback"])
-
-# Charity donations - donate wallet balance to Belgian charities
-api_router.include_router(charity.router, prefix="/charity", tags=["v2 - charity"])

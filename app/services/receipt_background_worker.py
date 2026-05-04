@@ -231,47 +231,13 @@ async def process_receipt_background(
             await session.commit()
             logger.info(f"⏱ bg_mark_completed: {time.monotonic() - t0:.3f}s")
 
-            # Step 7: Award cashback (non-fatal — receipt stays COMPLETED even if limits exceeded)
-            if final_total and final_total > 0:
-                try:
-                    t0 = time.monotonic()
-                    from app.services.cashback_service import CashbackService
-                    cashback_svc = CashbackService(session)
-                    await cashback_svc.award_cashback_for_receipt(
-                        user_id=user_id,
-                        receipt_id=receipt_id,
-                        receipt_total=final_total,
-                    )
-                    await session.commit()
-                    logger.info(f"⏱ bg_award_cashback: {time.monotonic() - t0:.3f}s")
-                except ValueError as limit_err:
-                    logger.warning(f"Cashback skipped (fair-use limit): {limit_err}")
-                    await session.rollback()
-                except Exception as cashback_err:
-                    logger.warning(f"Cashback award failed (non-fatal): {cashback_err}")
-                    await session.rollback()
-
-            # Step 7b: Update streak if receipt qualifies (>€50)
-            if final_total and final_total > 50:
-                try:
-                    t0 = time.monotonic()
-                    from app.services.streak_service import StreakService
-                    streak_svc = StreakService(session)
-                    await streak_svc.record_qualifying_receipt(user_id, final_total)
-                    await session.commit()
-                    logger.info(f"⏱ bg_streak_update: {time.monotonic() - t0:.3f}s")
-                except Exception as streak_err:
-                    logger.warning(f"Streak update failed (non-fatal): {streak_err}")
-                    await session.rollback()
-
-            # Step 9: Check brand cashback deals (non-fatal)
-            brand_cashback_earned_count = 0
+            # Step 7: Check brand cashback deals (the only earning path — non-fatal).
             try:
                 t0 = time.monotonic()
                 from app.services.brand_cashback_service import BrandCashbackService
                 brand_cb_svc = BrandCashbackService(session)
                 receipt_item_names = [item.item_name for item in extraction_result.line_items]
-                brand_cashback_earned_count = await brand_cb_svc.check_receipt_for_brand_cashback(
+                await brand_cb_svc.check_receipt_for_brand_cashback(
                     receipt_id=receipt_id,
                     user_id=user_id,
                     receipt_line_items=receipt_item_names,
@@ -283,21 +249,7 @@ async def process_receipt_background(
                 logger.warning(f"Brand cashback check failed (non-fatal): {brand_cb_err}")
                 await session.rollback()
 
-            # Step 10: Complete referral if brand cashback was earned (non-fatal)
-            if brand_cashback_earned_count > 0:
-                try:
-                    t0 = time.monotonic()
-                    from app.services.referral_service import ReferralService
-                    referral_svc = ReferralService(session)
-                    completed = await referral_svc.complete_referral_on_brand_cashback_earned(user_id)
-                    await session.commit()
-                    if completed:
-                        logger.info(f"⏱ bg_referral_complete: {time.monotonic() - t0:.3f}s — referral completed for user {user_id}")
-                except Exception as referral_err:
-                    logger.warning(f"Referral completion check failed (non-fatal): {referral_err}")
-                    await session.rollback()
-
-            # Step 11: Rebuild enriched profile (non-fatal)
+            # Step 8: Rebuild enriched profile (non-fatal)
             try:
                 t0 = time.monotonic()
                 from app.services.enriched_profile_service import EnrichedProfileService

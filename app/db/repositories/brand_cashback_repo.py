@@ -273,6 +273,31 @@ class BrandCashbackRepository:
             out.setdefault(e.campaign_id, []).append(e)
         return out
 
+    async def sum_earnings_for_user(self, user_id: str) -> int:
+        """Total cents the user has ever earned from brand cashback. 0 for users
+        with no earnings."""
+        result = await self.db.execute(
+            select(
+                func.coalesce(func.sum(BrandCashbackEarning.cashback_earned_cents), 0)
+            ).where(BrandCashbackEarning.user_id == user_id)
+        )
+        return result.scalar() or 0
+
+    async def list_earnings_for_user(
+        self, user_id: str, limit: int = 50, offset: int = 0
+    ) -> list[BrandCashbackEarning]:
+        """Earnings feed for the wallet, newest first, with the campaign eagerly
+        loaded so each row can render brand + product + thumbnail without N+1 reads."""
+        result = await self.db.execute(
+            select(BrandCashbackEarning)
+            .options(selectinload(BrandCashbackEarning.campaign))
+            .where(BrandCashbackEarning.user_id == user_id)
+            .order_by(BrandCashbackEarning.earned_at.desc())
+            .limit(limit)
+            .offset(offset)
+        )
+        return list(result.scalars().all())
+
     async def create_earning(
         self,
         user_id: str,
