@@ -4,6 +4,7 @@ from datetime import date, datetime, timedelta, timezone
 from difflib import SequenceMatcher
 from typing import Optional
 
+from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.repositories.brand_cashback_balance_repo import (
@@ -158,6 +159,9 @@ APPROVE_NOT_FOUND = "not_found"
 APPROVE_ALREADY_REVIEWED = "already_reviewed"
 APPROVE_CAMPAIGN_FULL = "campaign_cap_reached_during_review"
 APPROVE_USER_LIMIT = "user_limit_reached_during_review"
+APPROVE_CAMPAIGN_INACTIVE = "campaign_deactivated"
+APPROVE_CAMPAIGN_EXPIRED = "campaign_expired"
+APPROVE_RECEIPT_OUTSIDE = "receipt_outside_window"
 
 
 class BrandCashbackService:
@@ -317,6 +321,28 @@ class BrandCashbackService:
             )
             return 0
 
+        # Future-dated receipts are universally invalid (across all campaigns,
+        # regardless of window). Phone-clock manipulation or tampered prints
+        # land here. No earning, no review queue.
+        today = date.today()
+        if receipt_date > today:
+            logger.info(
+                f"Brand cashback: receipt {receipt_id} date={receipt_date} is in the future "
+                f"(today={today}) — skipping all matching for user={user_id}"
+            )
+            return 0
+
+        # Serialize concurrent receipt processings for the same user via a
+        # transactional advisory lock. Two uploads racing on the per-user cap
+        # would otherwise both observe `count < max` and both create earnings,
+        # exceeding the cap by 1. Lock auto-releases at COMMIT (held until the
+        # worker commits after this method returns). hashtext gives a stable
+        # 32-bit slot from the user_id string.
+        await self.db.execute(
+            text("SELECT pg_advisory_xact_lock(hashtext(:user_id))"),
+            {"user_id": user_id},
+        )
+
         balance_repo = BrandCashbackBalanceRepository(self.db)
         now = datetime.now(timezone.utc)
         new_earnings = 0
@@ -333,9 +359,11 @@ class BrandCashbackService:
 
             # Campaign-wide cap (race-safe re-check). Different scope than the
             # per-user cap: it CAN flip during a single receipt's processing
-            # if another user wins the race for the last slot, so we still
-            # check it inline.
+            # if another user wins the race for the last slot. Row-lock the
+            # campaign before the COUNT so two concurrent users don't both
+            # observe `count < cap` and both earn.
             if campaign.total_redemption_cap is not None:
+                await self.repo.lock_campaign_for_cap_check(campaign.id)
                 campaign_earnings = await self.repo.count_earnings_for_campaign(
                     campaign.id
                 )
@@ -434,16 +462,24 @@ class BrandCashbackService:
                 )
                 await balance_repo.credit(user_id, campaign.cashback_amount_cents)
                 new_earnings += 1
-                added_codes = 0
+                proposed_codes = 0
                 if match_tier == "text_exact" and matched_receipt_codes:
-                    # Only auto-extend codes on EXACT text match, never on fuzzy.
-                    added_codes = await self.repo.add_product_codes(
-                        matched_line_item_id, matched_receipt_codes
+                    # Tier 2 (text exact) gives the user their earning, but
+                    # the receipt's unknown codes go to the admin-review queue
+                    # instead of being auto-appended to product_codes — a
+                    # single fluke text match shouldn't globally pollute the
+                    # allow-list. Approved proposals call add_product_codes
+                    # later from the admin endpoint.
+                    proposed_codes = await self.repo.propose_product_codes(
+                        line_item_id=matched_line_item_id,
+                        codes=matched_receipt_codes,
+                        source_user_id=user_id,
+                        source_receipt_id=receipt_id,
                     )
                 logger.info(
                     f"Brand cashback earned: user={user_id} campaign={campaign.id} "
                     f"store='{store_name}' amount_cents={campaign.cashback_amount_cents} "
-                    f"tier={match_tier} auto_added_codes={added_codes}"
+                    f"tier={match_tier} proposed_codes={proposed_codes}"
                 )
                 continue
 
@@ -503,6 +539,35 @@ class BrandCashbackService:
 
         campaign = pending.campaign
         balance_repo = BrandCashbackBalanceRepository(self.db)
+        now = datetime.now(timezone.utc)
+
+        # Per-user advisory lock — admin double-clicking, or admin approving
+        # while the user simultaneously uploads a new receipt, must serialize
+        # so the per-user cap can't be raced.
+        await self.db.execute(
+            text("SELECT pg_advisory_xact_lock(hashtext(:user_id))"),
+            {"user_id": pending.user_id},
+        )
+
+        # Re-check campaign validity — the pending row may have aged. Admin
+        # could have deactivated, expired, or shifted the window since queue.
+        if not campaign.is_active:
+            await self.repo.mark_pending_denied(
+                pending_id, reviewer_id, APPROVE_CAMPAIGN_INACTIVE
+            )
+            return None, APPROVE_CAMPAIGN_INACTIVE
+        if campaign.valid_until <= now:
+            await self.repo.mark_pending_denied(
+                pending_id, reviewer_id, APPROVE_CAMPAIGN_EXPIRED
+            )
+            return None, APPROVE_CAMPAIGN_EXPIRED
+        if pending.receipt and pending.receipt.receipt_date:
+            rd = pending.receipt.receipt_date
+            if not (campaign.valid_from.date() <= rd <= campaign.valid_until.date()):
+                await self.repo.mark_pending_denied(
+                    pending_id, reviewer_id, APPROVE_RECEIPT_OUTSIDE
+                )
+                return None, APPROVE_RECEIPT_OUTSIDE
 
         # Re-check caps; state may have shifted between queue and review.
         user_earnings = await self.repo.count_user_earnings_for_campaign(
@@ -515,6 +580,7 @@ class BrandCashbackService:
             return None, APPROVE_USER_LIMIT
 
         if campaign.total_redemption_cap is not None:
+            await self.repo.lock_campaign_for_cap_check(campaign.id)
             campaign_earnings = await self.repo.count_earnings_for_campaign(
                 pending.campaign_id
             )
@@ -569,6 +635,49 @@ class BrandCashbackService:
         logger.info(
             f"Brand cashback review denied: pending={pending_id} "
             f"user={pending.user_id} campaign={pending.campaign_id} reason='{reason}'"
+        )
+        return None
+
+    # ------------------------------------------------------------------
+    # Code-extension proposals (admin-reviewed Tier 2 → product_codes path)
+    # ------------------------------------------------------------------
+
+    async def approve_code_proposal(
+        self, proposal_id: str, reviewer_id: str
+    ) -> Optional[str]:
+        """Approve a queued code proposal: append the code to the line item's
+        product_codes and mark the proposal approved. Idempotent against
+        already-reviewed rows (returns APPROVE_ALREADY_REVIEWED).
+        """
+        proposal = await self.repo.get_code_proposal(proposal_id)
+        if proposal is None:
+            return APPROVE_NOT_FOUND
+        if proposal.status != "pending":
+            return APPROVE_ALREADY_REVIEWED
+        await self.repo.add_product_codes(proposal.line_item_id, [proposal.code])
+        await self.repo.mark_code_proposal_approved(proposal_id, reviewer_id)
+        logger.info(
+            f"Brand cashback code proposal approved: proposal={proposal_id} "
+            f"line_item={proposal.line_item_id} code={proposal.code} "
+            f"reviewer={reviewer_id}"
+        )
+        return None
+
+    async def reject_code_proposal(
+        self, proposal_id: str, reviewer_id: str, reason: str
+    ) -> Optional[str]:
+        """Reject a queued code proposal. Code is NOT added; reason is stored
+        for audit. Idempotent against already-reviewed rows."""
+        proposal = await self.repo.get_code_proposal(proposal_id)
+        if proposal is None:
+            return APPROVE_NOT_FOUND
+        if proposal.status != "pending":
+            return APPROVE_ALREADY_REVIEWED
+        await self.repo.mark_code_proposal_rejected(proposal_id, reviewer_id, reason)
+        logger.info(
+            f"Brand cashback code proposal rejected: proposal={proposal_id} "
+            f"line_item={proposal.line_item_id} code={proposal.code} "
+            f"reason='{reason}' reviewer={reviewer_id}"
         )
         return None
 

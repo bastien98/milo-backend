@@ -17,6 +17,7 @@ from app.models.brand_cashback import (
     BrandCashbackClaim,
     BrandCashbackEarning,
     BrandCashbackPendingMatch,
+    BrandCashbackCodeProposal,
 )
 from app.models.brand_cashback_balance import BrandCashbackBalance
 
@@ -41,5 +42,6 @@ __all__ = [
     "BrandCashbackClaim",
     "BrandCashbackEarning",
     "BrandCashbackPendingMatch",
+    "BrandCashbackCodeProposal",
     "BrandCashbackBalance",
 ]

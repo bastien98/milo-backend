@@ -10,6 +10,7 @@ from sqlalchemy.orm import selectinload
 from app.models.brand_cashback import (
     BrandCashbackCampaign,
     BrandCashbackClaim,
+    BrandCashbackCodeProposal,
     BrandCashbackEarning,
     BrandCashbackPendingMatch,
     BrandCashbackStoreLineItem,
@@ -540,14 +541,41 @@ class BrandCashbackRepository:
         return result.scalar() or 0
 
     async def lock_pending_match(self, pending_id: str) -> Optional[BrandCashbackPendingMatch]:
-        """SELECT … FOR UPDATE to serialise concurrent admin clicks on the same row."""
+        """SELECT … FOR UPDATE to serialise concurrent admin clicks on the same row.
+
+        Eagerly loads `campaign` and `receipt` because `approve_pending_match`
+        re-checks campaign activity / window plus the receipt's date — accessing
+        either via lazy-load post-FOR-UPDATE would crash in async SQLAlchemy.
+        """
         result = await self.db.execute(
             select(BrandCashbackPendingMatch)
-            .options(selectinload(BrandCashbackPendingMatch.campaign))
+            .options(
+                selectinload(BrandCashbackPendingMatch.campaign),
+                selectinload(BrandCashbackPendingMatch.receipt),
+            )
             .where(BrandCashbackPendingMatch.id == pending_id)
             .with_for_update()
         )
         return result.scalar_one_or_none()
+
+    async def lock_campaign_for_cap_check(self, campaign_id: str) -> None:
+        """SELECT ... FOR UPDATE on a campaign row to serialise the
+        total_redemption_cap check across users.
+
+        Two different users hitting the last cap slot would otherwise both
+        observe `count < cap` and both create earnings, exceeding the cap by 1.
+        Holding this row lock through the COUNT + create_earning ensures one
+        user wins, the other re-reads count and gets blocked. Lock auto-releases
+        at COMMIT — the matcher's caller commits after each receipt finishes.
+
+        Only call when `campaign.total_redemption_cap is not None` — for
+        uncapped campaigns it's pure overhead.
+        """
+        await self.db.execute(
+            select(BrandCashbackCampaign.id)
+            .where(BrandCashbackCampaign.id == campaign_id)
+            .with_for_update()
+        )
 
     async def mark_pending_approved(
         self, pending_id: str, reviewer_id: str, earning_id: str
@@ -626,3 +654,115 @@ class BrandCashbackRepository:
             "total_earned_euros": (earnings_row[1] or 0) / 100,
             "avg_cashback_euros": (avg_result.scalar() or 0) / 100,
         }
+
+
+    # ------------------------------------------------------------------
+    # Code-extension proposals (admin-reviewed alternative to auto-extend)
+    # ------------------------------------------------------------------
+
+    async def propose_product_codes(
+        self,
+        line_item_id: str,
+        codes: list[str],
+        source_user_id: str,
+        source_receipt_id: Optional[str],
+    ) -> int:
+        """Insert a proposal row per (line_item_id, code) where code isn't
+        already on the line item's product_codes. ON CONFLICT DO NOTHING via
+        the UNIQUE constraint, so 50 users hitting the same fluke code create
+        one proposal in total — first proposer wins source attribution.
+
+        Returns the number of NEW proposal rows inserted.
+        """
+        if not codes:
+            return 0
+        item = await self.get_line_item_by_id(line_item_id)
+        if item is None:
+            return 0
+        existing_on_line_item = set(item.product_codes or [])
+        rows = []
+        for code in codes:
+            digits = "".join(ch for ch in (code or "") if ch.isdigit())
+            if not (4 <= len(digits) <= 14):
+                continue
+            if digits in existing_on_line_item:
+                continue
+            rows.append(
+                {
+                    "id": str(uuid.uuid4()),
+                    "line_item_id": line_item_id,
+                    "code": digits,
+                    "source_user_id": source_user_id,
+                    "source_receipt_id": source_receipt_id,
+                }
+            )
+        if not rows:
+            return 0
+        stmt = (
+            pg_insert(BrandCashbackCodeProposal)
+            .values(rows)
+            .on_conflict_do_nothing(constraint="uq_code_proposals_line_item_code")
+        )
+        result = await self.db.execute(stmt)
+        await self.db.flush()
+        return int(result.rowcount or 0)
+
+    async def get_pending_code_proposals(
+        self,
+    ) -> list[BrandCashbackCodeProposal]:
+        """Admin list — pending only, eager-load line item + campaign + receipt
+        + source user so the response serializer doesn't lazy-load."""
+        result = await self.db.execute(
+            select(BrandCashbackCodeProposal)
+            .options(
+                selectinload(BrandCashbackCodeProposal.line_item).selectinload(
+                    BrandCashbackStoreLineItem.campaign
+                ),
+            )
+            .where(BrandCashbackCodeProposal.status == "pending")
+            .order_by(BrandCashbackCodeProposal.proposed_at.desc())
+        )
+        return list(result.scalars().all())
+
+    async def get_code_proposal(
+        self, proposal_id: str
+    ) -> Optional[BrandCashbackCodeProposal]:
+        result = await self.db.execute(
+            select(BrandCashbackCodeProposal)
+            .options(
+                selectinload(BrandCashbackCodeProposal.line_item).selectinload(
+                    BrandCashbackStoreLineItem.campaign
+                ),
+            )
+            .where(BrandCashbackCodeProposal.id == proposal_id)
+        )
+        return result.scalar_one_or_none()
+
+    async def mark_code_proposal_approved(
+        self, proposal_id: str, reviewer_id: str
+    ) -> None:
+        await self.db.execute(
+            update(BrandCashbackCodeProposal)
+            .where(BrandCashbackCodeProposal.id == proposal_id)
+            .values(
+                status="approved",
+                reviewed_at=datetime.now(timezone.utc),
+                reviewed_by=reviewer_id,
+            )
+        )
+        await self.db.flush()
+
+    async def mark_code_proposal_rejected(
+        self, proposal_id: str, reviewer_id: str, reason: str
+    ) -> None:
+        await self.db.execute(
+            update(BrandCashbackCodeProposal)
+            .where(BrandCashbackCodeProposal.id == proposal_id)
+            .values(
+                status="rejected",
+                reviewed_at=datetime.now(timezone.utc),
+                reviewed_by=reviewer_id,
+                reject_reason=reason,
+            )
+        )
+        await self.db.flush()

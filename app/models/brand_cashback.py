@@ -82,6 +82,59 @@ class BrandCashbackStoreLineItem(Base):
 
     # Relationships
     campaign: Mapped["BrandCashbackCampaign"] = relationship("BrandCashbackCampaign", back_populates="line_items")
+    code_proposals: Mapped[list["BrandCashbackCodeProposal"]] = relationship(
+        "BrandCashbackCodeProposal", back_populates="line_item", cascade="all, delete-orphan"
+    )
+
+
+class BrandCashbackCodeProposal(Base):
+    """Admin-review queue for codes the matcher's Tier 2 (text-exact) match
+    would otherwise auto-append to a line item's product_codes.
+
+    One row per (line_item_id, code). UNIQUE constraint makes proposals
+    idempotent: 50 users hitting the same fluke code create one proposal.
+    Source attribution = the first proposer.
+    """
+
+    __tablename__ = "brand_cashback_code_proposals"
+    __table_args__ = (
+        UniqueConstraint("line_item_id", "code", name="uq_code_proposals_line_item_code"),
+    )
+
+    id: Mapped[str] = mapped_column(
+        String, primary_key=True, default=lambda: str(uuid.uuid4())
+    )
+    line_item_id: Mapped[str] = mapped_column(
+        String,
+        ForeignKey("brand_cashback_store_line_items.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    code: Mapped[str] = mapped_column(String(20), nullable=False)
+    source_user_id: Mapped[str] = mapped_column(
+        String, ForeignKey("users.id", ondelete="CASCADE"), nullable=False
+    )
+    source_receipt_id: Mapped[Optional[str]] = mapped_column(
+        String, ForeignKey("receipts.id", ondelete="SET NULL"), nullable=True
+    )
+    proposed_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+    status: Mapped[str] = mapped_column(
+        String(20), nullable=False, server_default="pending"
+    )
+    reviewed_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    reviewed_by: Mapped[Optional[str]] = mapped_column(
+        String, ForeignKey("users.id", ondelete="SET NULL"), nullable=True
+    )
+    reject_reason: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+
+    # Relationships
+    line_item: Mapped["BrandCashbackStoreLineItem"] = relationship(
+        "BrandCashbackStoreLineItem", back_populates="code_proposals"
+    )
 
 
 class BrandCashbackClaim(Base):

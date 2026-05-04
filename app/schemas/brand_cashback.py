@@ -152,6 +152,32 @@ class AdminApprovePendingRequest(BaseModel):
     add_to_alts: bool = True
 
 
+class AdminCodeProposalResponse(BaseModel):
+    """Admin view of a code-extension proposal queued by the matcher's Tier 2.
+
+    Includes line-item / campaign context so the admin can decide whether the
+    proposed code belongs in the line item's product_codes.
+    """
+    id: str
+    line_item_id: str
+    code: str
+    proposed_at: datetime
+    status: str
+
+    # Context for the reviewer
+    campaign_id: Optional[str] = None
+    campaign_brand_name: Optional[str] = None
+    campaign_product_name: Optional[str] = None
+    line_item_store_name: Optional[str] = None
+    line_item_exact_text: Optional[str] = None
+    source_user_id: Optional[str] = None
+    source_receipt_id: Optional[str] = None
+
+
+class AdminRejectCodeProposalRequest(BaseModel):
+    reason: str = Field(..., min_length=1, max_length=500)
+
+
 class AdminDenyPendingRequest(BaseModel):
     reason: str = Field(..., min_length=1, max_length=500)
 

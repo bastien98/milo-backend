@@ -16,9 +16,11 @@ from app.schemas.brand_cashback import (
     AdminCampaignDeletePreview,
     AdminCampaignResponse,
     AdminCampaignUpdate,
+    AdminCodeProposalResponse,
     AdminDenyPendingRequest,
     AdminLineItemCreate,
     AdminLineItemResponse,
+    AdminRejectCodeProposalRequest,
     AdminStatsResponse,
     BrandCashbackClaimResponse,
     BrandCashbackDealResponse,
@@ -27,8 +29,11 @@ from app.schemas.brand_cashback import (
 )
 from app.services.brand_cashback_service import (
     APPROVE_ALREADY_REVIEWED,
+    APPROVE_CAMPAIGN_EXPIRED,
     APPROVE_CAMPAIGN_FULL,
+    APPROVE_CAMPAIGN_INACTIVE,
     APPROVE_NOT_FOUND,
+    APPROVE_RECEIPT_OUTSIDE,
     APPROVE_USER_LIMIT,
     BrandCashbackService,
     DENIAL_BANNER_TTL,
@@ -625,6 +630,21 @@ async def admin_approve_pending_match(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
             detail="User per-campaign limit reached during review — auto-denied",
         )
+    if error == APPROVE_CAMPAIGN_INACTIVE:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="Campaign was deactivated since the review was queued — auto-denied",
+        )
+    if error == APPROVE_CAMPAIGN_EXPIRED:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="Campaign expired since the review was queued — auto-denied",
+        )
+    if error == APPROVE_RECEIPT_OUTSIDE:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="Receipt date is outside the campaign window after admin edit — auto-denied",
+        )
     if error:
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=error
@@ -656,4 +676,101 @@ async def admin_deny_pending_match(
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
             detail="This review has already been processed",
+        )
+
+
+# ---------------------------------------------------------------------------
+# Admin: code-extension proposals (Tier 2 → product_codes review queue)
+# ---------------------------------------------------------------------------
+
+
+def _code_proposal_to_response(p) -> AdminCodeProposalResponse:
+    """Map a BrandCashbackCodeProposal (with line_item + line_item.campaign
+    eagerly loaded) to the admin response shape, flattening context fields."""
+    li = p.line_item
+    campaign = li.campaign if li else None
+    return AdminCodeProposalResponse(
+        id=p.id,
+        line_item_id=p.line_item_id,
+        code=p.code,
+        proposed_at=p.proposed_at,
+        status=p.status,
+        campaign_id=campaign.id if campaign else None,
+        campaign_brand_name=campaign.brand_name if campaign else None,
+        campaign_product_name=campaign.product_name if campaign else None,
+        line_item_store_name=li.store_name if li else None,
+        line_item_exact_text=li.exact_line_item if li else None,
+        source_user_id=p.source_user_id,
+        source_receipt_id=p.source_receipt_id,
+    )
+
+
+@router.get(
+    "/admin/code-proposals",
+    response_model=list[AdminCodeProposalResponse],
+)
+async def admin_list_code_proposals(
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_db_user),
+):
+    """List pending code-extension proposals (admin-review queue for the
+    Tier 2 auto-extend path that's now opt-in instead of automatic)."""
+    _require_admin(current_user)
+    repo = BrandCashbackRepository(db)
+    rows = await repo.get_pending_code_proposals()
+    return [_code_proposal_to_response(p) for p in rows]
+
+
+@router.post(
+    "/admin/code-proposals/{proposal_id}/approve",
+    status_code=status.HTTP_204_NO_CONTENT,
+)
+async def admin_approve_code_proposal(
+    proposal_id: str,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_db_user),
+):
+    """Approve → append the proposed code to the line item's product_codes."""
+    _require_admin(current_user)
+    svc = BrandCashbackService(db)
+    error = await svc.approve_code_proposal(proposal_id, current_user.id)
+    if error == APPROVE_NOT_FOUND:
+        raise HTTPException(status_code=404, detail="Code proposal not found")
+    if error == APPROVE_ALREADY_REVIEWED:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="This proposal has already been processed",
+        )
+    if error:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=error
+        )
+
+
+@router.post(
+    "/admin/code-proposals/{proposal_id}/reject",
+    status_code=status.HTTP_204_NO_CONTENT,
+)
+async def admin_reject_code_proposal(
+    proposal_id: str,
+    payload: AdminRejectCodeProposalRequest,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_db_user),
+):
+    """Reject → mark proposal rejected with a reason. Code NOT added."""
+    _require_admin(current_user)
+    svc = BrandCashbackService(db)
+    error = await svc.reject_code_proposal(
+        proposal_id, current_user.id, payload.reason
+    )
+    if error == APPROVE_NOT_FOUND:
+        raise HTTPException(status_code=404, detail="Code proposal not found")
+    if error == APPROVE_ALREADY_REVIEWED:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="This proposal has already been processed",
+        )
+    if error:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=error
         )

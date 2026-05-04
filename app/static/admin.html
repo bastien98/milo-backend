@@ -78,6 +78,10 @@
           Reviews
           <span id="reviews-pending-badge" class="hidden text-[10px] font-bold px-1.5 py-0.5 rounded-full bg-amber-500 text-black">0</span>
         </button>
+        <button id="tab-codes" class="tab-btn px-4 py-3 text-sm font-semibold border-b-2 border-transparent text-zinc-400 hover:text-white flex items-center gap-2">
+          Codes
+          <span id="codes-pending-badge" class="hidden text-[10px] font-bold px-1.5 py-0.5 rounded-full bg-green-500 text-black">0</span>
+        </button>
       </div>
     </nav>
 
@@ -147,6 +151,28 @@
         </div>
 
         <div id="reviews-list" class="space-y-3"></div>
+      </section>
+
+      <!-- ==================== CODE PROPOSALS SECTION ==================== -->
+      <section id="section-codes" class="hidden">
+        <div class="flex items-center justify-between mb-6">
+          <div>
+            <h2 class="text-xl font-bold">Code proposals</h2>
+            <p class="text-xs text-zinc-500 mt-1">Codes the matcher's text-exact tier saw on receipts but hasn't yet added to the line item's <span class="font-mono">product_codes</span>. Approve to grow the allow-list, reject to drop.</p>
+          </div>
+        </div>
+
+        <div id="codes-loading" class="text-center py-12 text-zinc-500 text-sm">
+          Loading proposals...
+        </div>
+
+        <div id="codes-empty" class="hidden text-center py-16">
+          <div class="text-5xl mb-4 opacity-30">✓</div>
+          <p class="text-zinc-400 text-sm">No pending code proposals</p>
+          <p class="text-zinc-600 text-xs mt-1">Codes auto-queue here when a text-match earning fires with a previously-unseen receipt code.</p>
+        </div>
+
+        <div id="codes-list" class="space-y-3"></div>
       </section>
     </main>
   </div>
@@ -957,22 +983,26 @@
     let pendingDenial = null;    // ditto for deny
 
     function setActiveTab(tab) {
-      const isCampaigns = tab === "campaigns";
-      document.getElementById("section-campaigns").classList.toggle("hidden", !isCampaigns);
-      document.getElementById("section-reviews").classList.toggle("hidden", isCampaigns);
-      document.getElementById("tab-campaigns").classList.toggle("border-green-500", isCampaigns);
-      document.getElementById("tab-campaigns").classList.toggle("text-white", isCampaigns);
-      document.getElementById("tab-campaigns").classList.toggle("text-zinc-400", !isCampaigns);
-      document.getElementById("tab-campaigns").classList.toggle("border-transparent", !isCampaigns);
-      document.getElementById("tab-reviews").classList.toggle("border-green-500", !isCampaigns);
-      document.getElementById("tab-reviews").classList.toggle("text-white", !isCampaigns);
-      document.getElementById("tab-reviews").classList.toggle("text-zinc-400", isCampaigns);
-      document.getElementById("tab-reviews").classList.toggle("border-transparent", isCampaigns);
-      if (!isCampaigns) loadReviews();
+      const sections = { campaigns: "section-campaigns", reviews: "section-reviews", codes: "section-codes" };
+      const tabs = { campaigns: "tab-campaigns", reviews: "tab-reviews", codes: "tab-codes" };
+      Object.entries(sections).forEach(([key, id]) => {
+        document.getElementById(id).classList.toggle("hidden", key !== tab);
+      });
+      Object.entries(tabs).forEach(([key, id]) => {
+        const el = document.getElementById(id);
+        const active = key === tab;
+        el.classList.toggle("border-green-500", active);
+        el.classList.toggle("border-transparent", !active);
+        el.classList.toggle("text-white", active);
+        el.classList.toggle("text-zinc-400", !active);
+      });
+      if (tab === "reviews") loadReviews();
+      if (tab === "codes") loadCodeProposals();
     }
 
     document.getElementById("tab-campaigns").addEventListener("click", () => setActiveTab("campaigns"));
     document.getElementById("tab-reviews").addEventListener("click", () => setActiveTab("reviews"));
+    document.getElementById("tab-codes").addEventListener("click", () => setActiveTab("codes"));
 
     document.querySelectorAll(".reviews-filter-btn").forEach(btn => {
       btn.addEventListener("click", () => {
@@ -999,6 +1029,114 @@
           badge.classList.add("hidden");
         }
       } catch { /* badge is best-effort */ }
+    }
+
+    async function refreshCodesBadge() {
+      try {
+        const rows = await apiFetch("/brand-cashback/admin/code-proposals");
+        const badge = document.getElementById("codes-pending-badge");
+        if (Array.isArray(rows) && rows.length > 0) {
+          badge.textContent = rows.length;
+          badge.classList.remove("hidden");
+        } else {
+          badge.classList.add("hidden");
+        }
+      } catch { /* badge is best-effort */ }
+    }
+
+    async function loadCodeProposals() {
+      show("codes-loading");
+      hide("codes-empty");
+      document.getElementById("codes-list").innerHTML = "";
+      let rows;
+      try {
+        rows = await apiFetch("/brand-cashback/admin/code-proposals");
+      } catch (err) {
+        hide("codes-loading");
+        document.getElementById("codes-list").innerHTML =
+          `<div class="text-red-400 text-sm py-4">Error loading: ${escapeHtml(err.message)}</div>`;
+        return;
+      }
+      hide("codes-loading");
+      if (!rows.length) {
+        show("codes-empty");
+        return;
+      }
+      renderCodeProposals(rows);
+    }
+
+    function renderCodeProposals(rows) {
+      const listEl = document.getElementById("codes-list");
+      listEl.innerHTML = rows.map(p => `
+        <div class="glass rounded-xl p-4">
+          <div class="flex items-start justify-between gap-3 mb-3">
+            <div class="flex-1 min-w-0">
+              <div class="text-[10px] cashback-gold font-semibold tracking-wider uppercase">${escapeHtml(p.campaign_brand_name || "")}</div>
+              <div class="text-sm font-bold text-white">${escapeHtml(p.campaign_product_name || "(unknown campaign)")}</div>
+              <div class="text-xs text-zinc-500 mt-1">
+                <span class="font-mono">${escapeHtml(p.line_item_store_name || "")}</span>
+                <span class="mx-1">·</span>
+                <span class="font-mono">${escapeHtml(p.line_item_exact_text || "")}</span>
+              </div>
+            </div>
+            <div class="text-[10px] text-zinc-500">${new Date(p.proposed_at).toLocaleString()}</div>
+          </div>
+
+          <div class="bg-zinc-900 border border-zinc-800 rounded-lg p-3 mb-3">
+            <div class="text-[10px] text-zinc-500 uppercase tracking-wider mb-1">Proposed code</div>
+            <div class="font-mono text-base text-green-400">${escapeHtml(p.code)}</div>
+          </div>
+
+          <div class="flex gap-2">
+            <button data-id="${p.id}" class="approve-code-btn flex-1 cashback-green-bg text-black font-bold text-xs py-2 rounded-lg hover:opacity-90 transition">
+              Approve — add to product_codes
+            </button>
+            <button data-id="${p.id}" class="reject-code-btn px-4 py-2 rounded-lg bg-zinc-900 border border-zinc-800 text-zinc-300 hover:text-white text-xs">
+              Reject
+            </button>
+          </div>
+        </div>
+      `).join("");
+
+      listEl.querySelectorAll(".approve-code-btn").forEach(btn => {
+        btn.addEventListener("click", async () => {
+          btn.disabled = true;
+          btn.textContent = "Approving...";
+          try {
+            await apiFetch(
+              `/brand-cashback/admin/code-proposals/${btn.dataset.id}/approve`,
+              { method: "POST" }
+            );
+            await loadCodeProposals();
+            await refreshCodesBadge();
+          } catch (err) {
+            alert(`Approve failed: ${err.message}`);
+            btn.disabled = false;
+            btn.textContent = "Approve — add to product_codes";
+          }
+        });
+      });
+
+      listEl.querySelectorAll(".reject-code-btn").forEach(btn => {
+        btn.addEventListener("click", async () => {
+          const reason = prompt("Reject reason (required):");
+          if (!reason || !reason.trim()) return;
+          btn.disabled = true;
+          btn.textContent = "Rejecting...";
+          try {
+            await apiFetch(
+              `/brand-cashback/admin/code-proposals/${btn.dataset.id}/reject`,
+              { method: "POST", body: JSON.stringify({ reason: reason.trim() }) }
+            );
+            await loadCodeProposals();
+            await refreshCodesBadge();
+          } catch (err) {
+            alert(`Reject failed: ${err.message}`);
+            btn.disabled = false;
+            btn.textContent = "Reject";
+          }
+        });
+      });
     }
 
     // Character-level diff: returns HTML with <span class="diff"> wrapping
@@ -1210,9 +1348,13 @@
       }
     });
 
-    // Refresh the pending badge whenever the admin loads the page or returns to it.
+    // Refresh the pending badges (reviews + codes) whenever the admin
+    // loads the page or returns to it.
     onAuthStateChanged(auth, (user) => {
-      if (user) refreshPendingBadge();
+      if (user) {
+        refreshPendingBadge();
+        refreshCodesBadge();
+      }
     });
   </script>
 </body>

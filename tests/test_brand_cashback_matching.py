@@ -40,6 +40,7 @@ class _StubCampaign:
     total_redemption_cap: Optional[int] = None
     requires_store: bool = False
     eligible_stores: Optional[list] = None
+    cashback_amount_cents: int = 100
 
 
 @dataclass
@@ -73,6 +74,10 @@ def _service_with_claims(claims: list[_StubClaim]) -> tuple[BrandCashbackService
     `get_user_claims_with_campaigns`. All mutation methods are AsyncMocks
     that we assert are never called when the gating logic short-circuits."""
     db = MagicMock()
+    # The matcher now executes raw SQL for the per-user advisory lock and the
+    # campaign-cap row lock — make `db.execute` awaitable so those don't blow
+    # up under MagicMock's default sync behaviour.
+    db.execute = AsyncMock()
     svc = BrandCashbackService(db)
 
     repo = MagicMock()
@@ -202,11 +207,23 @@ def test_receipt_on_valid_from_boundary_passes_window_gate():
 
 
 def test_receipt_on_valid_until_boundary_passes_window_gate():
-    """Boundary inclusivity — receipt dated exactly on valid_until is in-window."""
-    c = _campaign(valid_from_offset_days=-30, valid_until_offset_days=30)
+    """Boundary inclusivity — receipt dated exactly on valid_until is in-window.
+
+    Tricky to set up: valid_until's datetime must be > now (so the existing
+    `valid_until <= now` check passes) AND its `.date()` must equal `date.today()`
+    in the matcher's local timezone (so the future-date guard doesn't reject).
+    Solution: anchor valid_until to today's end-of-day in the local zone."""
+    today = date.today()
+    eod_local = datetime.combine(today, datetime.max.time(), tzinfo=timezone.utc)
+    c = _StubCampaign(
+        id="camp-boundary",
+        is_active=True,
+        valid_from=_now_utc() - timedelta(days=7),
+        valid_until=eod_local,
+    )
     svc, repo = _service_with_claims([_StubClaim(c)])
 
-    boundary = c.valid_until.date()
+    boundary = today
 
     with patch(
         "app.services.brand_cashback_service.BrandCashbackBalanceRepository"
@@ -339,3 +356,190 @@ def test_mixed_only_non_capped_passed_to_matcher():
     assert n == 0
     # Exactly one campaign considered (the non-capped, in-window one).
     repo.get_line_items_for_campaign.assert_awaited_once()
+
+
+# ---------------------------------------------------------------------------
+# Fix #6: future-dated receipt rejected at top of matcher
+# ---------------------------------------------------------------------------
+
+def test_future_dated_receipt_rejected_universally():
+    """Receipt date > today → return 0, no per-claim work, no advisory lock."""
+    in_window = _campaign(valid_from_offset_days=-1, valid_until_offset_days=30)
+    svc, repo = _service_with_claims([_StubClaim(in_window)])
+
+    tomorrow = date.today() + timedelta(days=1)
+
+    with patch(
+        "app.services.brand_cashback_service.BrandCashbackBalanceRepository"
+    ) as balance_cls:
+        balance_cls.return_value.credit = AsyncMock()
+
+        n = _run(svc.check_receipt_for_brand_cashback(
+            receipt_id="r1",
+            user_id="u1",
+            receipt_line_items=[ReceiptLineItemForMatching(text="X", codes=())],
+            store_name=None,
+            receipt_date=tomorrow,
+        ))
+
+    assert n == 0
+    # No per-claim work — guard fires at the top.
+    repo.get_line_items_for_campaign.assert_not_awaited()
+    repo.create_earning.assert_not_awaited()
+    repo.create_pending_match.assert_not_awaited()
+
+
+# ---------------------------------------------------------------------------
+# Fix #7: Tier 2 hit queues code proposals (NOT direct extend)
+# ---------------------------------------------------------------------------
+
+def test_tier2_hit_calls_propose_codes_not_add():
+    """When Tier 2 (text exact) fires with unknown receipt codes, the matcher
+    calls `propose_product_codes` (admin-review queue), NOT the legacy direct
+    `add_product_codes`. The earning still fires."""
+    c = _campaign(valid_from_offset_days=-1, valid_until_offset_days=30)
+    svc, repo = _service_with_claims([_StubClaim(c)])
+
+    # Stub a single line item with empty product_codes (text-mode) and
+    # exact text matching the receipt input below.
+    line_item = MagicMock()
+    line_item.id = "li-1"
+    line_item.exact_line_item = "MAGIC SODA 50CL"
+    line_item.alt_line_items = []
+    line_item.product_codes = []
+    repo.get_line_items_for_campaign = AsyncMock(return_value=[line_item])
+    repo.create_earning = AsyncMock(return_value=MagicMock(id="earn-1"))
+    repo.propose_product_codes = AsyncMock(return_value=2)
+
+    receipt_codes = ("12345", "67890")
+
+    with patch(
+        "app.services.brand_cashback_service.BrandCashbackBalanceRepository"
+    ) as balance_cls:
+        balance_cls.return_value.credit = AsyncMock()
+
+        n = _run(svc.check_receipt_for_brand_cashback(
+            receipt_id="rc-1",
+            user_id="u1",
+            receipt_line_items=[
+                ReceiptLineItemForMatching(text="MAGIC SODA 50CL", codes=receipt_codes)
+            ],
+            store_name=None,
+            receipt_date=date.today(),
+        ))
+
+    assert n == 1
+    repo.create_earning.assert_awaited_once()
+    # Critical: proposal queue, not direct extend.
+    repo.propose_product_codes.assert_awaited_once_with(
+        line_item_id="li-1",
+        codes=list(receipt_codes),
+        source_user_id="u1",
+        source_receipt_id="rc-1",
+    )
+    repo.add_product_codes.assert_not_awaited()
+
+
+# ---------------------------------------------------------------------------
+# Fix #1: approve_pending_match re-checks campaign validity
+# ---------------------------------------------------------------------------
+
+def _build_pending(campaign, *, status="pending", receipt_date_offset=-3):
+    """Build a stub pending-match row that approve_pending_match expects."""
+    pending = MagicMock()
+    pending.id = "pending-1"
+    pending.user_id = "u1"
+    pending.campaign_id = campaign.id
+    pending.campaign = campaign
+    pending.status = status
+    pending.matched_line_item_id = "li-1"
+    pending.candidate_string = "MAGIC SODA"
+    pending.receipt = MagicMock()
+    pending.receipt.receipt_date = date.today() + timedelta(days=receipt_date_offset)
+    return pending
+
+
+def test_approve_denies_when_campaign_inactive():
+    """A pending row whose campaign got deactivated since queueing → approve
+    auto-denies with `campaign_deactivated`, no earning created."""
+    from app.services.brand_cashback_service import APPROVE_CAMPAIGN_INACTIVE
+
+    inactive_campaign = _campaign(
+        valid_from_offset_days=-7, valid_until_offset_days=30, is_active=False
+    )
+    svc, repo = _service_with_claims([])
+
+    pending = _build_pending(inactive_campaign)
+    repo.lock_pending_match = AsyncMock(return_value=pending)
+    repo.mark_pending_denied = AsyncMock()
+    repo.create_earning = AsyncMock()
+
+    with patch(
+        "app.services.brand_cashback_service.BrandCashbackBalanceRepository"
+    ) as balance_cls:
+        balance_cls.return_value.credit = AsyncMock()
+
+        earning, error = _run(svc.approve_pending_match(
+            pending_id="pending-1", reviewer_id="admin-1", add_to_alts=True,
+        ))
+
+    assert error == APPROVE_CAMPAIGN_INACTIVE
+    assert earning is None
+    repo.create_earning.assert_not_awaited()
+    repo.mark_pending_denied.assert_awaited_once_with(
+        "pending-1", "admin-1", APPROVE_CAMPAIGN_INACTIVE
+    )
+
+
+def test_approve_denies_when_campaign_expired():
+    """Campaign valid_until in the past → approve auto-denies with `campaign_expired`."""
+    from app.services.brand_cashback_service import APPROVE_CAMPAIGN_EXPIRED
+
+    expired_campaign = _campaign(valid_from_offset_days=-30, valid_until_offset_days=-1)
+    svc, repo = _service_with_claims([])
+
+    pending = _build_pending(expired_campaign)
+    repo.lock_pending_match = AsyncMock(return_value=pending)
+    repo.mark_pending_denied = AsyncMock()
+    repo.create_earning = AsyncMock()
+
+    with patch(
+        "app.services.brand_cashback_service.BrandCashbackBalanceRepository"
+    ) as balance_cls:
+        balance_cls.return_value.credit = AsyncMock()
+
+        earning, error = _run(svc.approve_pending_match(
+            pending_id="pending-1", reviewer_id="admin-1", add_to_alts=True,
+        ))
+
+    assert error == APPROVE_CAMPAIGN_EXPIRED
+    assert earning is None
+    repo.create_earning.assert_not_awaited()
+
+
+def test_approve_denies_when_receipt_outside_window():
+    """Receipt date predates valid_from (admin shifted window after queueing)
+    → approve auto-denies with `receipt_outside_window`."""
+    from app.services.brand_cashback_service import APPROVE_RECEIPT_OUTSIDE
+
+    # Campaign window starts a day ago, receipt is 5 days ago — outside.
+    c = _campaign(valid_from_offset_days=-1, valid_until_offset_days=30)
+    svc, repo = _service_with_claims([])
+
+    pending = _build_pending(c, receipt_date_offset=-5)
+    repo.lock_pending_match = AsyncMock(return_value=pending)
+    repo.mark_pending_denied = AsyncMock()
+    repo.create_earning = AsyncMock()
+
+    with patch(
+        "app.services.brand_cashback_service.BrandCashbackBalanceRepository"
+    ) as balance_cls:
+        balance_cls.return_value.credit = AsyncMock()
+
+        earning, error = _run(svc.approve_pending_match(
+            pending_id="pending-1", reviewer_id="admin-1", add_to_alts=True,
+        ))
+
+    assert error == APPROVE_RECEIPT_OUTSIDE
+    assert earning is None
+    repo.create_earning.assert_not_awaited()
