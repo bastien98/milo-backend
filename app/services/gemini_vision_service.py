@@ -14,7 +14,7 @@ import logging
 import time
 from dataclasses import dataclass
 from datetime import date
-from typing import Optional
+from typing import List, Optional
 
 from google import genai
 from pydantic import BaseModel as PydanticBaseModel, Field
@@ -86,7 +86,8 @@ class ExtractedLineItem:
     dp_pack_size: Optional[float]  # TOTAL pack size in ml or g (matches Daltix pack_size)
     dp_pack_unit: Optional[str]  # "ml" or "g" (matches Daltix pack_unit)
     dp_product_variant: Optional[str]  # flavor/style/sub-type (zero, bruin, paprika)
-    dp_article_code: Optional[str]  # Article/PLU/barcode code from receipt
+    dp_article_codes: list[str]  # All article/PLU/EAN codes printed for the line (digit-only)
+    dp_article_code: Optional[str]  # Canonical singleton: longest of dp_article_codes, kept for backwards compat
     dp_is_bio: bool  # True if organic (bio/biologisch/biologique)
 
     @property
@@ -137,7 +138,7 @@ class _LineItemSchema(PydanticBaseModel):
     dp_per_item_size: Optional[float] = Field(default=None, description="Size of ONE item as printed on receipt. '6X33CL'→33, '1,5L'→1.5, '500g'→500. Do NOT multiply by pack quantity")
     dp_pack_unit: Optional[str] = Field(default=None, description="Unit as printed on receipt, lowercase: 'cl', 'ml', 'l', 'g', 'kg'. Do NOT convert units")
     dp_product_variant: Optional[str] = Field(default=None, description="Flavor/sub-type in lowercase, or null")
-    dp_article_code: Optional[str] = Field(default=None, description="Article/PLU/barcode from receipt, or null")
+    dp_article_codes: List[str] = Field(default_factory=list, description="All article/PLU/EAN codes printed for this line, digits only. Empty array if none visible.")
     dp_is_bio: bool = Field(description="true if organic/bio product")
 
 
@@ -336,7 +337,7 @@ dp_pack_quantity: multi-pack count → "6X33CL"→6, "4x125g"→4, single→1
 dp_per_item_size: ONE item size, raw number, do NOT multiply by pack qty → "6X33CL"→33, "1,5L"→1.5, "500g"→500
 dp_pack_unit: unit as printed, lowercase: "cl","ml","l","g","kg". Do NOT convert units
 dp_product_variant: flavor/sub-type, lowercase → "zero","bruin","paprika","pils". null if base product
-dp_article_code: article/PLU/EAN from receipt, normalised to digits only — strip "ART"/"PLU"/"EAN" prefixes, drop spaces/dashes/periods, preserve any leading zeros. null if not visible. Examples: "ART 123456"→"123456", "PLU 4011"→"4011", "5410-123-456-789"→"5410123456789"
+dp_article_codes: ALL article/PLU/EAN codes printed on or beside this line item, returned as a JSON array of digit-only strings. Strip "ART"/"PLU"/"EAN" prefixes, drop spaces/dashes/periods, preserve leading zeros. Empty array [] if no code visible. Some chains print multiple codes per line (e.g., Delhaize occasionally prints both a short internal article number AND the 12–13 digit manufacturer EAN when an item was keyed in manually) — include them all, do NOT pick one. Examples: "ART 123456 BONI BIO ..."→["123456"], "PLU 4011 BANANA"→["4011"], "5410-123-456-789 ITEM"→["5410123456789"], Delhaize "9044686 / 50CL MONSTER E / 1.75 / 506094754971"→["9044686","506094754971"], "BANANEN 1KG" (no code)→[]
 dp_is_bio: BIO/BIOLOGISCH/BIOLOGIQUE/ORGANIC in text → true, else false
 
 Extract all line items from this receipt.'''
@@ -573,11 +574,20 @@ Extract all line items from this receipt.'''
                 if not dp_product_variant:
                     dp_product_variant = None
 
-            dp_article_code = item.get("dp_article_code")
-            if dp_article_code:
-                dp_article_code = dp_article_code.strip()
-                if not dp_article_code:
-                    dp_article_code = None
+            raw_codes = item.get("dp_article_codes") or []
+            if isinstance(raw_codes, str):
+                # Defensive: tolerate the old singleton shape from any older response.
+                raw_codes = [raw_codes]
+            dp_article_codes: list[str] = []
+            for c in raw_codes:
+                if not c:
+                    continue
+                c_norm = "".join(ch for ch in str(c) if ch.isdigit())
+                if c_norm and c_norm not in dp_article_codes:
+                    dp_article_codes.append(c_norm)
+            # Singleton: longest code, kept for backwards-compat with any read-side
+            # consumer (Pinecone/analytics) that still uses dp_article_code.
+            dp_article_code = max(dp_article_codes, key=len) if dp_article_codes else None
 
             dp_packaging_type = item.get("dp_packaging_type")
             if dp_packaging_type:
@@ -613,6 +623,7 @@ Extract all line items from this receipt.'''
                     dp_pack_size=dp_pack_size,
                     dp_pack_unit=dp_pack_unit,
                     dp_product_variant=dp_product_variant,
+                    dp_article_codes=dp_article_codes,
                     dp_article_code=dp_article_code,
                     dp_is_bio=bool(item.get("dp_is_bio", False)),
                     dp_packaging_type=dp_packaging_type,

@@ -31,6 +31,7 @@ class ExtractedItem(BaseModel):
 
     dp_product_variant: Optional[str] = None
     dp_article_code: Optional[str] = None
+    dp_article_codes: List[str] = []
     dp_is_bio: bool = False
     lookup_key: Optional[str] = None
 
@@ -108,6 +109,7 @@ class GroupedReceiptTransaction(BaseModel):
 
     dp_product_variant: Optional[str] = None
     dp_article_code: Optional[str] = None
+    dp_article_codes: List[str] = []
     dp_is_bio: bool = False
     lookup_key: Optional[str] = None
 

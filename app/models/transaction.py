@@ -4,6 +4,7 @@ from datetime import date as date_type
 from typing import TYPE_CHECKING, Optional
 
 from sqlalchemy import String, DateTime, Integer, Float, ForeignKey, Date, Index, Text, Boolean, func
+from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db.base import Base
@@ -60,6 +61,7 @@ class Transaction(Base):
     dp_pack_unit: Mapped[Optional[str]] = mapped_column(String(5), nullable=True)
     dp_product_variant: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
     dp_article_code: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)
+    dp_article_codes: Mapped[list] = mapped_column(JSONB, nullable=False, default=list, server_default="[]")
     dp_is_bio: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     dp_packaging_type: Mapped[Optional[str]] = mapped_column(String(20), nullable=True)
     dp_product_name_no_brand: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)

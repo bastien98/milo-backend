@@ -23,12 +23,16 @@ class ReceiptLineItemForMatching:
     """Minimal projection of a receipt line item used by the brand-cashback matcher.
 
     `text` is the cleaned item name (case/whitespace will be normalised at compare).
-    `code` is the per-line product code (EAN/artikel nummer) when the chain prints
-    one — `dp_article_code` from the OCR pipeline. `None` for chains that don't.
+    `codes` is the tuple of every per-line product code (EAN, artikel nummer, PLU)
+    that the OCR layer extracted for this line — `dp_article_codes` from the
+    extraction pipeline. Empty tuple for chains that don't print codes.
+
+    A campaign line item in code-mode (non-empty product_codes) hits if ANY
+    code in this tuple matches ANY code on the line item.
     """
 
     text: str
-    code: Optional[str]
+    codes: tuple[str, ...] = ()
 from app.schemas.brand_cashback import (
     BrandCashbackDealResponse,
     PendingReviewSummary,
@@ -351,6 +355,8 @@ class BrandCashbackService:
             text_items = [li for li in line_items if not li.product_codes]
 
             # ---- Code-mode: exact match on product_codes ----
+            # Any code in the receipt line's codes tuple matching any code on a
+            # campaign line item counts as a hit. First match wins.
             matched_line_item_id: Optional[str] = None
             if code_items:
                 code_index: dict[str, str] = {}
@@ -358,8 +364,11 @@ class BrandCashbackService:
                     for code in li.product_codes:
                         code_index[code] = li.id
                 for receipt_item in receipt_line_items:
-                    if receipt_item.code and receipt_item.code in code_index:
-                        matched_line_item_id = code_index[receipt_item.code]
+                    for code in receipt_item.codes:
+                        if code in code_index:
+                            matched_line_item_id = code_index[code]
+                            break
+                    if matched_line_item_id:
                         break
 
                 if matched_line_item_id:

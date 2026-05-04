@@ -185,6 +185,7 @@ async def process_receipt_background(
                     dp_pack_unit=item.dp_pack_unit,
                     dp_product_variant=item.dp_product_variant,
                     dp_article_code=item.dp_article_code,
+                    dp_article_codes=item.dp_article_codes,
                     dp_is_bio=item.dp_is_bio,
                     dp_packaging_type=item.dp_packaging_type,
                     dp_product_name_no_brand=item.dp_product_name_no_brand,
@@ -242,7 +243,7 @@ async def process_receipt_background(
                 receipt_items_for_matching = [
                     ReceiptLineItemForMatching(
                         text=item.item_name,
-                        code=item.dp_article_code,
+                        codes=tuple(item.dp_article_codes),
                     )
                     for item in extraction_result.line_items
                 ]
