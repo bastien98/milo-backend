@@ -166,6 +166,43 @@ class BrandCashbackRepository:
         )
         await self.db.flush()
 
+    async def add_product_codes(self, line_item_id: str, codes: list[str]) -> int:
+        """Append digit-only codes to a line item's product_codes JSONB array.
+
+        Used by the matcher's auto-extend path: when a Tier 2 (text exact) match
+        fires and the receipt brought codes that aren't yet on the line item,
+        append them so future receipts with the new SKU hit Tier 1 directly.
+
+        Idempotent — codes already present (after digit normalisation) are skipped.
+        Codes failing the digits-only / length 4-14 filter are silently dropped.
+
+        Returns the number of codes actually added.
+        """
+        if not codes:
+            return 0
+        item = await self.get_line_item_by_id(line_item_id)
+        if item is None:
+            return 0
+        existing = set(item.product_codes or [])
+        added: list[str] = []
+        for raw in codes:
+            digits = "".join(ch for ch in (raw or "") if ch.isdigit())
+            if not (4 <= len(digits) <= 14):
+                continue
+            if digits in existing or digits in added:
+                continue
+            added.append(digits)
+        if not added:
+            return 0
+        new_codes = list(item.product_codes or []) + added
+        await self.db.execute(
+            update(BrandCashbackStoreLineItem)
+            .where(BrandCashbackStoreLineItem.id == line_item_id)
+            .values(product_codes=new_codes)
+        )
+        await self.db.flush()
+        return len(added)
+
     async def add_alt_line_item(self, line_item_id: str, alt_string: str) -> None:
         """Append `alt_string` to a line item's alt_line_items JSONB array.
 

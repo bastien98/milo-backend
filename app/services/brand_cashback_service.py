@@ -351,62 +351,51 @@ class BrandCashbackService:
                 )
                 continue
 
-            code_items = [li for li in line_items if li.product_codes]
-            text_items = [li for li in line_items if not li.product_codes]
-
-            # ---- Code-mode: exact match on product_codes ----
-            # Any code in the receipt line's codes tuple matching any code on a
-            # campaign line item counts as a hit. First match wins.
+            # ---- Layered per-line-item matching ----
+            # Tier 1: any receipt code hits a line-item product_code → instant earning.
+            # Tier 2: receipt text exactly matches exact_line_item or alt → instant earning;
+            #         if the receipt brought codes the line item doesn't know yet, auto-append
+            #         them so future scans of the same (rotated) SKU hit Tier 1.
+            # Tier 3: receipt text fuzzy-matches (>= QUEUE_THRESHOLD) → admin review queue.
+            # First hit wins. Codes still required for Colruyt/Delhaize at admin time, but
+            # text now serves as a fallback when SKUs rotate (new EANs, same description).
             matched_line_item_id: Optional[str] = None
-            if code_items:
-                code_index: dict[str, str] = {}
-                for li in code_items:
-                    for code in li.product_codes:
-                        code_index[code] = li.id
+            match_tier: Optional[str] = None
+            matched_receipt_codes: list[str] = []
+
+            # Tier 1 — code match
+            code_index: dict[str, str] = {}
+            for li in line_items:
+                for code in (li.product_codes or []):
+                    code_index[code] = li.id
+            if code_index:
                 for receipt_item in receipt_line_items:
                     for code in receipt_item.codes:
                         if code in code_index:
                             matched_line_item_id = code_index[code]
+                            match_tier = "code"
                             break
                     if matched_line_item_id:
                         break
 
-                if matched_line_item_id:
-                    await self.repo.create_earning(
-                        user_id=user_id,
-                        campaign_id=campaign.id,
-                        receipt_id=receipt_id,
-                        matched_line_item_id=matched_line_item_id,
-                        cashback_earned_cents=campaign.cashback_amount_cents,
-                    )
-                    await balance_repo.credit(user_id, campaign.cashback_amount_cents)
-                    new_earnings += 1
-                    logger.info(
-                        f"Brand cashback earned (code match): user={user_id} "
-                        f"campaign={campaign.id} store='{store_name}' "
-                        f"amount_cents={campaign.cashback_amount_cents}"
-                    )
-                    continue
-
-            # ---- Text-mode (only over text-mode line items) ----
-            if not text_items:
-                continue
-
-            known_strings: list[tuple[str, str]] = []
-            for li in text_items:
-                known_strings.append((li.id, li.exact_line_item))
-                for alt in (li.alt_line_items or []):
-                    known_strings.append((li.id, alt))
-
-            # Pass 1: strict equality
-            for receipt_item in receipt_line_items:
-                for li_id, known in known_strings:
-                    if _is_line_item_match(receipt_item.text, known):
-                        matched_line_item_id = li_id
+            # Tier 2 — text exact (only if no code match yet)
+            if not matched_line_item_id:
+                known_strings: list[tuple[str, str]] = []
+                for li in line_items:
+                    known_strings.append((li.id, li.exact_line_item))
+                    for alt in (li.alt_line_items or []):
+                        known_strings.append((li.id, alt))
+                for receipt_item in receipt_line_items:
+                    for li_id, known in known_strings:
+                        if _is_line_item_match(receipt_item.text, known):
+                            matched_line_item_id = li_id
+                            match_tier = "text_exact"
+                            matched_receipt_codes = list(receipt_item.codes)
+                            break
+                    if matched_line_item_id:
                         break
-                if matched_line_item_id:
-                    break
 
+            # Earning + auto-extend for tier 2
             if matched_line_item_id:
                 await self.repo.create_earning(
                     user_id=user_id,
@@ -417,9 +406,16 @@ class BrandCashbackService:
                 )
                 await balance_repo.credit(user_id, campaign.cashback_amount_cents)
                 new_earnings += 1
+                added_codes = 0
+                if match_tier == "text_exact" and matched_receipt_codes:
+                    # Only auto-extend codes on EXACT text match, never on fuzzy.
+                    added_codes = await self.repo.add_product_codes(
+                        matched_line_item_id, matched_receipt_codes
+                    )
                 logger.info(
                     f"Brand cashback earned: user={user_id} campaign={campaign.id} "
-                    f"store='{store_name}' amount_cents={campaign.cashback_amount_cents}"
+                    f"store='{store_name}' amount_cents={campaign.cashback_amount_cents} "
+                    f"tier={match_tier} auto_added_codes={added_codes}"
                 )
                 continue
 

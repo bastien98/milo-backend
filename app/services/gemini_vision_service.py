@@ -201,7 +201,7 @@ class GeminiVisionService:
 ## ITEM FIELD RULES
 
 ### item_name — Receipt Text Cleaning
-Extract the core product text from the receipt line. You must clean the string to ensure exact-matching in a database:
+Extract the core product text from the receipt line. You must clean the string to ensure exact-matching in a database. CRITICAL: the brand-cashback matcher does case-insensitive equality on this string against admin-configured line items, so consistency across receipts of the same SKU matters more than aesthetic normalization. Apply ONLY the strip rules below — do not paraphrase, abbreviate, expand, or "clean up" the wording further.
 
 KEEP: brand name, product name, variant, size/packaging info (e.g., "500g", "1,5L PET", "6x33cl").
 
