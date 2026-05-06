@@ -88,6 +88,7 @@ class BrandCashbackDealResponse(BaseModel):
     cashback_amount: float        # euros (cents / 100)
     image_url: Optional[str] = None       # hero (original aspect, ~1200px max), used in detail sheet
     image_thumb_url: Optional[str] = None  # thumbnail (400x400 square crop), used in grid cards
+    brand_logo_url: Optional[str] = None   # brand logo (aspect preserved, ~512px max long edge)
     valid_from: datetime
     valid_until: datetime
     eligible_stores: List[str]
@@ -271,6 +272,7 @@ class AdminCampaignResponse(BaseModel):
     cashback_amount_cents: int
     image_url: Optional[str] = None
     image_thumb_url: Optional[str] = None
+    brand_logo_url: Optional[str] = None
     valid_from: datetime
     valid_until: datetime
     eligible_stores: List[str]

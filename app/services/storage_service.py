@@ -117,6 +117,44 @@ class StorageService:
             logger.error(f"Failed to upload campaign image: {key}, error={e}")
             raise
 
+    def upload_brand_logo(
+        self,
+        campaign_id: str,
+        content: bytes,
+        ext: str,
+    ) -> Optional[str]:
+        """Upload a campaign's brand logo to S3.
+
+        Stored at milo/campaigns/{id}_brand_logo.{ext}. Single variant —
+        unlike the product image, no thumb is generated since logos are
+        already small and aspect ratio must be preserved (wordmarks).
+        """
+        if not self.enabled:
+            return None
+
+        key = f"{self.CAMPAIGN_KEY_PREFIX}/{campaign_id}_brand_logo.{ext}"
+        content_type_map = {
+            "jpg": "image/jpeg",
+            "jpeg": "image/jpeg",
+            "png": "image/png",
+            "webp": "image/webp",
+        }
+
+        try:
+            self.client.put_object(
+                Bucket=settings.AWS_S3_BUCKET_NAME,
+                Key=key,
+                Body=content,
+                ContentType=content_type_map.get(ext, "application/octet-stream"),
+            )
+            logger.info(
+                f"Uploaded campaign brand logo: {key} ({len(content)} bytes)"
+            )
+            return key
+        except ClientError as e:
+            logger.error(f"Failed to upload brand logo: {key}, error={e}")
+            raise
+
     def generate_presigned_url(self, key: str, expires: int = 3600) -> Optional[str]:
         """Generate a presigned URL for reading an object.
 

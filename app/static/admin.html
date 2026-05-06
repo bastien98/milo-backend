@@ -323,7 +323,15 @@
           <input id="c-image" type="file" accept="image/jpeg,image/png,image/webp"
             class="w-full text-sm text-zinc-300 file:mr-3 file:py-2 file:px-3 file:rounded-md file:border-0 file:text-xs file:font-semibold file:bg-zinc-800 file:text-zinc-200 hover:file:bg-zinc-700 cursor-pointer">
           <img id="c-image-preview" class="hidden mt-3 max-h-32 rounded-md border border-zinc-800" alt="Preview">
-          <p class="text-xs text-zinc-500 mt-1.5">JPEG, PNG, or WebP, max 10 MB. Resized to 800px max. Optional.</p>
+          <p class="text-xs text-zinc-500 mt-1.5">JPEG, PNG, or WebP, max 10 MB. Min 600px on the short edge. Any aspect ratio works — backend pads to a 1:1 white square so the whole product stays visible. Optional.</p>
+        </div>
+
+        <div>
+          <label class="block text-xs font-semibold uppercase tracking-wider text-zinc-400 mb-1.5">Brand Logo</label>
+          <input id="c-brand-logo" type="file" accept="image/jpeg,image/png,image/webp"
+            class="w-full text-sm text-zinc-300 file:mr-3 file:py-2 file:px-3 file:rounded-md file:border-0 file:text-xs file:font-semibold file:bg-zinc-800 file:text-zinc-200 hover:file:bg-zinc-700 cursor-pointer">
+          <img id="c-brand-logo-preview" class="hidden mt-3 max-h-24 rounded-md border border-zinc-800 bg-zinc-900 p-2" alt="Brand logo preview">
+          <p class="text-xs text-zinc-500 mt-1.5">JPEG, PNG, or WebP, max 10 MB. Backend auto-trims transparent margins and pads to a square so the mark fills the card disc evenly — extra whitespace in your source file is OK. Resized to 512px max long edge. Optional.</p>
         </div>
 
         <div class="grid grid-cols-2 gap-3">
@@ -711,6 +719,9 @@
       const preview = document.getElementById("c-image-preview");
       preview.classList.add("hidden");
       preview.removeAttribute("src");
+      const logoPreview = document.getElementById("c-brand-logo-preview");
+      logoPreview.classList.add("hidden");
+      logoPreview.removeAttribute("src");
 
       const submitBtn = document.getElementById("campaign-submit");
       const titleEl = document.querySelector("#campaign-modal h3");
@@ -735,6 +746,10 @@
           preview.src = existing.image_url;
           preview.classList.remove("hidden");
         }
+        if (existing.brand_logo_url) {
+          logoPreview.src = existing.brand_logo_url;
+          logoPreview.classList.remove("hidden");
+        }
       } else {
         titleEl.textContent = "New Campaign";
         submitBtn.textContent = "Create Campaign";
@@ -758,6 +773,18 @@
     document.getElementById("c-image").addEventListener("change", (e) => {
       const file = e.target.files[0];
       const preview = document.getElementById("c-image-preview");
+      if (!file) {
+        preview.classList.add("hidden");
+        preview.removeAttribute("src");
+        return;
+      }
+      preview.src = URL.createObjectURL(file);
+      preview.classList.remove("hidden");
+    });
+
+    document.getElementById("c-brand-logo").addEventListener("change", (e) => {
+      const file = e.target.files[0];
+      const preview = document.getElementById("c-brand-logo-preview");
       if (!file) {
         preview.classList.add("hidden");
         preview.removeAttribute("src");
@@ -816,6 +843,7 @@
       }
 
       const imageFile = document.getElementById("c-image").files[0];
+      const brandLogoFile = document.getElementById("c-brand-logo").files[0];
 
       try {
         const url = isEdit
@@ -830,6 +858,15 @@
           const fd = new FormData();
           fd.append("file", imageFile);
           await apiFetch(`/brand-cashback/admin/campaigns/${saved.id}/image`, {
+            method: "POST",
+            body: fd,
+          });
+        }
+        if (brandLogoFile) {
+          submitBtn.textContent = "Uploading logo...";
+          const fd = new FormData();
+          fd.append("file", brandLogoFile);
+          await apiFetch(`/brand-cashback/admin/campaigns/${saved.id}/brand-logo`, {
             method: "POST",
             body: fd,
           });

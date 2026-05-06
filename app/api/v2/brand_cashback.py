@@ -2,7 +2,7 @@ import io
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile, status
-from PIL import Image, ImageOps, UnidentifiedImageError
+from PIL import Image, ImageChops, ImageOps, UnidentifiedImageError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_db, get_current_db_user
@@ -49,8 +49,11 @@ router = APIRouter()
 
 ALLOWED_IMAGE_CONTENT_TYPES = {"image/jpeg", "image/png", "image/webp"}
 MAX_IMAGE_BYTES = 10 * 1024 * 1024  # 10 MB raw input
+MIN_SOURCE_DIMENSION = 600  # reject sources smaller than this on the short edge
 HERO_MAX_DIMENSION = 1200
-THUMB_DIMENSION = 400  # 400x400 square crop
+THUMB_DIMENSION = 400  # 400x400 square — fit-with-pad, never crop
+THUMB_PAD_RGB = (255, 255, 255)  # matches the white photo tile in the iOS card
+BRAND_LOGO_MAX_DIMENSION = 512
 JPEG_QUALITY = 85
 
 
@@ -68,6 +71,98 @@ def _decode_image(content: bytes) -> Image.Image:
         )
 
 
+def _decode_image_keep_alpha(content: bytes) -> Image.Image:
+    """Decode preserving alpha channel — used for brand logos which often
+    have transparent backgrounds and shouldn't be flattened to RGB."""
+    try:
+        img = Image.open(io.BytesIO(content))
+        img = ImageOps.exif_transpose(img)
+        if img.mode == "P":
+            img = img.convert("RGBA" if "transparency" in img.info else "RGB")
+        elif img.mode not in ("RGB", "RGBA", "LA"):
+            img = img.convert("RGBA")
+        return img
+    except (UnidentifiedImageError, OSError) as e:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Could not decode image: {e}",
+        )
+
+
+def _make_brand_logo(img: Image.Image) -> tuple[bytes, str]:
+    """Normalize a brand logo for the iOS card's white disc.
+
+    Always outputs an opaque JPEG with a pure-white surround so the image
+    composites flush onto `Circle().fill(.white)` — both whites match exactly,
+    no visible seam, no faint anti-aliased fringe.
+
+    Pipeline:
+      1. Flatten any alpha onto a pure-white background. Transparent PNGs
+         become opaque RGB so the output is always JPEG / single code path.
+      2. Snap near-white pixels (R, G, B all >= 235) to pure (255, 255, 255).
+         Collapses both off-white source backgrounds (e.g. `#FAFAFA`) and
+         anti-aliased edge halos into the same exact white as the iOS disc.
+      3. Trim pure-white margins so the logo content always fills the canvas.
+         `ImageOps.invert(...).getbbox()` flips pure-white to pure-black, then
+         `getbbox()` returns the smallest box containing every non-pure-white
+         pixel — i.e. the logo. Works for any future upload: tightly cropped
+         logos no-op (bbox is full canvas), padded logos auto-fit.
+      4. Pad to a square white canvas so wide wordmarks stay centred (don't
+         end up as a thin sliver inside the circular disc).
+      5. Resize to max 512px on the long edge.
+    """
+    out = img.copy()
+
+    # 1. Flatten alpha onto white.
+    if out.mode == "LA":
+        out = out.convert("RGBA")
+    if out.mode == "RGBA":
+        bg = Image.new("RGB", out.size, (255, 255, 255))
+        bg.paste(out, mask=out.split()[-1])
+        out = bg
+    elif out.mode != "RGB":
+        out = out.convert("RGB")
+
+    # 2. Snap near-white pixels to pure white. Threshold each channel to a
+    # 0/255 mask, then AND the three masks together via ImageChops.multiply
+    # (255*255/255 = 255 only where all three pass). Pixels where every
+    # channel >= NEAR_WHITE_THRESHOLD become exact white. 235 catches the
+    # typical cream-tinted backgrounds (e.g. R244 G243 B238) brands ship,
+    # while leaving genuine logo content (sub-235 grays) untouched.
+    NEAR_WHITE_THRESHOLD = 235
+    r, g, b = out.split()
+    r_pass = r.point(lambda v: 255 if v >= NEAR_WHITE_THRESHOLD else 0)
+    g_pass = g.point(lambda v: 255 if v >= NEAR_WHITE_THRESHOLD else 0)
+    b_pass = b.point(lambda v: 255 if v >= NEAR_WHITE_THRESHOLD else 0)
+    near_white_mask = ImageChops.multiply(
+        ImageChops.multiply(r_pass, g_pass), b_pass
+    )
+    pure_white = Image.new("RGB", out.size, (255, 255, 255))
+    out = Image.composite(pure_white, out, near_white_mask)
+
+    # 3. Trim pure-white margins so the logo content fills the canvas.
+    bbox = ImageOps.invert(out).getbbox()
+    if bbox:
+        out = out.crop(bbox)
+
+    # 4. Pad to a square white canvas.
+    side = max(out.width, out.height)
+    if side > 0 and (out.width != side or out.height != side):
+        canvas = Image.new("RGB", (side, side), (255, 255, 255))
+        offset = ((side - out.width) // 2, (side - out.height) // 2)
+        canvas.paste(out, offset)
+        out = canvas
+
+    # 4. Resize.
+    out.thumbnail(
+        (BRAND_LOGO_MAX_DIMENSION, BRAND_LOGO_MAX_DIMENSION), Image.LANCZOS
+    )
+
+    buf = io.BytesIO()
+    out.save(buf, format="JPEG", quality=JPEG_QUALITY, optimize=True)
+    return buf.getvalue(), "jpg"
+
+
 def _encode_jpeg(img: Image.Image) -> bytes:
     buf = io.BytesIO()
     img.save(buf, format="JPEG", quality=JPEG_QUALITY, optimize=True)
@@ -82,17 +177,22 @@ def _make_hero(img: Image.Image) -> bytes:
 
 
 def _make_thumb(img: Image.Image) -> bytes:
-    """Thumbnail variant: 400x400 center-cropped square — drives the grid card.
+    """Thumbnail variant: 400x400 fit-and-padded square — drives the grid card.
 
-    Pillow's ImageOps.fit picks the largest centered square crop and resizes it.
+    Resizes the source so its long edge lands on THUMB_DIMENSION, then pastes
+    it centered onto a THUMB_PAD_RGB canvas. The whole product is always
+    visible; padding fills any non-square slack and matches the iOS card
+    surface so it blends in.
     """
-    cropped = ImageOps.fit(
-        img,
-        (THUMB_DIMENSION, THUMB_DIMENSION),
-        method=Image.LANCZOS,
-        centering=(0.5, 0.5),
+    fitted = img.copy()
+    fitted.thumbnail((THUMB_DIMENSION, THUMB_DIMENSION), Image.LANCZOS)
+    canvas = Image.new("RGB", (THUMB_DIMENSION, THUMB_DIMENSION), THUMB_PAD_RGB)
+    offset = (
+        (THUMB_DIMENSION - fitted.width) // 2,
+        (THUMB_DIMENSION - fitted.height) // 2,
     )
-    return _encode_jpeg(cropped)
+    canvas.paste(fitted, offset)
+    return _encode_jpeg(canvas)
 
 
 def _require_admin(current_user: User) -> None:
@@ -131,6 +231,7 @@ async def _build_admin_response(
         cashback_amount_cents=campaign.cashback_amount_cents,
         image_url=image_url_for_key(campaign.image_s3_key),
         image_thumb_url=image_url_for_key(campaign.image_thumb_s3_key),
+        brand_logo_url=image_url_for_key(campaign.brand_logo_s3_key),
         valid_from=campaign.valid_from,
         valid_until=campaign.valid_until,
         eligible_stores=campaign.eligible_stores or [],
@@ -439,6 +540,8 @@ async def admin_delete_campaign(
         storage.delete(campaign.image_s3_key)
     if campaign.image_thumb_s3_key:
         storage.delete(campaign.image_thumb_s3_key)
+    if campaign.brand_logo_s3_key:
+        storage.delete(campaign.brand_logo_s3_key)
 
     if earned_count == 0:
         # Hard-delete; cascade="all, delete-orphan" on the model removes line items + claims.
@@ -447,7 +550,12 @@ async def admin_delete_campaign(
         # Preserve earned history; clear S3 keys so future reads don't try to fetch deleted objects.
         await repo.update_campaign(
             campaign_id,
-            {"is_active": False, "image_s3_key": None, "image_thumb_s3_key": None},
+            {
+                "is_active": False,
+                "image_s3_key": None,
+                "image_thumb_s3_key": None,
+                "brand_logo_s3_key": None,
+            },
         )
 
 
@@ -479,6 +587,14 @@ async def admin_upload_campaign_image(
         )
 
     decoded = _decode_image(content)
+    if min(decoded.size) < MIN_SOURCE_DIMENSION:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=(
+                f"Image too small. Minimum {MIN_SOURCE_DIMENSION}px on the short edge; "
+                f"got {decoded.size[0]}x{decoded.size[1]}."
+            ),
+        )
     hero_bytes = _make_hero(decoded)
     thumb_bytes = _make_thumb(decoded)
 
@@ -493,6 +609,54 @@ async def admin_upload_campaign_image(
     campaign = await repo.update_campaign(
         campaign_id,
         {"image_s3_key": hero_key, "image_thumb_s3_key": thumb_key},
+    )
+    return await _build_admin_response(campaign, repo)
+
+
+@router.post(
+    "/admin/campaigns/{campaign_id}/brand-logo",
+    response_model=AdminCampaignResponse,
+)
+async def admin_upload_campaign_brand_logo(
+    campaign_id: str,
+    file: UploadFile = File(...),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_db_user),
+):
+    """Upload (or replace) the brand logo for a campaign. Single variant,
+    aspect preserved, max 512px on the long edge. Always stored as opaque
+    JPEG with a pure-white surround so the logo composites flush on the iOS
+    card's white disc — see `_make_brand_logo` for the normalization pipeline."""
+    _require_admin(current_user)
+    repo = BrandCashbackRepository(db)
+    campaign = await repo.get_campaign_by_id(campaign_id)
+    if not campaign:
+        raise HTTPException(status_code=404, detail="Campaign not found")
+
+    content_type = file.content_type or "application/octet-stream"
+    if content_type not in ALLOWED_IMAGE_CONTENT_TYPES:
+        raise HTTPException(
+            status_code=status.HTTP_415_UNSUPPORTED_MEDIA_TYPE,
+            detail=f"Only JPEG, PNG, and WebP images are supported, got: {content_type}",
+        )
+
+    content = await file.read()
+    if len(content) > MAX_IMAGE_BYTES:
+        raise HTTPException(
+            status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+            detail=f"Image exceeds {MAX_IMAGE_BYTES // (1024 * 1024)}MB limit",
+        )
+
+    decoded = _decode_image_keep_alpha(content)
+    logo_bytes, ext = _make_brand_logo(decoded)
+
+    if campaign.brand_logo_s3_key:
+        storage.delete(campaign.brand_logo_s3_key)
+
+    logo_key = storage.upload_brand_logo(campaign_id, logo_bytes, ext)
+    campaign = await repo.update_campaign(
+        campaign_id,
+        {"brand_logo_s3_key": logo_key},
     )
     return await _build_admin_response(campaign, repo)
 
