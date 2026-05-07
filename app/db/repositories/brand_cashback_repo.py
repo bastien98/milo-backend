@@ -25,20 +25,6 @@ class BrandCashbackRepository:
     # Campaigns
     # ------------------------------------------------------------------
 
-    async def get_active_campaigns(self) -> list[BrandCashbackCampaign]:
-        """Active campaigns currently within their valid window (not scheduled, not expired)."""
-        now = datetime.now(timezone.utc)
-        result = await self.db.execute(
-            select(BrandCashbackCampaign)
-            .where(
-                BrandCashbackCampaign.is_active == True,
-                BrandCashbackCampaign.valid_from <= now,
-                BrandCashbackCampaign.valid_until > now,
-            )
-            .order_by(BrandCashbackCampaign.created_at.desc())
-        )
-        return list(result.scalars().all())
-
     async def get_all_campaigns(
         self, include_inactive: bool = False
     ) -> list[BrandCashbackCampaign]:

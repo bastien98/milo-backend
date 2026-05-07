@@ -175,14 +175,13 @@ class BrandCashbackService:
     # ------------------------------------------------------------------
 
     async def get_deals_for_user(self, user_id: str) -> list[BrandCashbackDealResponse]:
-        """Active, not-expired, not-cap-exhausted campaigns annotated with the user's status.
+        """Every active campaign annotated with the user's status.
 
-        Excludes:
-          - campaigns the user has already maxed out (status would be "earned")
-          - campaigns whose total cap is exhausted
-        Both vanish from the deals list — earned ones still appear in /my-claims for history.
+        Admin-deleted campaigns (`is_active=False`) are the only ones hidden.
+        Expired, cap-exhausted, and personally earned-out campaigns all stay
+        visible — the iOS detail sheet renders the appropriate terminal state.
         """
-        campaigns = await self.repo.get_active_campaigns()
+        campaigns = await self.repo.get_all_campaigns(include_inactive=False)
         claims = await self.repo.get_user_claims_by_campaign(user_id)
         earnings = await self.repo.get_user_earnings_by_campaign(user_id)
         pendings_by_campaign = self._index_pendings(
@@ -201,14 +200,10 @@ class BrandCashbackService:
             has_claim = campaign.id in claims
 
             campaign_earnings = await self.repo.count_earnings_for_campaign(campaign.id)
-            if _is_campaign_full(campaign, campaign_earnings):
-                continue
 
             user_status = _resolve_user_status(
                 has_claim, earnings_count, campaign.max_redemptions_per_user
             )
-            if user_status == "earned":
-                continue
 
             eligible_skus = await self.repo.get_distinct_exact_line_items(campaign.id)
             claim = claims.get(campaign.id)
